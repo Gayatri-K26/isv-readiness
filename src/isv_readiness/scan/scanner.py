@@ -31,6 +31,9 @@ STUB_PATTERNS = (
     re.compile(r"\btodo\b", re.IGNORECASE),
 )
 
+K8S_DOMAINS = {"k8s", "kubernetes"}
+K8S_COMMAND_KEYS = {"k8s", "kubernetes"}
+
 
 @dataclass(frozen=True)
 class ScanOptions:
@@ -66,6 +69,7 @@ def scan_provider(options: ScanOptions) -> GapReport:
     for domain in options.domains:
         config_path = _find_domain_config(provider_repo, domain)
         if config_path is None:
+            is_k8s = _is_k8s_domain(domain)
             rows.append(
                 _row(
                     provider_repo=provider_repo,
@@ -74,17 +78,17 @@ def scan_provider(options: ScanOptions) -> GapReport:
                     validation_class=None,
                     requirement_id=None,
                     milestone=None,
-                    status="error",
+                    status="not_implemented" if is_k8s else "error",
                     stage="coverage",
-                    gap_type="not_implemented",
-                    message=f"No provider config found for domain '{domain}'",
+                    gap_type="onboarding" if is_k8s else "not_implemented",
+                    message=_missing_config_message(provider_repo, domain),
                     config_path=None,
                     script_path=None,
-                    target=None,
+                    target=_suggest_config_target(provider_repo, domain),
                     aws_reference=None,
                     schema_errors=[],
                     missing_json_fields=[],
-                    auto_fixable=False,
+                    auto_fixable=is_k8s,
                     rerun_config=None,
                 )
             )
@@ -180,6 +184,28 @@ def _scan_check(
             schema_errors=[],
             missing_json_fields=[],
             auto_fixable=False,
+            rerun_config=rerun_config,
+        )
+
+    if _is_template_k8s_command(provider_repo, step):
+        return _row(
+            provider_repo=provider_repo,
+            domain=domain,
+            step_name=check.step_name,
+            validation_class=check.validation_class,
+            requirement_id=check.requirement_id,
+            milestone=check.milestone,
+            status="not_implemented",
+            stage="coverage",
+            gap_type="onboarding",
+            message="Kubernetes command still points at the my-isv template scripts instead of this provider.",
+            config_path=step.config_path,
+            script_path=step.script_path,
+            target=_relative_or_str(step.config_path, provider_repo),
+            aws_reference=aws_reference,
+            schema_errors=[],
+            missing_json_fields=[],
+            auto_fixable=True,
             rerun_config=rerun_config,
         )
 
@@ -394,14 +420,75 @@ def _resolve_validation_root(provider_repo: Path, explicit: Path | None) -> Path
 
 
 def _find_domain_config(provider_repo: Path, domain: str) -> Path | None:
-    candidates = [
-        provider_repo / "config" / f"{domain}.yaml",
-        provider_repo / f"{domain}.yaml",
-    ]
+    if provider_repo.is_file() and provider_repo.suffix in {".yaml", ".yml"}:
+        return provider_repo.resolve()
+
+    names = _domain_config_names(domain)
+    candidates: list[Path] = []
+    for name in names:
+        candidates.extend([provider_repo / "config" / name, provider_repo / name])
+
+    if _is_k8s_domain(domain):
+        candidates.extend([
+            provider_repo.with_suffix(".yaml"),
+            provider_repo.with_suffix(".yml"),
+            provider_repo.parent / f"{provider_repo.name}.yaml",
+            provider_repo.parent / f"{provider_repo.name}.yml",
+        ])
+
+    seen: set[Path] = set()
     for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
         if candidate.exists():
             return candidate.resolve()
     return None
+
+
+def _is_k8s_domain(domain: str) -> bool:
+    return domain in K8S_DOMAINS
+
+
+def _domain_config_names(domain: str) -> list[str]:
+    if _is_k8s_domain(domain):
+        return ["k8s.yaml", "k8s.yml", "kubernetes.yaml", "kubernetes.yml"]
+    return [f"{domain}.yaml", f"{domain}.yml"]
+
+
+def _suite_file_name(domain: str) -> str:
+    return "k8s.yaml" if _is_k8s_domain(domain) else f"{domain}.yaml"
+
+
+def _command_keys_for_domain(domain: str) -> list[str]:
+    if _is_k8s_domain(domain):
+        return ["kubernetes", "k8s"]
+    return [domain]
+
+
+def _suggest_config_target(provider_repo: Path, domain: str) -> str | None:
+    if not _is_k8s_domain(domain):
+        return None
+    if provider_repo.suffix in {".yaml", ".yml"}:
+        return str(provider_repo)
+    return str(provider_repo.with_suffix(".yaml"))
+
+
+def _missing_config_message(provider_repo: Path, domain: str) -> str:
+    if not _is_k8s_domain(domain):
+        return f"No provider config found for domain '{domain}'"
+    target = _suggest_config_target(provider_repo, domain) or "isvctl/configs/providers/<provider>.yaml"
+    return (
+        "No Kubernetes provider wrapper found. Create a provider config that imports "
+        f"suites/k8s.yaml and points setup/teardown at this provider's scripts, for example {target}."
+    )
+
+
+def _is_template_k8s_command(provider_repo: Path, step: StepRef) -> bool:
+    if provider_repo.name == "my-isv" or not step.command:
+        return False
+    normalized = step.command.replace("\\", "/")
+    return "my-isv/scripts/k8s/" in normalized or "providers/my-isv/scripts/k8s/" in normalized
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -434,7 +521,7 @@ def _load_imported_suite_docs(
             docs.append(_read_yaml(path))
 
     if not docs and validation_root is not None:
-        fallback = validation_root / "isvctl" / "configs" / "suites" / f"{domain}.yaml"
+        fallback = validation_root / "isvctl" / "configs" / "suites" / _suite_file_name(domain)
         if fallback.exists():
             docs.append(_read_yaml(fallback))
     return docs
@@ -463,8 +550,10 @@ def _steps_for_domain(provider_config: dict[str, Any], domain: str, config_path:
     commands = provider_config.get("commands") or {}
     entries: list[dict[str, Any]] = []
     if isinstance(commands, dict):
-        if isinstance(commands.get(domain), dict):
-            entries.append(commands[domain])
+        command_keys = _command_keys_for_domain(domain)
+        matched_entries = [commands[key] for key in command_keys if isinstance(commands.get(key), dict)]
+        if matched_entries:
+            entries.extend(matched_entries)
         else:
             entries.extend(entry for entry in commands.values() if isinstance(entry, dict))
 

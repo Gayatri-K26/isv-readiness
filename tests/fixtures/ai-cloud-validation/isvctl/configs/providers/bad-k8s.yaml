@@ -1,0 +1,12 @@
+import: ../suites/k8s.yaml
+
+version: "1.0"
+
+commands:
+  kubernetes:
+    phases: ["setup", "test", "teardown"]
+    steps:
+      - name: setup
+        phase: setup
+        command: "my-isv/scripts/k8s/setup.sh"
+        timeout: 120

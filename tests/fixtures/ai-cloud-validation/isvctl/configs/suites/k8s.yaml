@@ -1,0 +1,11 @@
+version: "1.0"
+
+tests:
+  platform: kubernetes
+  validations:
+    kubernetes:
+      checks:
+        K8sNodeCountCheck:
+          count: "{{ steps.setup.kubernetes.node_count | default(1, true) }}"
+        K8sGpuCapacityCheck:
+          expected_total: "{{ steps.setup.kubernetes.total_gpus | default(1, true) }}"

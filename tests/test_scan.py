@@ -83,6 +83,59 @@ class StaticScanTests(unittest.TestCase):
             self.assertIn("describe_instance", tree)
             self.assertIn("| ID | Domain | Step |", markdown)
 
+    def test_k8s_scan_finds_top_level_provider_wrapper(self) -> None:
+        provider = FIXTURES / "ai-cloud-validation" / "isvctl" / "configs" / "providers" / "dsx-air"
+        report = scan_provider(
+            ScanOptions(
+                provider_repo=provider,
+                domains=["k8s"],
+                validation_root=FIXTURES / "ai-cloud-validation",
+            )
+        )
+        by_step = {(row.step_name, row.validation_class): row for row in report.rows}
+
+        setup = by_step[("setup", "StepOutputSchema")]
+        self.assertEqual(setup.status, "pass")
+        self.assertEqual(setup.evidence.config_path, str(provider.with_suffix(".yaml")))
+        self.assertEqual(setup.evidence.script_path, "scripts/k8s/setup.sh")
+
+        teardown = by_step[("teardown", "StepOutputSchema")]
+        self.assertEqual(teardown.status, "pass")
+
+    def test_k8s_scan_reports_missing_provider_wrapper_as_onboarding_gap(self) -> None:
+        provider = FIXTURES / "ai-cloud-validation" / "isvctl" / "configs" / "providers" / "new-k8s"
+        report = scan_provider(
+            ScanOptions(
+                provider_repo=provider,
+                domains=["k8s"],
+                validation_root=FIXTURES / "ai-cloud-validation",
+            )
+        )
+
+        self.assertEqual(len(report.rows), 1)
+        row = report.rows[0]
+        self.assertEqual(row.status, "not_implemented")
+        self.assertEqual(row.gap_type, "onboarding")
+        self.assertTrue(row.remediation.auto_fixable)
+        self.assertIn("No Kubernetes provider wrapper", row.evidence.message)
+        self.assertTrue((row.remediation.target or "").endswith("new-k8s.yaml"))
+
+    def test_k8s_scan_flags_my_isv_template_command_wiring(self) -> None:
+        provider = FIXTURES / "ai-cloud-validation" / "isvctl" / "configs" / "providers" / "bad-k8s"
+        report = scan_provider(
+            ScanOptions(
+                provider_repo=provider,
+                domains=["k8s"],
+                validation_root=FIXTURES / "ai-cloud-validation",
+            )
+        )
+
+        row = report.rows[0]
+        self.assertEqual(row.status, "not_implemented")
+        self.assertEqual(row.gap_type, "onboarding")
+        self.assertTrue(row.remediation.auto_fixable)
+        self.assertIn("my-isv template", row.evidence.message)
+
 
 if __name__ == "__main__":
     unittest.main()

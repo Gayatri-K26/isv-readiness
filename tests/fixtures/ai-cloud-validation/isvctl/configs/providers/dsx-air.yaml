@@ -1,0 +1,20 @@
+import: ../suites/k8s.yaml
+
+version: "1.0"
+
+commands:
+  kubernetes:
+    phases: ["setup", "test", "teardown"]
+    steps:
+      - name: setup
+        phase: setup
+        command: "dsx-air/scripts/k8s/setup.sh"
+        timeout: 120
+      - name: teardown
+        phase: teardown
+        command: "dsx-air/scripts/k8s/teardown.sh"
+        timeout: 30
+
+tests:
+  platform: kubernetes
+  description: "DSX Air fixture"

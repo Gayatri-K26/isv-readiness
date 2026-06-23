@@ -15,6 +15,7 @@ GapType = Literal[
     "lab_env",
     "semantic_mismatch",
     "lib_adoption",
+    "onboarding",
 ]
 
 

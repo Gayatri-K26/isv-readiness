@@ -108,7 +108,8 @@
             "product_bug",
             "lab_env",
             "semantic_mismatch",
-            "lib_adoption"
+            "lib_adoption",
+            "onboarding"
           ]
         },
         "evidence": {
