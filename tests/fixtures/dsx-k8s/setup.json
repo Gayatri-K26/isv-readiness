@@ -1,0 +1,20 @@
+{
+  "success": true,
+  "platform": "kubernetes",
+  "cluster_name": "kubernetes-admin@kubernetes",
+  "kubernetes": {
+    "node_count": 3,
+    "nodes": [
+      "k8s-admin",
+      "k8s-worker-1",
+      "k8s-worker-2"
+    ],
+    "gpu_node_count": 0,
+    "gpu_per_node": 0,
+    "total_gpus": 0,
+    "driver_version": "unknown",
+    "runtime_class": "nvidia",
+    "gpu_resource_name": "nvidia.com/gpu"
+  },
+  "csi": {}
+}

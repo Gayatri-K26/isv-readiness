@@ -31,11 +31,12 @@ def render_scorecard(report: dict[str, Any]) -> str:
     active = total - counts.get("skipped", 0)
     pass_count = counts.get("pass", 0)
     score = 100.0 if active == 0 else (pass_count / active) * 100.0
+    score_label = "Readiness score" if any(row.get("detection") == "dynamic" for row in rows) else "Static score"
     lines = [
         "Gap Scorecard",
         f"Schema: {report.get('schema_version', '<unknown>')}",
         f"Provider repo: {report.get('provider_repo', '<unknown>')}",
-        f"Static score: {score:.1f}% ({pass_count}/{active} non-skipped rows pass)",
+        f"{score_label}: {score:.1f}% ({pass_count}/{active} non-skipped rows pass)",
         "Statuses: " + _counter_text(counts),
         "",
         "By domain:",

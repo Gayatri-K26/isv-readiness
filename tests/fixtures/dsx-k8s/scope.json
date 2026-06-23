@@ -1,0 +1,11 @@
+{
+  "provider": "dsx-air",
+  "owns": {
+    "node_inventory": true,
+    "gpu_operator": true,
+    "network_policy": false,
+    "workloads": true,
+    "node_pools": false
+  },
+  "run_env": "dsx-air-k8s-admin"
+}

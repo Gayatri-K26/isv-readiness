@@ -5,6 +5,9 @@ import json
 import sys
 from pathlib import Path
 
+from isv_readiness.scan.k8s_dynamic import K8sDynamicArtifacts, scan_k8s_artifacts
+from isv_readiness.scan.k8s_scope import load_k8s_scope
+from isv_readiness.scan.models import GapReport
 from isv_readiness.scan.report import load_report, render_report
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
 
@@ -22,13 +25,17 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="gapctl", description="ISV readiness gap scanner")
     subparsers = parser.add_subparsers(dest="command")
 
-    scan_parser = subparsers.add_parser("scan", help="Build a deterministic static gaps.json report")
+    scan_parser = subparsers.add_parser("scan", help="Build a deterministic static/dynamic gaps.json report")
     scan_parser.add_argument("-p", "--provider-repo", type=Path, required=True)
     scan_parser.add_argument("--domains", required=True, help="Comma-separated domains, for example vm,network")
     scan_parser.add_argument("--validation-root", type=Path, default=None)
     scan_parser.add_argument("--out", type=Path, default=Path("gaps.json"))
-    scan_parser.add_argument("--run", action="store_true", help="Reserved for v0.2 dynamic scans")
-    scan_parser.add_argument("--lab", default=None, help="Reserved for v0.2 dynamic scans")
+    scan_parser.add_argument("--junit", type=Path, default=None, help="K8s dynamic scan: JUnit XML from isvctl test run")
+    scan_parser.add_argument("--log", type=Path, default=None, help="K8s dynamic scan: captured isvctl log")
+    scan_parser.add_argument("--setup-json", type=Path, default=None, help="K8s dynamic scan: captured setup inventory JSON")
+    scan_parser.add_argument("--scope", type=Path, default=None, help="K8s dynamic scan: ISV ownership/scope JSON")
+    scan_parser.add_argument("--run", action="store_true", help="Reserved for later: execute isvctl directly")
+    scan_parser.add_argument("--lab", default=None, help="Reserved for later: named lab/run environment")
     scan_parser.set_defaults(handler=_scan)
 
     report_parser = subparsers.add_parser("report", help="Render a gaps.json report")
@@ -50,7 +57,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _scan(args: argparse.Namespace) -> int:
     if args.run:
-        print("Dynamic --run scanning is reserved for v0.2; run without --run for the v0.1 static scanner.", file=sys.stderr)
+        print("--run execution is reserved for a later v1 step; pass --junit/--log/--setup-json to ingest artifacts.", file=sys.stderr)
         return 2
     domains = [domain.strip() for domain in args.domains.split(",") if domain.strip()]
     if not domains:
@@ -63,9 +70,46 @@ def _scan(args: argparse.Namespace) -> int:
             validation_root=args.validation_root,
         )
     )
+
+    if _has_dynamic_artifacts(args):
+        if "k8s" not in domains and "kubernetes" not in domains:
+            print("Dynamic artifact ingestion currently supports only --domains k8s.", file=sys.stderr)
+            return 2
+        dynamic_rows = scan_k8s_artifacts(
+            K8sDynamicArtifacts(
+                provider_repo=args.provider_repo,
+                junit_path=args.junit,
+                log_path=args.log,
+                setup_json_path=args.setup_json,
+                config_path=_first_config_path(report, args.provider_repo),
+                scope=load_k8s_scope(args.scope),
+            )
+        )
+        report = GapReport(
+            schema_version=report.schema_version,
+            provider_repo=report.provider_repo,
+            domains=report.domains,
+            isv_context=report.isv_context,
+            rows=sorted([*report.rows, *dynamic_rows], key=lambda row: (row.domain, row.step_name, row.validation_class or "", row.detection, row.id)),
+        )
+
     args.out.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"Wrote {args.out}")
     return 0
+
+
+def _has_dynamic_artifacts(args: argparse.Namespace) -> bool:
+    return args.junit is not None or args.log is not None or args.setup_json is not None
+
+
+def _first_config_path(report: GapReport, provider_repo: Path) -> Path | None:
+    for row in report.rows:
+        config_path = row.evidence.config_path
+        if not config_path:
+            continue
+        path = Path(config_path)
+        return path if path.is_absolute() else provider_repo / path
+    return None
 
 
 def _report(args: argparse.Namespace) -> int:

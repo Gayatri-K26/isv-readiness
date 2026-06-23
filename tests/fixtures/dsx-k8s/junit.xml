@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites name="isvctl validation tests">
+  <testsuite name="kubernetes/test" tests="5" failures="2" errors="0" skipped="2">
+    <testcase name="test_validation[K8sNodeCountCheck]" time="0.1" />
+    <testcase name="test_validation[K8sGpuCapacityCheck]" time="0.1">
+      <failure message="Validation failed: No 'nvidia.com/gpu' resources found in node capacity" />
+    </testcase>
+    <testcase name="test_validation[K8sNetworkPolicyCheck]" time="0.1">
+      <failure message="Validation failed: NetworkPolicy did not take effect within 30s (denied-client still reaches server)" />
+    </testcase>
+    <testcase name="test_validation[K8sNimHelmWorkload-1b]" time="0.1">
+      <skipped message="NGC_API_KEY not set - NGC credentials required" />
+    </testcase>
+    <testcase name="test_validation[K8sNodePoolCheck]" time="0.1">
+      <skipped message="step_not_configured: step 'create_test_node_pool' is not configured for this run" />
+    </testcase>
+  </testsuite>
+</testsuites>
