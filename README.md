@@ -49,6 +49,15 @@ gapctl report --in gaps.json --format tree
 gapctl report --in gaps.json --format md
 ```
 
+For brand-new K8s providers, start with onboarding. The dry run prints the
+wrapper/scripts/scope plan and the ISV information the agent needs; `--write`
+creates the starter files.
+
+```bash
+gapctl onboard --domain k8s --provider-name dsx-air --validation-root /path/to/ai-cloud-validation
+gapctl onboard --domain k8s --provider-name dsx-air --validation-root /path/to/ai-cloud-validation --write
+```
+
 Provider repo layout:
 
 ```text

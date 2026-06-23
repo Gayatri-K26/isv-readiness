@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from isv_readiness.scan.k8s_dynamic import K8sDynamicArtifacts, scan_k8s_artifacts
+from isv_readiness.scan.k8s_onboard import build_k8s_onboarding_plan, write_k8s_onboarding_files
 from isv_readiness.scan.k8s_scope import load_k8s_scope
 from isv_readiness.scan.models import GapReport
 from isv_readiness.scan.report import load_report, render_report
@@ -49,9 +50,13 @@ def _build_parser() -> argparse.ArgumentParser:
     loop_parser = subparsers.add_parser("loop", help="Reserved for v0.4 until-green loops")
     loop_parser.set_defaults(handler=_reserved("gapctl loop ships in v0.4."))
 
-    onboard_parser = subparsers.add_parser("onboard", help="Reserved for access-level readiness checks")
-    onboard_parser.add_argument("--check", action="store_true")
-    onboard_parser.set_defaults(handler=_reserved("gapctl onboard --check ships after the v0.1 static scanner."))
+    onboard_parser = subparsers.add_parser("onboard", help="Prepare a provider for readiness scanning")
+    onboard_parser.add_argument("--domain", choices=["k8s"], default="k8s")
+    onboard_parser.add_argument("--provider-name", required=True, help="Provider name, for example dsx-air")
+    onboard_parser.add_argument("--validation-root", type=Path, required=True, help="Path to ai-cloud-validation checkout")
+    onboard_parser.add_argument("--write", action="store_true", help="Create the wrapper/scripts/scope template")
+    onboard_parser.add_argument("--overwrite", action="store_true", help="Overwrite existing generated files")
+    onboard_parser.set_defaults(handler=_onboard)
     return parser
 
 
@@ -110,6 +115,28 @@ def _first_config_path(report: GapReport, provider_repo: Path) -> Path | None:
         path = Path(config_path)
         return path if path.is_absolute() else provider_repo / path
     return None
+
+
+def _onboard(args: argparse.Namespace) -> int:
+    if args.domain != "k8s":
+        print("Only K8s onboarding is implemented in v1.", file=sys.stderr)
+        return 2
+    try:
+        plan = build_k8s_onboarding_plan(args.validation_root, args.provider_name)
+        if args.write:
+            written = write_k8s_onboarding_files(plan, overwrite=args.overwrite)
+            print("Created K8s provider onboarding files:")
+            for path in written:
+                print(f"- {path}")
+        else:
+            print("K8s provider onboarding plan:")
+            for line in plan.summary_lines():
+                print(line)
+            print("\nPass --write to create these files.")
+    except (FileExistsError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    return 0
 
 
 def _report(args: argparse.Namespace) -> int:
