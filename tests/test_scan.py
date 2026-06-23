@@ -136,6 +136,32 @@ class StaticScanTests(unittest.TestCase):
         self.assertTrue(row.remediation.auto_fixable)
         self.assertIn("my-isv template", row.evidence.message)
 
+    def test_k8s_run_writes_onboarding_report_when_config_missing(self) -> None:
+        from isv_readiness.cli import main
+
+        provider = FIXTURES / "ai-cloud-validation" / "isvctl" / "configs" / "providers" / "missing-run-provider"
+        with tempfile.TemporaryDirectory() as tempdir:
+            output = Path(tempdir) / "gaps.json"
+            exit_code = main(
+                [
+                    "scan",
+                    "-p",
+                    str(provider),
+                    "--domains",
+                    "k8s",
+                    "--validation-root",
+                    str(FIXTURES / "ai-cloud-validation"),
+                    "--run",
+                    "--out",
+                    str(output),
+                ]
+            )
+            self.assertEqual(exit_code, 1)
+            data = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertEqual(data["rows"][0]["gap_type"], "onboarding")
+        self.assertIn("No Kubernetes provider wrapper", data["rows"][0]["evidence"]["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

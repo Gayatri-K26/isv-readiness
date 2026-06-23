@@ -58,6 +58,14 @@ gapctl onboard --domain k8s --provider-name dsx-air --validation-root /path/to/a
 gapctl onboard --domain k8s --provider-name dsx-air --validation-root /path/to/ai-cloud-validation --write
 ```
 
+For K8s dynamic scans, either ingest saved artifacts from an ISV-run validation
+or let `gapctl` run `isvctl` in the validation checkout and then parse the
+artifacts it writes:
+
+```bash
+gapctl scan -p /path/to/providers/dsx-air --domains k8s --validation-root /path/to/ai-cloud-validation --run --scope /path/to/scope.json
+```
+
 Provider repo layout:
 
 ```text
