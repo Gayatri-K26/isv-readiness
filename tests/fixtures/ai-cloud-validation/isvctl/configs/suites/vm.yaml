@@ -1,0 +1,24 @@
+version: "1.0"
+
+tests:
+  platform: vm
+  validations:
+    instance_created:
+      step: launch_instance
+      checks:
+        InstanceCreatedCheck: {}
+
+    list_instances:
+      step: list_instances
+      checks:
+        InstanceListCheck: {}
+
+    instance_info:
+      step: describe_instance
+      checks:
+        InstanceStateCheck: {}
+
+    teardown_checks:
+      step: teardown
+      checks:
+        StepSuccessCheck: {}

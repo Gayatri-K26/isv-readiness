@@ -1,0 +1,21 @@
+version: "1.0"
+
+commands:
+  vm:
+    phases: ["setup", "test", "teardown"]
+    steps:
+      - name: launch_instance
+        phase: setup
+        command: "python3 ../scripts/vm/launch_instance.py"
+
+      - name: list_instances
+        phase: test
+        command: "python3 ../scripts/vm/list_instances.py"
+
+      - name: describe_instance
+        phase: test
+        command: "python3 ../scripts/vm/describe_instance.py"
+
+      - name: teardown
+        phase: teardown
+        command: "python3 ../scripts/vm/teardown.py"

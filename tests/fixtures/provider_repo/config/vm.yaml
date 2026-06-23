@@ -1,0 +1,28 @@
+import:
+  - ../../ai-cloud-validation/isvctl/configs/suites/vm.yaml
+
+version: "1.0"
+
+commands:
+  vm:
+    phases: ["setup", "test", "teardown"]
+    steps:
+      - name: launch_instance
+        phase: setup
+        command: "python ../scripts/vm/launch_instance.py"
+        timeout: 60
+
+      - name: list_instances
+        phase: test
+        command: "python ../scripts/vm/list_instances.py"
+        timeout: 60
+
+      - name: teardown
+        phase: teardown
+        skip: true
+        command: "python ../scripts/vm/teardown.py"
+        timeout: 60
+
+tests:
+  cluster_name: fixture-vm
+  description: fixture provider config

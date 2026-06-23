@@ -1,0 +1,103 @@
+{
+  "schema_version": "0.1.0",
+  "provider_repo": "examples/provider-repo",
+  "domains": [
+    "vm"
+  ],
+  "isv_context": {
+    "repo_access": "local",
+    "api_spec": null,
+    "run_env": "not_checked",
+    "creds_scope": null
+  },
+  "rows": [
+    {
+      "id": "gap_5e4bf68a7ab4",
+      "domain": "vm",
+      "step_name": "launch_instance",
+      "validation_class": "InstanceCreatedCheck",
+      "requirement_id": "BOOT01",
+      "milestone": "M0",
+      "status": "not_implemented",
+      "detection": "static",
+      "stage": "coverage",
+      "gap_type": "not_implemented",
+      "evidence": {
+        "message": "Provider script still contains stub marker: Not implemented",
+        "validation_message": null,
+        "schema_errors": [],
+        "missing_json_fields": [],
+        "stderr_excerpt": null,
+        "script_path": "scripts/vm/launch_instance.py",
+        "config_path": "config/vm.yaml"
+      },
+      "remediation": {
+        "auto_fixable": true,
+        "target": "scripts/vm/launch_instance.py",
+        "rerun_command": "isvctl test run -f config/vm.yaml",
+        "aws_reference": "../ai-cloud-validation/isvctl/configs/providers/aws/scripts/vm/launch_instance.py"
+      },
+      "enrichment": {}
+    },
+    {
+      "id": "gap_5d413a9b22f1",
+      "domain": "vm",
+      "step_name": "list_instances",
+      "validation_class": "InstanceListCheck",
+      "requirement_id": "BOOT01",
+      "milestone": "M1",
+      "status": "fail",
+      "detection": "static",
+      "stage": "correctness",
+      "gap_type": "provider_script",
+      "evidence": {
+        "message": "Static JSON sample does not match expected 'instance_list' output schema.",
+        "validation_message": null,
+        "schema_errors": [
+          "$: 'instances' is a required property"
+        ],
+        "missing_json_fields": [
+          "instances"
+        ],
+        "stderr_excerpt": null,
+        "script_path": "scripts/vm/list_instances.py",
+        "config_path": "config/vm.yaml"
+      },
+      "remediation": {
+        "auto_fixable": true,
+        "target": "scripts/vm/list_instances.py",
+        "rerun_command": "isvctl test run -f config/vm.yaml",
+        "aws_reference": "../ai-cloud-validation/isvctl/configs/providers/aws/scripts/vm/list_instances.py"
+      },
+      "enrichment": {}
+    },
+    {
+      "id": "gap_1fd99b3e7adc",
+      "domain": "vm",
+      "step_name": "teardown",
+      "validation_class": "StepSuccessCheck",
+      "requirement_id": null,
+      "milestone": null,
+      "status": "pass",
+      "detection": "static",
+      "stage": "coverage",
+      "gap_type": "provider_script",
+      "evidence": {
+        "message": "Static JSON sample matches expected 'teardown' output schema.",
+        "validation_message": null,
+        "schema_errors": [],
+        "missing_json_fields": [],
+        "stderr_excerpt": null,
+        "script_path": "scripts/vm/teardown.py",
+        "config_path": "config/vm.yaml"
+      },
+      "remediation": {
+        "auto_fixable": false,
+        "target": null,
+        "rerun_command": "isvctl test run -f config/vm.yaml",
+        "aws_reference": "../ai-cloud-validation/isvctl/configs/providers/aws/scripts/vm/teardown.py"
+      },
+      "enrichment": {}
+    }
+  ]
+}

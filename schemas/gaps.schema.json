@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nvidia.com/schemas/isv-readiness/gaps-0.1.0.schema.json",
+  "title": "ISV Readiness Gap Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "provider_repo", "domains", "isv_context", "rows"],
+  "properties": {
+    "schema_version": {
+      "const": "0.1.0"
+    },
+    "provider_repo": {
+      "type": "string"
+    },
+    "domains": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "isv_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo_access", "api_spec", "run_env", "creds_scope"],
+      "properties": {
+        "repo_access": {
+          "type": "string",
+          "description": "How the scanner can read the provider repo, for example local, remote, or none."
+        },
+        "api_spec": {
+          "type": ["string", "null"],
+          "description": "Available API/spec context for code generation, if any."
+        },
+        "run_env": {
+          "type": "string",
+          "description": "Whether a verification environment is available, for example not_checked, local, staging, or none."
+        },
+        "creds_scope": {
+          "type": ["string", "null"],
+          "description": "Credential scope visible to the scanner/agent, if known."
+        }
+      }
+    },
+    "rows": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/gap_row"
+      }
+    }
+  },
+  "$defs": {
+    "gap_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "domain",
+        "step_name",
+        "validation_class",
+        "requirement_id",
+        "milestone",
+        "status",
+        "detection",
+        "stage",
+        "gap_type",
+        "evidence",
+        "remediation",
+        "enrichment"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^gap_[0-9a-f]{12}$"
+        },
+        "domain": {
+          "type": "string",
+          "minLength": 1
+        },
+        "step_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "validation_class": {
+          "type": ["string", "null"]
+        },
+        "requirement_id": {
+          "type": ["string", "null"]
+        },
+        "milestone": {
+          "type": ["string", "null"]
+        },
+        "status": {
+          "enum": ["pass", "fail", "not_implemented", "skipped", "error"]
+        },
+        "detection": {
+          "enum": ["static", "dynamic"]
+        },
+        "stage": {
+          "enum": ["coverage", "correctness"]
+        },
+        "gap_type": {
+          "enum": [
+            "not_implemented",
+            "provider_script",
+            "product_bug",
+            "lab_env",
+            "semantic_mismatch",
+            "lib_adoption"
+          ]
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidence"
+        },
+        "remediation": {
+          "$ref": "#/$defs/remediation"
+        },
+        "enrichment": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "message",
+        "validation_message",
+        "schema_errors",
+        "missing_json_fields",
+        "stderr_excerpt",
+        "script_path",
+        "config_path"
+      ],
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "validation_message": {
+          "type": ["string", "null"]
+        },
+        "schema_errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "missing_json_fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "stderr_excerpt": {
+          "type": ["string", "null"]
+        },
+        "script_path": {
+          "type": ["string", "null"]
+        },
+        "config_path": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "remediation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["auto_fixable", "target", "rerun_command", "aws_reference"],
+      "properties": {
+        "auto_fixable": {
+          "type": "boolean"
+        },
+        "target": {
+          "type": ["string", "null"]
+        },
+        "rerun_command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "aws_reference": {
+          "type": ["string", "null"]
+        }
+      }
+    }
+  }
+}
