@@ -60,6 +60,16 @@ provider-repo/
       launch_instance.py
 ```
 
+Kubernetes is a special case in the current `ai-cloud-validation` tree. The
+`isvctl provider scaffold <name>` flow creates `providers/<name>/scripts/k8s/`,
+but the scaffold does not currently create `providers/<name>/config/k8s.yaml`.
+Existing local K8s providers are modeled as top-level files such as
+`isvctl/configs/providers/k3s.yaml`, `microk8s.yaml`, and `minikube.yaml`; those
+files import `suites/k8s.yaml` and override commands to point at provider
+scripts. For a DSX Air pretend-ISV run, use the same pattern with a wrapper like
+`isvctl/configs/providers/dsx-air.yaml` that points setup/teardown at
+`providers/dsx-air/scripts/k8s/`.
+
 When the sibling checkout is not adjacent to the provider repo, pass it explicitly:
 
 ```bash
