@@ -11,8 +11,10 @@ from isv_readiness.scan.k8s_dynamic import K8sDynamicArtifacts, scan_k8s_artifac
 from isv_readiness.scan.k8s_onboard import build_k8s_onboarding_plan, write_k8s_onboarding_files
 from isv_readiness.scan.k8s_scope import load_k8s_scope
 from isv_readiness.scan.models import GapReport
+from isv_readiness.scan.profile import enrich_report_with_profile
 from isv_readiness.scan.report import load_report, render_report
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
+from isv_readiness.solution_profile import SolutionProfile, SolutionProfileError, load_solution_profile
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -30,7 +32,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     scan_parser = subparsers.add_parser("scan", help="Build a deterministic static/dynamic gaps.json report")
     scan_parser.add_argument("-p", "--provider-repo", type=Path, required=True)
-    scan_parser.add_argument("--domains", required=True, help="Comma-separated domains, for example vm,network")
+    scan_parser.add_argument("--domains", help="Comma-separated domains; defaults to covered/test domains in --profile")
+    scan_parser.add_argument("--profile", type=Path, default=None, help="Solution profile for responsibility routing")
     scan_parser.add_argument("--validation-root", type=Path, default=None)
     scan_parser.add_argument("--out", type=Path, default=Path("gaps.json"))
     scan_parser.add_argument("--junit", type=Path, default=None, help="K8s dynamic scan: JUnit XML from isvctl test run")
@@ -46,6 +49,11 @@ def _build_parser() -> argparse.ArgumentParser:
     report_parser.add_argument("--in", dest="input_path", type=Path, required=True)
     report_parser.add_argument("--format", choices=["scorecard", "tree", "md"], default="scorecard")
     report_parser.set_defaults(handler=_report)
+
+    profile_parser = subparsers.add_parser("profile", help="Validate and summarize a solution profile")
+    profile_parser.add_argument("--in", dest="input_path", type=Path, required=True)
+    profile_parser.add_argument("--format", choices=["summary", "json"], default="summary")
+    profile_parser.set_defaults(handler=_profile)
 
     fix_parser = subparsers.add_parser("fix", help="Reserved for v0.3 agent fixes")
     fix_parser.set_defaults(handler=_reserved("gapctl fix ships in v0.3."))
@@ -64,9 +72,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _scan(args: argparse.Namespace) -> int:
-    domains = [domain.strip() for domain in args.domains.split(",") if domain.strip()]
+    profile = _load_profile_arg(args.profile)
+    if args.profile is not None and profile is None:
+        return 2
+    domains = _scan_domains(args.domains, profile)
     if not domains:
-        print("--domains must include at least one domain", file=sys.stderr)
+        print("--domains must include at least one domain or --profile must declare a covered/test domain", file=sys.stderr)
         return 2
     report = scan_provider(
         ScanOptions(
@@ -107,8 +118,20 @@ def _scan(args: argparse.Namespace) -> int:
             provider_repo=report.provider_repo,
             domains=report.domains,
             isv_context=report.isv_context,
-            rows=sorted([*report.rows, *dynamic_rows], key=lambda row: (row.domain, row.step_name, row.validation_class or "", row.detection, row.id)),
+            rows=sorted(
+                [*report.rows, *dynamic_rows],
+                key=lambda row: (
+                    row.domain,
+                    row.step_name,
+                    row.validation_class or "",
+                    row.detection,
+                    row.id,
+                ),
+            ),
         )
+
+    if profile is not None:
+        report = enrich_report_with_profile(report, profile)
 
     args.out.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"Wrote {args.out}")
@@ -200,6 +223,52 @@ def _report(args: argparse.Namespace) -> int:
     report = load_report(args.input_path)
     print(render_report(report, args.format))
     return 0
+
+
+def _profile(args: argparse.Namespace) -> int:
+    profile = _load_profile_arg(args.input_path)
+    if profile is None:
+        return 2
+    if args.format == "json":
+        print(json.dumps(profile.to_dict(), indent=2, sort_keys=True))
+        return 0
+
+    summary = profile.qualification_summary()
+    coverage = summary["coverage"]
+    print(f"Solution: {profile.solution.name} ({profile.solution.version})")
+    print(f"Profile: {profile.solution.profile_status}")
+    print(f"Journey: {summary['journey_stage']} / {summary['journey_status']}")
+    print(
+        "Coverage: "
+        f"covered={coverage['covered']} gap={coverage['gap']} "
+        f"out_of_scope={coverage['out_of_scope']} unknown={coverage['unknown']}"
+    )
+    print(f"Full validation ready: {'yes' if summary['full_validation_ready'] else 'no'}")
+    print("Blocking domains: " + (", ".join(summary["blocking_domains"]) or "none"))
+    print("Blocking capabilities: " + (", ".join(summary["blocking_capabilities"]) or "none"))
+    return 0
+
+
+def _load_profile_arg(path: Path | None) -> SolutionProfile | None:
+    if path is None:
+        return None
+    try:
+        return load_solution_profile(path)
+    except (OSError, SolutionProfileError) as exc:
+        print(str(exc), file=sys.stderr)
+        return None
+
+
+def _scan_domains(raw_domains: str | None, profile: SolutionProfile | None) -> list[str]:
+    if raw_domains:
+        return [domain.strip() for domain in raw_domains.split(",") if domain.strip()]
+    if profile is None:
+        return []
+    return [
+        domain.domain
+        for domain in profile.domains
+        if domain.coverage == "covered" and domain.validation_mode == "test"
+    ]
 
 
 def _reserved(message: str):

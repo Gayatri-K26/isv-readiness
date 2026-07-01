@@ -209,3 +209,39 @@ scope decisions.
 - `python3 -m compileall -q src tests`: passed.
 - `python3 -m json.tool schemas/solution-profile.schema.json`: passed.
 - `git diff --check`: passed.
+
+## Step 5a - Profile-Aware Scanning
+
+### Objective
+
+Apply the solution responsibility model to deterministic gap rows without
+changing `ai-cloud-validation` outcomes.
+
+### Decisions
+
+1. Keep scan status and evidence unchanged; add responsibility routing under
+   `enrichment.solution_profile`.
+2. Permit profile routing to disable `auto_fixable`, but never use it to turn a
+   non-fixable row into an automatic edit.
+3. Resolve current validation category metadata before domain defaults so
+   capability slices such as Kubernetes CSI inherit the correct owner.
+4. Allow `gapctl scan --profile` to derive covered, testable domains when
+   `--domains` is omitted.
+5. Add `gapctl profile` to validate profiles and expose qualification blockers
+   before provider scripts are generated or executed.
+
+### Changed Files
+
+- `src/isv_readiness/scan/profile.py`
+- `src/isv_readiness/cli.py`
+- `tests/test_profile_enrichment.py`
+- `tests/fixtures/ai-cloud-validation/isvctl/configs/suites/k8s.yaml`
+- `SLOP.md`
+
+### Verification
+
+- Focused tests cover domain derivation, profile summaries, K8s capability
+  overrides, report-schema compatibility, and out-of-scope edit suppression.
+- `PYTHONPATH=src python3 -m unittest discover -s tests -v`: 32 tests passed.
+- `python3 -m compileall -q src tests`: passed.
+- `git diff --check`: passed.
