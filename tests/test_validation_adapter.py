@@ -171,9 +171,7 @@ class IsvctlAdapterTests(unittest.TestCase):
             },
         }
 
-        def runner(
-            command: Sequence[str], cwd: Path | None, timeout_seconds: int
-        ) -> subprocess.CompletedProcess[str]:
+        def runner(command: Sequence[str], cwd: Path | None, timeout_seconds: int) -> subprocess.CompletedProcess[str]:
             calls.append((tuple(command), cwd, timeout_seconds))
             if command[-1] == "--version":
                 return subprocess.CompletedProcess(command, 0, "isvctl 0.8.0\n", "")
@@ -251,7 +249,7 @@ class IsvctlAdapterTests(unittest.TestCase):
             adapter = IsvctlAdapter(validation_root, runner=runner)
             adapter.catalog()
 
-        self.assertEqual(calls[0], (str(executable), "catalog", "list", "--json"))
+        self.assertEqual(calls[0], (str(executable.resolve()), "catalog", "list", "--json"))
 
     def test_cli_exports_schema_valid_validation_plan(self) -> None:
         from isv_readiness.cli import main

@@ -27,12 +27,20 @@ Implemented:
   classification and setup-inventory parsing.
 - Profile-aware action routing that can suppress unsafe automatic edits.
 - Flat, schema-valid `gaps.json` reports and scorecard/tree/Markdown views.
+- Candidate-to-patch guardrails for one profile-approved provider-script gap.
+- Isolated static verification manifests and explicit, hash-bound atomic
+  candidate application with backups.
+- Persistent, deterministic one-gap-at-a-time loop state with blocker-first
+  routing and explicit retry accounting.
 
 Not implemented yet:
 
-- Frontier-model code generation for `gapctl fix`.
-- Guarded patch creation and pull-request submission.
-- The deterministic `gapctl loop --until-green` retry/stop controller.
+- Frontier-model integration that produces candidate source files.
+- Live/dynamic targeted verification, rollback commands, and pull-request
+  submission.
+- An autonomous runner that repeatedly scans, generates, applies, and verifies;
+  the implemented loop controller advances only from explicit reports and
+  human-recorded attempts.
 - Publication workflows. The current boundary ends with a reproducible
   qualification or validation bundle.
 
@@ -184,6 +192,91 @@ with a deterministic action:
 - `skip_with_rationale`
 - `request_scope_decision`
 
+### 7. Propose one guarded provider-script patch
+
+`gapctl fix` accepts a candidate replacement produced by a human or a
+separately configured generator. It emits a unified diff and never changes the
+provider checkout:
+
+```bash
+gapctl fix \
+  --in gaps.json \
+  --gap-id gap_0123456789ab \
+  --provider-repo /path/to/provider \
+  --candidate /path/to/candidate.py \
+  --out proposal.patch
+```
+
+The row must be profile-routed to `implement_or_fix_adapter`, marked
+`auto_fixable` by the scanner, and target the selected provider's `scripts/`
+tree. Path escapes, symlinks, secret-looking literals, invalid Python/JSON/YAML,
+and non-script targets are rejected.
+
+### 8. Verify and explicitly apply the candidate
+
+The verifier copies the provider into an isolated temporary workspace, writes
+the candidate there, rescans the selected static domain, and rejects a selected
+gap that remains unresolved or any newly introduced regression:
+
+```bash
+gapctl verify \
+  --in gaps.json \
+  --gap-id gap_0123456789ab \
+  --provider-repo /path/to/provider \
+  --candidate /path/to/candidate.py \
+  --validation-root /path/to/ai-cloud-validation \
+  --out verification.json
+```
+
+After reviewing `proposal.patch` and the successful manifest, application
+requires an explicit flag. The candidate, patch, and current target must still
+match their verified SHA-256 values:
+
+```bash
+gapctl apply \
+  --in gaps.json \
+  --gap-id gap_0123456789ab \
+  --provider-repo /path/to/provider \
+  --candidate /path/to/candidate.py \
+  --verification verification.json \
+  --backup-dir /path/to/backups \
+  --out application.json \
+  --apply
+```
+
+Existing targets are backed up and replaced atomically. The current verifier is
+limited to static gaps; dynamic gaps still require a reviewed live `isvctl`
+rerun.
+
+### 9. Advance the deterministic loop
+
+The loop controller selects one blocker or fixable gap and persists its state;
+it does not execute the row's rerun string:
+
+```bash
+gapctl loop \
+  --in gaps.json \
+  --domain vm \
+  --state loop-state.json \
+  --max-attempts 3
+```
+
+After a reviewed patch attempt and rescan, record that explicit attempt while
+advancing with the new report:
+
+```bash
+gapctl loop \
+  --in rescanned-gaps.json \
+  --domain vm \
+  --state loop-state.json \
+  --attempted-gap gap_0123456789ab \
+  --max-attempts 3
+```
+
+States are `ready`, `blocked`, or `complete`. Scope decisions, external
+adapters, evidence requests, product gaps, non-authorized targets, and exhausted
+retry budgets stop the controller rather than falling through to code changes.
+
 ## Contracts
 
 - [schemas/gaps.schema.json](schemas/gaps.schema.json): deterministic flat scan
@@ -192,8 +285,14 @@ with a deterministic action:
   normalized, version-aware `isvctl` plan.
 - [schemas/solution-profile.schema.json](schemas/solution-profile.schema.json):
   versioned solution graph and responsibility model.
+- [schemas/loop-state.schema.json](schemas/loop-state.schema.json): persistent
+  selection, routing, retry, fingerprint, and history state for the controller.
+- [schemas/verification-manifest.schema.json](schemas/verification-manifest.schema.json):
+  isolated-rescan result bound to candidate, patch, and pre-apply target hashes.
+- [schemas/application-result.schema.json](schemas/application-result.schema.json):
+  auditable atomic-application and backup result.
 
-`gaps.json` stays flat so the future loop can select one row deterministically.
+`gaps.json` stays flat so the loop controller can select one row deterministically.
 Profile data is enrichment and guardrail context; it does not rewrite test
 outcomes.
 
@@ -246,5 +345,8 @@ Validate all schemas and compile Python sources:
 python3 -m json.tool schemas/gaps.schema.json >/dev/null
 python3 -m json.tool schemas/validation-plan.schema.json >/dev/null
 python3 -m json.tool schemas/solution-profile.schema.json >/dev/null
+python3 -m json.tool schemas/loop-state.schema.json >/dev/null
+python3 -m json.tool schemas/verification-manifest.schema.json >/dev/null
+python3 -m json.tool schemas/application-result.schema.json >/dev/null
 python3 -m compileall -q src tests
 ```

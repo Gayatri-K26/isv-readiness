@@ -390,3 +390,205 @@ remove development setup that contradicted the supported integration boundary.
 - All three JSON schemas pass `python3 -m json.tool`.
 - `uv lock --check`: passed.
 - `git diff --check`: passed.
+
+## Step 6 - Simulation Boundary and Upstream Compatibility
+
+### Objective
+
+Distinguish framework integration evidence from product qualification and prove
+that an upstream validation-suite change remains visible without allowing
+`gapctl` to modify `ai-cloud-validation`.
+
+### Evidence
+
+- The DSX Air environment used for the live exercise is a limited-access
+  Kubernetes simulation running on VMs. It is useful for CLI, JUnit, log, and
+  report plumbing but is not authoritative evidence of BCM, Mission Control, or
+  provider ownership.
+- The VM exercise used `ISVCTL_DEMO_MODE=1`, dummy resource identifiers, and
+  documentation addresses. It validated generic non-Kubernetes ingestion but
+  did not validate a real VM lifecycle.
+- Scope questions are not answered by an agent. Their text and required inputs
+  live in the versioned profiles; deterministic selectors map scan rows to those
+  capabilities, and `_resolve_action` maps approved coverage/mode/ownership to
+  an action. Kubernetes validation-to-layer prefixes remain explicit code rules.
+
+### Decisions
+
+1. Treat DSX Air results as integration/plumbing evidence, not product
+   qualification or a basis for assigning product ownership.
+2. Keep BCM and Mission Control profiles draft until a real SME supplies the
+   shared-responsibility facts. Limited lab access is a `lab_env` constraint,
+   not proof that a capability is out of product scope.
+3. Preserve the real non-Kubernetes run as a future qualification gate; the
+   demo run satisfies only the parser/orchestration smoke test.
+4. Simulate upstream drift in a copied fixture by adding a previously unknown
+   validation. Require a changed config fingerprint, one additional normalized
+   plan entry, one additional scan row, schema-valid outputs, deterministic
+   domain-default routing, and byte-for-byte preservation of the changed suite
+   after scanning.
+5. Treat Git persistence separately: upstream changes persist through commits
+   in `ai-cloud-validation`; the compatibility test proves consumption and
+   non-mutation, not version-control durability.
+
+### Changed Files
+
+- `tests/test_upstream_compatibility.py`
+- `SLOP.md`
+
+### Verification
+
+- The mock `K8sFutureUpstreamCheck` changes the normalized config fingerprint,
+  is retained as catalog-unknown and valid, appears as one new static row, and
+  falls back to `kubernetes.default` routing.
+- Both validation-plan and gap-report schemas accept the changed outputs.
+- The copied upstream suite is unchanged by plan/scanner consumption.
+
+## Step 7 - Guarded Candidate-to-Patch Proposal
+
+### Objective
+
+Create the first code-change boundary without granting a model, candidate file,
+or gap report permission to edit provider source directly.
+
+### Decisions
+
+1. Make candidate generation a replaceable seam. `gapctl fix` accepts a
+   candidate replacement file produced by a human, model, or external tool;
+   model-provider integration is not required to test the safety boundary.
+2. Require all three independent authorizations before emitting a patch:
+   unresolved status is fixable, profile action is
+   `implement_or_fix_adapter`, and scanner remediation is `auto_fixable` with a
+   target.
+3. Resolve the target against the explicitly selected provider root and allow
+   only its `scripts/` subtree. Reject path traversal, absolute escapes,
+   symlink targets, and config/suite/engine paths even if an input report claims
+   they are editable.
+4. Reject non-UTF-8 or oversized candidates, common private-key/access-key and
+   literal-credential patterns, and invalid Python, JSON, or YAML syntax.
+5. Emit a standard unified diff and SHA-256 identifier. Never write the target,
+   apply the patch, run infrastructure, create a branch, or open a pull request.
+6. Keep targeted verification separate. A later verifier can consume the patch
+   after human review without weakening the proposal gate.
+
+### Changed Files
+
+- `src/isv_readiness/fixes.py`
+- `src/isv_readiness/cli.py`
+- `tests/test_fixes.py`
+- `README.md`
+- `docs/architecture.md`
+- `SLOP.md`
+
+### Verification
+
+- Focused tests cover successful existing-file diff generation, source
+  non-mutation, CLI output, unresolved scope, path traversal, non-script
+  targets, secret-looking literals, and invalid Python syntax.
+- The emitted patch names only the provider-relative approved target.
+
+## Step 8 - Deterministic Loop-State Controller
+
+### Objective
+
+Persist one-gap-at-a-time selection and stop conditions without turning report
+strings into executable commands or bypassing human patch review.
+
+### Decisions
+
+1. Drive the controller from successive immutable `gaps.json` reports rather
+   than invoking scans or shell commands internally.
+2. Select blocker routes before fixable work. Unresolved scope, evidence,
+   external-adapter, and product-gap routes stop the loop before code
+   generation; an approved `skip_with_rationale` is a resolved disposition.
+3. Permit `ready` only when the selected row routes to
+   `implement_or_fix_adapter` and the scanner independently authorizes a target.
+4. Record attempts only through an explicit `--attempted-gap` matching the
+   previously selected ID. Merely re-reading a report never consumes retry
+   budget.
+5. Stop after the configured per-gap retry budget while retaining deterministic
+   report fingerprints and the last 100 state transitions.
+6. Define `ready`, `blocked`, and `complete` in a versioned loop-state schema.
+   The current controller is the safe state core for a future autonomous
+   runner; it is not itself an automatic patch/apply/rescan engine.
+
+### Changed Files
+
+- `src/isv_readiness/loop.py`
+- `src/isv_readiness/cli.py`
+- `schemas/loop-state.schema.json`
+- `tests/test_loop.py`
+- `README.md`
+- `docs/architecture.md`
+- `SLOP.md`
+
+### Verification
+
+- Tests cover blocker-first selection, explicit retry accounting, retry
+  exhaustion, approved-skip completion, mismatched attempt rejection, CLI state
+  persistence, reload, history, and schema validation.
+- macOS temporary-path assertions now compare resolved paths, removing the
+  `/var` versus `/private/var` false failures without changing product code.
+- `uv run python -m unittest discover -s tests -v`: 52 tests passed.
+- `uvx ruff check src tests`: passed.
+
+## Step 9 - Agent Instructions, Targeted Verification, and Controlled Application
+
+### Objective
+
+Turn a guarded patch proposal into a verifiable and explicitly authorized
+provider-script change without giving reports, candidates, or loop state direct
+write authority.
+
+### Decisions
+
+1. Add a repository-level `AGENTS.md` so future agents inherit the source-of-
+   truth boundary, DSX simulation classification, ownership rules, path limits,
+   verification commands, documentation requirements, and no-push/no-apply
+   defaults.
+2. Verify only static gaps in this slice. Dynamic gaps require a real reviewed
+   `isvctl` rerun and are rejected rather than being misrepresented as verified
+   by syntax or offline analysis.
+3. Copy the selected provider into an isolated temporary workspace, including a
+   sibling top-level K8s wrapper when present. Install the candidate only in that
+   copy and run the deterministic static scanner against the selected domain.
+4. Require the selected row to move to `pass` and reject newly introduced
+   unresolved rows or regressions of prior passing rows. Do not mutate the real
+   provider during verification.
+5. Bind the verification manifest to the gap ID, domain, target, patch hash,
+   candidate hash, and pre-application target hash. Persist the before/after
+   selected status and explicit regression list in a versioned schema.
+6. Require `gapctl apply --apply` as explicit write authorization. Rebuild the
+   guarded proposal at application time and reject changed source, changed
+   candidate, changed patch, unsuccessful verification, or regressions.
+7. Back up an existing target before using an fsync-backed temporary file and
+   atomic `os.replace`. Preserve the target mode for replacements and candidate
+   mode for new files.
+8. Keep rollback execution, dynamic verification, branch creation, commits,
+   pushes, and pull requests outside this slice. The application result records
+   the backup and hashes needed for later audited rollback tooling.
+
+### Changed Files
+
+- `AGENTS.md`
+- `src/isv_readiness/verification.py`
+- `src/isv_readiness/cli.py`
+- `schemas/verification-manifest.schema.json`
+- `schemas/application-result.schema.json`
+- `tests/test_verification.py`
+- `README.md`
+- `docs/architecture.md`
+- `SLOP.md`
+
+### Verification
+
+- Focused tests cover isolated success, unresolved-candidate failure, source
+  non-mutation, manifest and application schemas, atomic replacement, backup
+  preservation, source/candidate drift rejection, explicit-flag refusal, and a
+  complete CLI verify/apply flow.
+- `gapctl verify` and `gapctl apply` help expose only explicit file and
+  verification inputs; neither consumes a remediation command from the report.
+- `uv run python -m unittest discover -s tests`: 58 tests passed.
+- `uvx ruff check src tests`: passed.
+- Both new JSON schemas, Python compilation, the lockfile, and
+  `git diff --check` passed.

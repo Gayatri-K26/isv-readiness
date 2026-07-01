@@ -33,9 +33,7 @@ class CrossDomainOnboardingTests(unittest.TestCase):
             )
             calls: list[tuple[tuple[str, ...], Path, int]] = []
 
-            def runner(
-                command: Sequence[str], cwd: Path, timeout_seconds: int
-            ) -> subprocess.CompletedProcess[str]:
+            def runner(command: Sequence[str], cwd: Path, timeout_seconds: int) -> subprocess.CompletedProcess[str]:
                 calls.append((tuple(command), cwd, timeout_seconds))
                 config_dir = plan.provider_dir / "config"
                 scripts_dir = plan.provider_dir / "scripts" / "k8s"
@@ -72,7 +70,7 @@ class CrossDomainOnboardingTests(unittest.TestCase):
             executable.write_text("", encoding="utf-8")
 
             plan = build_provider_onboarding_plan(validation_root, "acme", ["bare-metal"])
-            self.assertEqual(plan.scaffold_command[0], str(executable))
+            self.assertEqual(plan.scaffold_command[0], str(executable.resolve()))
             self.assertEqual(plan.domains, ("bare_metal",))
 
             with self.assertRaisesRegex(OnboardingError, "Unsupported onboarding domains"):

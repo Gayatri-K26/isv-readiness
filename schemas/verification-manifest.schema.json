@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nvidia.com/schemas/isv-readiness/verification-manifest-0.1.0.schema.json",
+  "title": "ISV Readiness Candidate Verification Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "verification_mode",
+    "gap_id",
+    "domain",
+    "target",
+    "patch_sha256",
+    "candidate_sha256",
+    "target_before_sha256",
+    "selected_status_before",
+    "selected_status_after",
+    "regressions",
+    "success"
+  ],
+  "properties": {
+    "schema_version": {"const": "0.1.0"},
+    "verification_mode": {"const": "isolated_static_rescan"},
+    "gap_id": {"type": "string", "pattern": "^gap_[0-9a-f]{12}$"},
+    "domain": {"type": "string", "minLength": 1},
+    "target": {"type": "string", "pattern": "^scripts/"},
+    "patch_sha256": {"$ref": "#/$defs/hash"},
+    "candidate_sha256": {"$ref": "#/$defs/hash"},
+    "target_before_sha256": {
+      "oneOf": [
+        {"$ref": "#/$defs/hash"},
+        {"type": "null"}
+      ]
+    },
+    "selected_status_before": {
+      "enum": ["fail", "not_implemented", "error"]
+    },
+    "selected_status_after": {
+      "type": ["string", "null"]
+    },
+    "regressions": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "success": {"type": "boolean"}
+  },
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

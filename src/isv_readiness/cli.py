@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from isv_readiness.fixes import FixGuardrailError, build_fix_proposal
+from isv_readiness.loop import LoopStateError, advance_loop, load_loop_state
 from isv_readiness.onboarding import (
     OnboardingError,
     build_provider_onboarding_plan,
@@ -22,6 +24,12 @@ from isv_readiness.scan.report import load_report, render_report
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
 from isv_readiness.solution_profile import SolutionProfile, SolutionProfileError, load_solution_profile
 from isv_readiness.validation_adapter import IsvctlAdapter, ValidationAdapterError
+from isv_readiness.verification import (
+    VerificationError,
+    apply_verified_candidate,
+    load_verification_manifest,
+    verify_fix_candidate,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -45,10 +53,14 @@ def _build_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--out", type=Path, default=Path("gaps.json"))
     scan_parser.add_argument("--junit", type=Path, default=None, help="Dynamic scan: JUnit XML from isvctl test run")
     scan_parser.add_argument("--log", type=Path, default=None, help="Dynamic scan: captured isvctl log")
-    scan_parser.add_argument("--setup-json", type=Path, default=None, help="K8s dynamic scan: captured setup inventory JSON")
+    scan_parser.add_argument(
+        "--setup-json", type=Path, default=None, help="K8s dynamic scan: captured setup inventory JSON"
+    )
     scan_parser.add_argument("--scope", type=Path, default=None, help="K8s dynamic scan: ISV ownership/scope JSON")
     scan_parser.add_argument("--artifacts-dir", type=Path, default=None, help="Directory for --run JUnit/log artifacts")
-    scan_parser.add_argument("--run", action="store_true", help="Execute one domain with isvctl and parse its artifacts")
+    scan_parser.add_argument(
+        "--run", action="store_true", help="Execute one domain with isvctl and parse its artifacts"
+    )
     scan_parser.add_argument("--lab", default=None, help="Reserved for later: named lab/run environment")
     scan_parser.set_defaults(handler=_scan)
 
@@ -64,22 +76,62 @@ def _build_parser() -> argparse.ArgumentParser:
 
     plan_parser = subparsers.add_parser("plan", help="Export the merged, normalized isvctl validation plan")
     plan_parser.add_argument("-f", "--config", type=Path, action="append", required=True)
-    plan_parser.add_argument("--validation-root", type=Path, default=None, help="Checkout root; omit for isvctl on PATH")
+    plan_parser.add_argument(
+        "--validation-root", type=Path, default=None, help="Checkout root; omit for isvctl on PATH"
+    )
     plan_parser.add_argument("--out", type=Path, default=Path("validation-plan.json"))
     plan_parser.set_defaults(handler=_plan)
 
-    fix_parser = subparsers.add_parser("fix", help="Reserved for v0.3 agent fixes")
-    fix_parser.set_defaults(handler=_reserved("gapctl fix ships in v0.3."))
+    fix_parser = subparsers.add_parser("fix", help="Validate a candidate provider-script edit and emit a patch")
+    fix_parser.add_argument("--in", dest="input_path", type=Path, required=True, help="Profile-enriched gaps.json")
+    fix_parser.add_argument("--gap-id", required=True, help="One deterministic gap ID to propose a fix for")
+    fix_parser.add_argument("--provider-repo", type=Path, required=True, help="Approved provider repository root")
+    fix_parser.add_argument("--candidate", type=Path, required=True, help="Candidate replacement file")
+    fix_parser.add_argument("--out", type=Path, required=True, help="Unified diff output path")
+    fix_parser.set_defaults(handler=_fix)
 
-    loop_parser = subparsers.add_parser("loop", help="Reserved for v0.4 until-green loops")
-    loop_parser.set_defaults(handler=_reserved("gapctl loop ships in v0.4."))
+    verify_parser = subparsers.add_parser("verify", help="Verify one candidate in an isolated static rescan")
+    verify_parser.add_argument("--in", dest="input_path", type=Path, required=True, help="Profile-enriched gaps.json")
+    verify_parser.add_argument("--gap-id", required=True, help="One deterministic static gap ID")
+    verify_parser.add_argument("--provider-repo", type=Path, required=True, help="Approved provider repository root")
+    verify_parser.add_argument("--candidate", type=Path, required=True, help="Candidate replacement file")
+    verify_parser.add_argument("--validation-root", type=Path, default=None, help="ai-cloud-validation checkout root")
+    verify_parser.add_argument("--out", type=Path, required=True, help="Verification manifest JSON")
+    verify_parser.set_defaults(handler=_verify)
+
+    apply_parser = subparsers.add_parser("apply", help="Apply a successfully verified candidate atomically")
+    apply_parser.add_argument("--in", dest="input_path", type=Path, required=True, help="Profile-enriched gaps.json")
+    apply_parser.add_argument("--gap-id", required=True, help="Verified deterministic gap ID")
+    apply_parser.add_argument("--provider-repo", type=Path, required=True, help="Approved provider repository root")
+    apply_parser.add_argument("--candidate", type=Path, required=True, help="Verified candidate replacement file")
+    apply_parser.add_argument("--verification", type=Path, required=True, help="Successful verification manifest")
+    apply_parser.add_argument("--backup-dir", type=Path, required=True, help="Backup directory for an existing target")
+    apply_parser.add_argument("--out", type=Path, required=True, help="Application result JSON")
+    apply_parser.add_argument("--apply", action="store_true", help="Required explicit authorization to change source")
+    apply_parser.set_defaults(handler=_apply)
+
+    loop_parser = subparsers.add_parser("loop", help="Advance deterministic one-gap-at-a-time loop state")
+    loop_parser.add_argument("--in", dest="input_path", type=Path, required=True, help="Latest gaps.json")
+    loop_parser.add_argument("--domain", required=True, help="One domain controlled by this loop")
+    loop_parser.add_argument("--state", type=Path, required=True, help="Persistent loop state JSON")
+    loop_parser.add_argument("--attempted-gap", default=None, help="Previously selected gap just attempted")
+    loop_parser.add_argument("--max-attempts", type=int, default=3, help="Retry budget per gap")
+    loop_parser.set_defaults(handler=_loop)
 
     onboard_parser = subparsers.add_parser("onboard", help="Prepare a provider for readiness scanning")
-    onboard_parser.add_argument("--domain", default=None, help="One domain; --domain k8s keeps the lightweight K8s flow")
-    onboard_parser.add_argument("--domains", default=None, help="Comma-separated domains for the full provider scaffold")
-    onboard_parser.add_argument("--profile", type=Path, default=None, help="Derive domains and ISV inputs from a profile")
+    onboard_parser.add_argument(
+        "--domain", default=None, help="One domain; --domain k8s keeps the lightweight K8s flow"
+    )
+    onboard_parser.add_argument(
+        "--domains", default=None, help="Comma-separated domains for the full provider scaffold"
+    )
+    onboard_parser.add_argument(
+        "--profile", type=Path, default=None, help="Derive domains and ISV inputs from a profile"
+    )
     onboard_parser.add_argument("--provider-name", required=True, help="Provider name, for example dsx-air")
-    onboard_parser.add_argument("--validation-root", type=Path, required=True, help="Path to ai-cloud-validation checkout")
+    onboard_parser.add_argument(
+        "--validation-root", type=Path, required=True, help="Path to ai-cloud-validation checkout"
+    )
     onboard_parser.add_argument("--write", action="store_true", help="Create the wrapper/scripts/scope template")
     onboard_parser.add_argument("--overwrite", action="store_true", help="Overwrite existing generated files")
     onboard_parser.set_defaults(handler=_onboard)
@@ -92,7 +144,10 @@ def _scan(args: argparse.Namespace) -> int:
         return 2
     domains = _scan_domains(args.domains, profile)
     if not domains:
-        print("--domains must include at least one domain or --profile must declare a covered/test domain", file=sys.stderr)
+        print(
+            "--domains must include at least one domain or --profile must declare a covered/test domain",
+            file=sys.stderr,
+        )
         return 2
     report = scan_provider(
         ScanOptions(
@@ -296,6 +351,97 @@ def _report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _fix(args: argparse.Namespace) -> int:
+    try:
+        proposal = build_fix_proposal(
+            load_report(args.input_path),
+            gap_id=args.gap_id,
+            provider_repo=args.provider_repo,
+            candidate_path=args.candidate,
+        )
+        args.out.write_text(proposal.patch, encoding="utf-8")
+    except (OSError, json.JSONDecodeError, FixGuardrailError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(f"Wrote guarded patch proposal: {args.out}")
+    print(f"Gap: {proposal.gap_id}")
+    print(f"Target: {proposal.target}")
+    print(f"Patch SHA-256: {proposal.patch_sha256}")
+    print("Source files were not modified; review and apply the patch separately.")
+    return 0
+
+
+def _verify(args: argparse.Namespace) -> int:
+    try:
+        manifest = verify_fix_candidate(
+            load_report(args.input_path),
+            gap_id=args.gap_id,
+            provider_repo=args.provider_repo,
+            candidate_path=args.candidate,
+            validation_root=args.validation_root,
+        )
+        args.out.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except (OSError, json.JSONDecodeError, FixGuardrailError, VerificationError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(f"Verification success: {'yes' if manifest.success else 'no'}")
+    print(f"Gap: {manifest.gap_id}")
+    print(f"Target: {manifest.target}")
+    print(f"Selected status: {manifest.selected_status_before} -> {manifest.selected_status_after or 'missing'}")
+    print(f"Regressions: {len(manifest.regressions)}")
+    print(f"Manifest: {args.out}")
+    return 0 if manifest.success else 1
+
+
+def _apply(args: argparse.Namespace) -> int:
+    if not args.apply:
+        print("Refusing to change source without the explicit --apply flag.", file=sys.stderr)
+        return 2
+    try:
+        result = apply_verified_candidate(
+            load_report(args.input_path),
+            gap_id=args.gap_id,
+            provider_repo=args.provider_repo,
+            candidate_path=args.candidate,
+            manifest=load_verification_manifest(args.verification),
+            backup_dir=args.backup_dir,
+        )
+        args.out.write_text(json.dumps(result.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except (OSError, json.JSONDecodeError, FixGuardrailError, VerificationError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(f"Applied verified candidate: {result.target}")
+    print(f"Backup: {result.backup_path or 'not required (new file)'}")
+    print(f"Result: {args.out}")
+    print("Run a fresh gapctl scan and record the attempt in gapctl loop.")
+    return 0
+
+
+def _loop(args: argparse.Namespace) -> int:
+    try:
+        report = load_report(args.input_path)
+        previous = load_loop_state(args.state) if args.state.exists() else None
+        state = advance_loop(
+            report,
+            domain=args.domain,
+            previous=previous,
+            attempted_gap_id=args.attempted_gap,
+            max_attempts=args.max_attempts,
+        )
+        args.state.write_text(json.dumps(state.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except (OSError, json.JSONDecodeError, LoopStateError, TypeError, KeyError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(f"Loop status: {state.status}")
+    print(f"Domain: {state.domain}")
+    print(f"Unresolved rows: {state.unresolved_count}")
+    print(f"Selected gap: {state.selected_gap_id or 'none'}")
+    print(f"Route: {state.route or 'none'}")
+    print(f"Reason: {state.reason}")
+    print(f"State: {args.state}")
+    return 1 if state.status == "blocked" else 0
+
+
 def _profile(args: argparse.Namespace) -> int:
     profile = _load_profile_arg(args.input_path)
     if profile is None:
@@ -350,9 +496,7 @@ def _scan_domains(raw_domains: str | None, profile: SolutionProfile | None) -> l
     if profile is None:
         return []
     return [
-        domain.domain
-        for domain in profile.domains
-        if domain.coverage == "covered" and domain.validation_mode == "test"
+        domain.domain for domain in profile.domains if domain.coverage == "covered" and domain.validation_mode == "test"
     ]
 
 
@@ -364,11 +508,3 @@ def _onboarding_domains(
     if single_domain:
         return [single_domain]
     return _scan_domains(raw_domains, profile)
-
-
-def _reserved(message: str):
-    def handler(_args: argparse.Namespace) -> int:
-        print(message, file=sys.stderr)
-        return 2
-
-    return handler

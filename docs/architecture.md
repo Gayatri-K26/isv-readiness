@@ -44,18 +44,21 @@ flowchart TD
     Classifier --> Context[Minimal context pack]
     Context --> Generator[Swappable frontier code generator]
     Generator --> Guardrail[Path, secret, schema, and diff guardrails]
-    Guardrail --> Patch[Patch or pull request]
-    Patch --> Human[Human review and merge]
-    Human --> Run
+    Guardrail --> Patch[Patch proposal]
+    Patch --> Verify[Isolated targeted verification]
+    Verify --> Human[Human review]
+    Human --> Apply[Explicit hash-bound application]
+    Apply --> Run
 
     Actions --> Ticket[Product-gap ticket draft]
     Actions --> Evidence[Evidence request]
     Actions --> Skip[Documented skip or scope decision]
 ```
 
-Solid contracts through action routing are implemented. Code generation,
-guarded patch creation, ticket submission, and the until-green controller are
-the next implementation phase.
+Solid contracts through guarded patch proposal, isolated static verification,
+explicit hash-bound application, and deterministic loop-state advancement are
+implemented. Frontier-model candidate generation, live/dynamic verification,
+rollback/PR submission, and an autonomous runner remain future work.
 
 ## Journey Stages
 
@@ -159,10 +162,12 @@ permission when ownership or scope does not allow the agent to patch.
 | `skip_with_rationale` | Capability is approved out of scope or intentionally excluded | No |
 | `request_scope_decision` | Ownership, product coverage, or validation mode is unresolved | No |
 
-## Future Fix Node
+## Guarded Fix Node
 
-Only code generation needs a frontier model. The surrounding loop remains
-deterministic.
+Only candidate generation needs a frontier model. The surrounding gate and loop
+remain deterministic. The current generator seam is a candidate replacement
+file supplied to `gapctl fix`; this allows human-authored, model-authored, or
+tool-authored candidates to pass through the same policy.
 
 The generator interface should accept a minimal context pack:
 
@@ -175,12 +180,25 @@ The generator interface should accept a minimal context pack:
 - one relevant reference implementation when license and policy permit
 - previous attempt and verifier feedback
 
-It returns a proposed patch and a structured explanation. The model never
-chooses the next gap, retry budget, allowed path, or merge action.
+The guardrail emits a unified patch without modifying source. The verifier
+copies the provider into a temporary workspace, installs the candidate there,
+rescans the selected static domain, and records selected-row status and
+regressions in a hash-bound manifest. Application requires an explicit flag,
+rebuilds the proposal from current inputs, compares candidate/patch/target
+hashes, creates a backup, and atomically replaces the provider script. A future
+model adapter can also return a structured explanation, but it never chooses
+the next gap, retry budget, allowed path, or merge action.
 
 ## Deterministic Loop
 
-The future controller state machine is:
+The implemented controller consumes successive `gaps.json` reports and records
+explicit attempts in `loop-state.json`. It selects one row, blocks before unsafe
+routes, enforces a per-gap retry budget, and reports `ready`, `blocked`, or
+`complete`. It deliberately does not execute remediation strings or apply
+patches. A future autonomous runner may orchestrate these existing state
+transitions around human review and targeted verification.
+
+The complete target state machine is:
 
 ```text
 SCAN
@@ -216,7 +234,9 @@ Suggested stop conditions:
 - Validate generated JSON output against the expected step schema before a
   dynamic run.
 - Run the narrow targeted validation before the full domain.
-- Produce a patch or pull request; never auto-merge.
+- Verify candidates in an isolated copy before source application.
+- Require explicit application authorization and bind it to verified hashes.
+- Back up existing targets and apply atomically; never auto-merge.
 - Keep credentials, private source, and execution inside the ISV environment.
 
 ## BCM and Mission Control Baselines
@@ -254,8 +274,13 @@ solution supplies them.
 | Generic single-domain JUnit ingestion | Implemented |
 | K8s setup and layer-aware dynamic classification | Implemented |
 | Profile-aware action routing | Implemented |
-| Frontier generator interface and implementation | Next |
-| Patch guardrail and targeted verifier | Next |
-| Deterministic until-green controller | Next |
+| Candidate-file generator seam | Implemented |
+| Provider-script patch guardrail | Implemented |
+| Isolated static verifier and manifest | Implemented |
+| Explicit hash-bound atomic application | Implemented |
+| Persistent deterministic loop-state controller | Implemented |
+| Frontier generator integration | Next |
+| Live/dynamic targeted verifier and rollback command | Next |
+| Autonomous until-green runner | Next |
 | MCP enrichment adapters | Later, optional |
 | Publication workflow | Deferred |

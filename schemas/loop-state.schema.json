@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nvidia.com/schemas/isv-readiness/loop-state-0.1.0.schema.json",
+  "title": "ISV Readiness Deterministic Loop State",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "domain",
+    "status",
+    "selected_gap_id",
+    "route",
+    "reason",
+    "report_fingerprint",
+    "unresolved_count",
+    "attempts_by_gap",
+    "history"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "0.1.0"
+    },
+    "domain": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": ["ready", "blocked", "complete"]
+    },
+    "selected_gap_id": {
+      "type": ["string", "null"]
+    },
+    "route": {
+      "type": ["string", "null"]
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "report_fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "unresolved_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "attempts_by_gap": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "history": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/$defs/history_entry"
+      }
+    }
+  },
+  "$defs": {
+    "history_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "report_fingerprint",
+        "status",
+        "selected_gap_id",
+        "route",
+        "reason"
+      ],
+      "properties": {
+        "report_fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "status": {
+          "enum": ["ready", "blocked", "complete"]
+        },
+        "selected_gap_id": {
+          "type": ["string", "null"]
+        },
+        "route": {
+          "type": ["string", "null"]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}
