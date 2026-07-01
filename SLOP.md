@@ -103,3 +103,46 @@ private Python APIs or one revision of the upstream YAML layout.
   package with three top-level projects. This packaging/tooling issue is kept
   visible for the CLI integration step; no dependency metadata was changed as
   part of the adapter commit.
+
+## Step 3 - Scanner Contract-Drift Integration
+
+### Objective
+
+Make static coverage independent of a single historical validation YAML shape
+and prove the scanner sees the current upstream Kubernetes suite.
+
+### Decisions
+
+1. Build scanner checks from the normalized validation plan instead of parsing
+   only group-level `step` plus mapping-style `checks` entries.
+2. Mirror the supported `isvctl` merge behavior for offline static scans:
+   mappings merge recursively and later lists replace earlier lists. The CLI
+   adapter remains the authoritative merged-config boundary for execution.
+3. Represent validations with no lifecycle-step binding as `<validation>`
+   coverage rows. They are declared correctly; their pass/fail outcome belongs
+   to the dynamic `ai-cloud-validation` run, not provider-script discovery.
+4. Emit malformed validation contracts as explicit `error` rows with
+   `semantic_mismatch` classification instead of dropping them.
+5. Store category, phase, provider-step requirement, and execution-adapter
+   metadata in row enrichment without copying validation parameters or secrets.
+6. Preserve existing gap IDs. Only repeated instances with the same class and
+   step receive an additional deterministic identity component.
+
+### Changed Files
+
+- `src/isv_readiness/scan/scanner.py`
+- `tests/test_scan.py`
+- `tests/fixtures/ai-cloud-validation/isvctl/configs/suites/k8s.yaml`
+- `SLOP.md`
+
+### Verification
+
+- Focused scanner tests cover grouped maps, repeated lists, grouped lists,
+  direct maps, ReFrame routing, validation-only rows, malformed contracts, and
+  duplicate-instance IDs.
+- A static scan of the current upstream K3s provider now emits 44 unique rows:
+  42 declared validations and 2 lifecycle rows, with no contract errors. The
+  previous scanner emitted only the 2 lifecycle rows.
+- `PYTHONPATH=src python3 -m unittest discover -s tests -v`: 23 tests passed.
+- `python3 -m compileall -q src tests`: passed.
+- `git diff --check`: passed.

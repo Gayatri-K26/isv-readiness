@@ -102,6 +102,24 @@ class StaticScanTests(unittest.TestCase):
         teardown = by_step[("teardown", "StepOutputSchema")]
         self.assertEqual(teardown.status, "pass")
 
+        node_count = by_step[("<validation>", "K8sNodeCountCheck")]
+        self.assertEqual(node_count.status, "pass")
+        self.assertEqual(node_count.enrichment["validation_category"], "kubernetes")
+        self.assertFalse(node_count.enrichment["requires_provider_step"])
+
+        cpu_pool = by_step[("create_test_node_pool", "K8sNodePoolCheck")]
+        gpu_pool = by_step[("create_test_gpu_node_pool", "K8sNodePoolCheck")]
+        self.assertEqual(cpu_pool.status, "not_implemented")
+        self.assertEqual(gpu_pool.status, "not_implemented")
+
+        storage = by_step[("inspect_storage", "K8sCsiStorageTypesCheck")]
+        self.assertEqual(storage.status, "not_implemented")
+        self.assertEqual(storage.enrichment["validation_phase"], "test")
+
+        reframe = by_step[("<validation>", "CPUInfoCheck")]
+        self.assertEqual(reframe.enrichment["execution_adapter"], "reframe")
+        self.assertEqual(len(report.rows), len({row.id for row in report.rows}))
+
     def test_k8s_scan_reports_missing_provider_wrapper_as_onboarding_gap(self) -> None:
         provider = FIXTURES / "ai-cloud-validation" / "isvctl" / "configs" / "providers" / "new-k8s"
         report = scan_provider(
@@ -130,11 +148,73 @@ class StaticScanTests(unittest.TestCase):
             )
         )
 
-        row = report.rows[0]
+        row = next(row for row in report.rows if row.gap_type == "onboarding")
         self.assertEqual(row.status, "not_implemented")
         self.assertEqual(row.gap_type, "onboarding")
         self.assertTrue(row.remediation.auto_fixable)
         self.assertIn("my-isv template", row.evidence.message)
+
+    def test_malformed_validation_contract_emits_error_row(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            provider = Path(tempdir) / "provider"
+            config_dir = provider / "config"
+            config_dir.mkdir(parents=True)
+            (config_dir / "vm.yaml").write_text(
+                "version: '1.0'\ntests:\n  platform: vm\n  validations: []\n",
+                encoding="utf-8",
+            )
+
+            report = scan_provider(
+                ScanOptions(
+                    provider_repo=provider,
+                    domains=["vm"],
+                    validation_root=Path(tempdir) / "empty-validation-root",
+                )
+            )
+
+        self.assertEqual(len(report.rows), 1)
+        row = report.rows[0]
+        self.assertEqual(row.step_name, "<validation>")
+        self.assertEqual(row.validation_class, "<invalid>")
+        self.assertEqual(row.status, "error")
+        self.assertEqual(row.gap_type, "semantic_mismatch")
+        self.assertIn("tests.validations", row.evidence.message)
+
+    def test_repeated_validation_instances_get_unique_gap_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            provider = Path(tempdir) / "provider"
+            config_dir = provider / "config"
+            config_dir.mkdir(parents=True)
+            (config_dir / "vm.yaml").write_text(
+                """version: '1.0'
+tests:
+  platform: vm
+  validations:
+    repeated:
+      - RepeatedCheck:
+          step: inspect
+          variant: first
+      - RepeatedCheck:
+          step: inspect
+          variant: second
+""",
+                encoding="utf-8",
+            )
+
+            report = scan_provider(
+                ScanOptions(
+                    provider_repo=provider,
+                    domains=["vm"],
+                    validation_root=Path(tempdir) / "empty-validation-root",
+                )
+            )
+
+        self.assertEqual(len(report.rows), 2)
+        self.assertEqual(len({row.id for row in report.rows}), 2)
+        self.assertEqual(
+            {row.enrichment["validation_instance"] for row in report.rows},
+            {"repeated:1", "repeated:2"},
+        )
 
     def test_k8s_run_writes_onboarding_report_when_config_missing(self) -> None:
         from isv_readiness.cli import main

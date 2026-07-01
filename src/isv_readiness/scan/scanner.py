@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import ast
+import copy
 import hashlib
 import json
 import re
 import shlex
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +25,7 @@ from isv_readiness.scan.models import (
     Status,
 )
 from isv_readiness.scan.schema_registry import SchemaRegistry
+from isv_readiness.validation_adapter import normalize_catalog, normalize_validation_plan
 
 STUB_PATTERNS = (
     re.compile(r"\bnot implemented\b", re.IGNORECASE),
@@ -33,6 +36,8 @@ STUB_PATTERNS = (
 
 K8S_DOMAINS = {"k8s", "kubernetes"}
 K8S_COMMAND_KEYS = {"k8s", "kubernetes"}
+VALIDATION_ONLY_STEP = "<validation>"
+VALIDATION_CONFIG_STEP = "<validation-config>"
 
 
 @dataclass(frozen=True)
@@ -58,6 +63,10 @@ class CheckRef:
     validation_class: str
     requirement_id: str | None = None
     milestone: str | None = None
+    requires_step: bool = True
+    valid: bool = True
+    error: str | None = None
+    enrichment: dict[str, Any] | None = None
 
 
 def scan_provider(options: ScanOptions) -> GapReport:
@@ -100,16 +109,24 @@ def scan_provider(options: ScanOptions) -> GapReport:
         steps = _steps_for_domain(provider_config, domain, config_path)
         aws_steps = _aws_steps_for_domain(validation_root, domain)
 
-        step_names_with_checks = {check.step_name for check in checks}
+        step_names_with_checks = {check.step_name for check in checks if check.requires_step}
         for step_name in sorted(set(steps) - step_names_with_checks):
             checks.append(CheckRef(step_name=step_name, validation_class="StepOutputSchema"))
 
         for step_name in sorted(set(aws_steps) - set(steps) - step_names_with_checks):
             checks.append(CheckRef(step_name=step_name, validation_class="AwsReferenceStep"))
 
-        for check in sorted(checks, key=lambda item: (item.step_name, item.validation_class)):
+        for check in sorted(
+            checks,
+            key=lambda item: (
+                item.step_name,
+                item.validation_class,
+                (item.enrichment or {}).get("validation_instance", ""),
+            ),
+        ):
             step = steps.get(check.step_name)
-            aws_reference = _relative_or_str(aws_steps.get(check.step_name).script_path, provider_repo) if aws_steps.get(check.step_name) else None
+            aws_step = aws_steps.get(check.step_name)
+            aws_reference = _relative_or_str(aws_step.script_path, provider_repo) if aws_step else None
             rows.append(
                 _scan_check(
                     provider_repo=provider_repo,
@@ -143,6 +160,56 @@ def _scan_check(
     aws_reference: str | None,
 ) -> GapRow:
     rerun_config = config_path
+    if not check.valid:
+        return _row(
+            provider_repo=provider_repo,
+            domain=domain,
+            step_name=check.step_name,
+            validation_class=check.validation_class,
+            requirement_id=check.requirement_id,
+            milestone=check.milestone,
+            status="error",
+            stage="coverage",
+            gap_type="semantic_mismatch",
+            message=f"Validation configuration is invalid: {check.error or 'unknown contract error'}",
+            config_path=config_path,
+            script_path=None,
+            target=_relative_or_str(config_path, provider_repo),
+            aws_reference=aws_reference,
+            schema_errors=[],
+            missing_json_fields=[],
+            auto_fixable=False,
+            rerun_config=rerun_config,
+            enrichment=check.enrichment,
+        )
+
+    if not check.requires_step:
+        phase = (check.enrichment or {}).get("validation_phase", "test")
+        return _row(
+            provider_repo=provider_repo,
+            domain=domain,
+            step_name=check.step_name,
+            validation_class=check.validation_class,
+            requirement_id=check.requirement_id,
+            milestone=check.milestone,
+            status="pass",
+            stage="coverage",
+            gap_type="provider_script",
+            message=(
+                f"Validation is declared for phase '{phase}' without a provider step binding; "
+                "its runtime outcome is deferred to ai-cloud-validation."
+            ),
+            config_path=config_path,
+            script_path=None,
+            target=None,
+            aws_reference=aws_reference,
+            schema_errors=[],
+            missing_json_fields=[],
+            auto_fixable=False,
+            rerun_config=rerun_config,
+            enrichment=check.enrichment,
+        )
+
     if step is None:
         return _row(
             provider_repo=provider_repo,
@@ -163,6 +230,7 @@ def _scan_check(
             missing_json_fields=[],
             auto_fixable=False,
             rerun_config=rerun_config,
+            enrichment=check.enrichment,
         )
 
     if step.skipped:
@@ -185,6 +253,7 @@ def _scan_check(
             missing_json_fields=[],
             auto_fixable=False,
             rerun_config=rerun_config,
+            enrichment=check.enrichment,
         )
 
     if _is_template_k8s_command(provider_repo, step):
@@ -207,6 +276,7 @@ def _scan_check(
             missing_json_fields=[],
             auto_fixable=True,
             rerun_config=rerun_config,
+            enrichment=check.enrichment,
         )
 
     if step.script_path is None:
@@ -229,6 +299,7 @@ def _scan_check(
             missing_json_fields=[],
             auto_fixable=False,
             rerun_config=rerun_config,
+            enrichment=check.enrichment,
         )
 
     if not step.script_path.exists():
@@ -251,6 +322,7 @@ def _scan_check(
             missing_json_fields=[],
             auto_fixable=_is_script_target(provider_repo, step.script_path),
             rerun_config=rerun_config,
+            enrichment=check.enrichment,
         )
 
     text = step.script_path.read_text(encoding="utf-8")
@@ -275,6 +347,7 @@ def _scan_check(
             missing_json_fields=[],
             auto_fixable=_is_script_target(provider_repo, step.script_path),
             rerun_config=rerun_config,
+            enrichment=check.enrichment,
         )
 
     output_samples = _static_json_outputs(step.script_path, text)
@@ -306,6 +379,7 @@ def _scan_check(
                 missing_json_fields=sorted(set(all_missing)),
                 auto_fixable=_is_script_target(provider_repo, step.script_path),
                 rerun_config=rerun_config,
+                enrichment=check.enrichment,
             )
 
         return _row(
@@ -327,6 +401,7 @@ def _scan_check(
             missing_json_fields=[],
             auto_fixable=False,
             rerun_config=rerun_config,
+            enrichment=check.enrichment,
         )
 
     return _row(
@@ -348,6 +423,7 @@ def _scan_check(
         missing_json_fields=[],
         auto_fixable=False,
         rerun_config=rerun_config,
+        enrichment=check.enrichment,
     )
 
 
@@ -371,10 +447,18 @@ def _row(
     missing_json_fields: list[str],
     auto_fixable: bool,
     rerun_config: Path | None,
+    enrichment: dict[str, Any] | None = None,
 ) -> GapRow:
+    validation_instance = str((enrichment or {}).get("validation_instance", ""))
     spine = "|".join([domain, step_name, validation_class or "", requirement_id or "", milestone or ""])
+    if validation_instance:
+        spine = f"{spine}|{validation_instance}"
     gap_id = "gap_" + hashlib.sha1(spine.encode("utf-8")).hexdigest()[:12]
-    rerun_command = f"isvctl test run -f {_relative_or_str(rerun_config, provider_repo)}" if rerun_config else "isvctl test run -f <provider-config>"
+    rerun_command = (
+        f"isvctl test run -f {_relative_or_str(rerun_config, provider_repo)}"
+        if rerun_config
+        else "isvctl test run -f <provider-config>"
+    )
     return GapRow(
         id=gap_id,
         domain=domain,
@@ -401,7 +485,7 @@ def _row(
             rerun_command=rerun_command,
             aws_reference=aws_reference,
         ),
-        enrichment={},
+        enrichment=enrichment or {},
     )
 
 
@@ -528,22 +612,76 @@ def _load_imported_suite_docs(
 
 
 def _checks_for_domain(suite_docs: list[dict[str, Any]], provider_config: dict[str, Any]) -> list[CheckRef]:
+    merged_config: dict[str, Any] = {}
+    for document in [*suite_docs, provider_config]:
+        merged_config = _deep_merge_config(merged_config, document)
+
+    plan = normalize_validation_plan(
+        merged_config,
+        normalize_catalog({"entries": []}),
+    )
     checks: list[CheckRef] = []
-    for doc in [*suite_docs, provider_config]:
-        validations = (((doc.get("tests") or {}).get("validations")) or {})
-        if not isinstance(validations, dict):
+    for validation in plan.validations:
+        requires_step = validation.step is not None
+        enrichment: dict[str, Any] = {
+            "validation_category": validation.category,
+            "validation_phase": validation.phase,
+            "requires_provider_step": requires_step,
+        }
+        if validation.execution_adapter is not None:
+            enrichment["execution_adapter"] = validation.execution_adapter
+        checks.append(
+            CheckRef(
+                step_name=validation.step or VALIDATION_ONLY_STEP,
+                validation_class=validation.name,
+                requires_step=requires_step,
+                valid=validation.valid,
+                error=validation.error,
+                enrichment=enrichment,
+            )
+        )
+
+    for warning in plan.warnings:
+        checks.append(
+            CheckRef(
+                step_name=VALIDATION_CONFIG_STEP,
+                validation_class="ValidationConfigContract",
+                requires_step=False,
+                valid=False,
+                error=warning,
+                enrichment={
+                    "validation_category": "<contract>",
+                    "validation_phase": "configuration",
+                    "requires_provider_step": False,
+                },
+            )
+        )
+
+    identities = Counter((check.step_name, check.validation_class) for check in checks)
+    occurrences: Counter[tuple[str, str]] = Counter()
+    result: list[CheckRef] = []
+    for check in checks:
+        identity = (check.step_name, check.validation_class)
+        if identities[identity] == 1:
+            result.append(check)
             continue
-        for validation in validations.values():
-            if not isinstance(validation, dict):
-                continue
-            step_name = validation.get("step")
-            check_map = validation.get("checks") or {}
-            if not isinstance(step_name, str) or not isinstance(check_map, dict):
-                continue
-            for validation_class in check_map:
-                if isinstance(validation_class, str):
-                    checks.append(CheckRef(step_name=step_name, validation_class=validation_class))
-    return checks
+        occurrences[identity] += 1
+        enrichment = dict(check.enrichment or {})
+        category = enrichment.get("validation_category", "validation")
+        enrichment["validation_instance"] = f"{category}:{occurrences[identity]}"
+        result.append(replace(check, enrichment=enrichment))
+    return result
+
+
+def _deep_merge_config(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Mirror isvctl's mapping merge and list-replacement behavior for static scans."""
+    result = copy.deepcopy(base)
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge_config(result[key], value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
 
 
 def _steps_for_domain(provider_config: dict[str, Any], domain: str, config_path: Path) -> dict[str, StepRef]:
