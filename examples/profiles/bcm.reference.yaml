@@ -1,0 +1,310 @@
+schema_version: "0.1.0"
+
+solution:
+  id: bcm-reference
+  name: NVIDIA Base Command Manager reference stack
+  vendor: NVIDIA
+  version: "11.x - confirm exact build at intake"
+  profile_status: draft
+  target_environment: Bare-metal GPU cluster with Kubernetes and Slurm
+
+journey:
+  stage: qualify
+  status: in_progress
+
+actors:
+  - id: bcm-isv
+    name: Base Command Manager solution team acting as the ISV
+    kind: isv
+  - id: deployment-partner
+    name: NCP or integration partner supplying external cloud services
+    kind: partner
+  - id: validation-lab
+    name: AI Cloud Ready validation lab
+    kind: lab
+
+components:
+  - id: bcm-11
+    name: NVIDIA Base Command Manager
+    version: "11.x - confirm exact build"
+    kind: product
+    supplier_actor_id: bcm-isv
+    nsrg_layers: [2, 3]
+    source_refs: [bcm-docs, bcm-11-release-notes]
+
+  - id: bcm-kubernetes
+    name: BCM Kubernetes integration
+    version: "Bundled with selected BCM build"
+    kind: integration
+    supplier_actor_id: bcm-isv
+    nsrg_layers: [3]
+    depends_on: [bcm-11]
+    source_refs: [bcm-docs, bcm-11-release-notes]
+
+  - id: bcm-slurm
+    name: BCM Slurm integration
+    version: "Bundled with selected BCM build"
+    kind: integration
+    supplier_actor_id: bcm-isv
+    nsrg_layers: [3, 4]
+    depends_on: [bcm-11]
+    source_refs: [bcm-docs, bcm-11-release-notes]
+
+  - id: external-network
+    name: External tenant networking and SDN stack
+    version: TBD during qualification
+    kind: external_dependency
+    supplier_actor_id: deployment-partner
+    nsrg_layers: [1]
+
+  - id: external-storage
+    name: External block, file, and object storage stack
+    version: TBD during qualification
+    kind: external_dependency
+    supplier_actor_id: deployment-partner
+    nsrg_layers: [2]
+
+  - id: external-identity
+    name: External tenant identity and access management stack
+    version: TBD during qualification
+    kind: external_dependency
+    supplier_actor_id: deployment-partner
+    nsrg_layers: [2, 3]
+
+  - id: external-registry
+    name: External tenant image registry
+    version: TBD during qualification
+    kind: external_dependency
+    supplier_actor_id: deployment-partner
+    nsrg_layers: [2, 3]
+
+domains:
+  - domain: bare_metal
+    name: Bare-metal provisioning and host lifecycle
+    required_for_full_validation: true
+    coverage: covered
+    validation_mode: test
+    capability_owner_actor_id: bcm-isv
+    provider_adapter_owner_actor_id: bcm-isv
+    component_ids: [bcm-11]
+    provider_configs: [isvctl/configs/providers/bcm/config/bare_metal.yaml]
+    required_inputs:
+      - BCM API or CLI endpoint and supported authentication method
+      - Test-node inventory and allowed lifecycle operations
+      - SSH access model for provisioned nodes
+    evidence_refs: [bcm-docs]
+    capabilities:
+      - id: bcm-advanced-hardware-evidence
+        name: Advanced hardware, attestation, and fabric evidence
+        selectors:
+          validation_categories:
+            - ingestion_check
+            - dpu_health
+            - health_aggregation
+            - ib_tenant_isolation
+            - ib_keys_configured
+            - nonce_attestation
+            - firmware_attestation
+        coverage: unknown
+        validation_mode: deferred
+        capability_owner_actor_id: deployment-partner
+        provider_adapter_owner_actor_id: deployment-partner
+        component_ids: [bcm-11]
+        rationale: >-
+          Public BCM overview material does not establish complete coverage for
+          every advanced hardware and attestation contract in this suite.
+        required_inputs:
+          - Product-team confirmation of supported APIs and evidence fields
+
+  - domain: kubernetes
+    name: Kubernetes provisioning and workload orchestration
+    required_for_full_validation: true
+    coverage: covered
+    validation_mode: test
+    capability_owner_actor_id: bcm-isv
+    provider_adapter_owner_actor_id: bcm-isv
+    component_ids: [bcm-11, bcm-kubernetes]
+    provider_configs: [isvctl/configs/providers/bcm.yaml]
+    required_inputs:
+      - Kubeconfig or kubectl-compatible command
+      - BCM cluster and node-pool API access
+      - GPU runtime class, resource name, and operator namespace
+    evidence_refs: [bcm-docs, bcm-11-release-notes]
+    capabilities:
+      - id: bcm-k8s-storage
+        name: Kubernetes CSI and storage integration
+        selectors:
+          validation_categories: [k8s_storage]
+        coverage: unknown
+        validation_mode: deferred
+        capability_owner_actor_id: deployment-partner
+        provider_adapter_owner_actor_id: deployment-partner
+        component_ids: [external-storage]
+        rationale: >-
+          Storage implementation is deployment-specific and is not established
+          by the BCM overview documentation.
+        required_inputs:
+          - CSI drivers and StorageClass names
+          - Block, shared-file, and static-volume ownership
+
+      - id: bcm-k8s-identity
+        name: Kubernetes workload identity integration
+        selectors:
+          validation_categories: [k8s_identity]
+        coverage: unknown
+        validation_mode: deferred
+        capability_owner_actor_id: deployment-partner
+        provider_adapter_owner_actor_id: deployment-partner
+        component_ids: [external-identity]
+        rationale: >-
+          The integrated identity provider and workload-identity contract must
+          be selected for the target deployment.
+        required_inputs:
+          - OIDC issuer and service-account integration details
+
+      - id: bcm-k8s-network
+        name: Kubernetes CNI and network-policy integration
+        selectors:
+          validation_categories: [k8s_network]
+        coverage: unknown
+        validation_mode: deferred
+        capability_owner_actor_id: deployment-partner
+        provider_adapter_owner_actor_id: deployment-partner
+        component_ids: [external-network]
+        rationale: >-
+          BCM documents Kubernetes and Calico integration, but target CNI,
+          policy enforcement, and tenant-network ownership require confirmation.
+        required_inputs:
+          - CNI implementation and NetworkPolicy support
+          - Kubernetes API network access policy
+
+  - domain: slurm
+    name: Slurm scheduling and AI workloads
+    required_for_full_validation: true
+    coverage: covered
+    validation_mode: test
+    capability_owner_actor_id: bcm-isv
+    provider_adapter_owner_actor_id: bcm-isv
+    component_ids: [bcm-11, bcm-slurm]
+    provider_configs: [isvctl/configs/providers/bcm/config/slurm.yaml]
+    required_inputs:
+      - Slurm controller access and test partition
+      - GPU allocation policy and workload container runtime
+    evidence_refs: [bcm-docs, bcm-11-release-notes]
+
+  - domain: observability
+    name: Infrastructure monitoring and log availability
+    required_for_full_validation: true
+    coverage: covered
+    validation_mode: test
+    capability_owner_actor_id: bcm-isv
+    provider_adapter_owner_actor_id: bcm-isv
+    component_ids: [bcm-11]
+    provider_configs: [isvctl/configs/providers/bcm/config/observability.yaml]
+    required_inputs:
+      - BCM monitoring and log-query API access
+      - Retention windows for host, network, and management telemetry
+    evidence_refs: [bcm-docs]
+
+  - domain: network
+    name: Tenant networking, SDN, and fabric lifecycle
+    required_for_full_validation: true
+    coverage: unknown
+    validation_mode: deferred
+    capability_owner_actor_id: deployment-partner
+    provider_adapter_owner_actor_id: deployment-partner
+    component_ids: [external-network]
+    rationale: >-
+      BCM has cluster and rack networking features, but full tenant SDN, VPC,
+      security-group, and network-isolation ownership is not yet established.
+    required_inputs:
+      - Selected SDN product and API specification
+      - VPC, subnet, security-group, and fabric ownership boundaries
+
+  - domain: control_plane
+    name: Tenant-facing cloud control plane
+    required_for_full_validation: true
+    coverage: unknown
+    validation_mode: deferred
+    capability_owner_actor_id: deployment-partner
+    provider_adapter_owner_actor_id: deployment-partner
+    component_ids: [bcm-11]
+    rationale: >-
+      Qualification must identify the tenant API, quota, access-key, and object
+      storage control plane paired with BCM.
+    required_inputs:
+      - Control-plane API specification and test tenant
+      - Access-key and tenant lifecycle ownership
+
+  - domain: iam
+    name: Tenant identity and credential lifecycle
+    required_for_full_validation: true
+    coverage: unknown
+    validation_mode: deferred
+    capability_owner_actor_id: deployment-partner
+    provider_adapter_owner_actor_id: deployment-partner
+    component_ids: [external-identity]
+    rationale: >-
+      The target identity provider and tenant credential model are not part of
+      the BCM overview claim and must be supplied by the integrated solution.
+    required_inputs:
+      - IAM API and authentication flow
+      - Test identities, roles, and credential-rotation policy
+
+  - domain: image_registry
+    name: Tenant image and install-configuration registry
+    required_for_full_validation: true
+    coverage: unknown
+    validation_mode: deferred
+    capability_owner_actor_id: deployment-partner
+    provider_adapter_owner_actor_id: deployment-partner
+    component_ids: [external-registry]
+    rationale: >-
+      A tenant-facing registry and image lifecycle API must be selected for the
+      complete stack; BCM software-image management is not assumed equivalent.
+    required_inputs:
+      - Registry API and authentication
+      - VM and bare-metal image lifecycle integration
+
+  - domain: security
+    name: Platform security, tenant isolation, and audit controls
+    required_for_full_validation: true
+    coverage: unknown
+    validation_mode: deferred
+    capability_owner_actor_id: deployment-partner
+    provider_adapter_owner_actor_id: deployment-partner
+    component_ids: [bcm-11, external-identity, external-network]
+    rationale: >-
+      Security validation crosses BCM and the external identity, networking,
+      key-management, and tenant control-plane components.
+    required_inputs:
+      - Security architecture and shared-responsibility matrix
+      - MFA, OIDC, KMS, audit, and tenant-isolation evidence sources
+
+  - domain: vm
+    name: Virtual-machine service
+    required_for_full_validation: false
+    coverage: out_of_scope
+    validation_mode: skip
+    capability_owner_actor_id: deployment-partner
+    provider_adapter_owner_actor_id: deployment-partner
+    component_ids: [bcm-11]
+    rationale: >-
+      This reference target is a bare-metal cluster solution. VMaaS can be added
+      as a separately versioned component if the candidate solution claims it.
+
+sources:
+  - id: bcm-docs
+    title: NVIDIA Base Command Manager Documentation
+    url: https://docs.nvidia.com/base-command-manager/index.html
+    kind: documentation
+  - id: bcm-11-release-notes
+    title: NVIDIA Base Command Manager 11 Release Notes
+    url: https://docs.nvidia.com/base-command-manager/bcm-11-release-notes/overview.html
+    kind: documentation
+
+assumptions:
+  - This is a draft discovery baseline, not a validated product claim.
+  - Exact BCM build, licenses, enabled integrations, and target hardware must be pinned at intake.
+  - Full AI Cloud Ready validation requires an integrated IaaS, CaaS, and PaaS stack; BCM alone is not assumed to supply every cloud service.
+  - Publication is outside the current isv-readiness implementation boundary.

@@ -146,3 +146,66 @@ and prove the scanner sees the current upstream Kubernetes suite.
 - `PYTHONPATH=src python3 -m unittest discover -s tests -v`: 23 tests passed.
 - `python3 -m compileall -q src tests`: passed.
 - `git diff --check`: passed.
+
+## Step 4 - Multi-Domain Solution and Responsibility Model
+
+### Objective
+
+Represent an ISV's complete, versioned solution and shared-responsibility
+boundaries so the agent can distinguish adapter work from product gaps,
+external dependencies, evidence collection, rationalized skips, and unresolved
+scope decisions.
+
+### Evidence
+
+- The AI Cloud Ready POR permits partial stacks to be qualified and documented,
+  but requires an integrated IaaS, CaaS, and PaaS stack for full end-to-end
+  validation.
+- Current public BCM documentation states that BCM streamlines cluster
+  provisioning, workload management, and infrastructure monitoring, supports
+  Kubernetes orchestration, and documents Slurm integration.
+- Current public Mission Control documentation and 2.3.0 release notes describe
+  BCM as a component and identify autonomous job recovery, autonomous hardware
+  recovery, Grafana dashboards, LaunchPad, and Kubernetes-delivered artifacts.
+- Public product overviews do not establish that BCM or Mission Control alone
+  supplies a complete tenant cloud control plane, SDN/VPC service, tenant IAM,
+  tenant image registry, or every security control in the validation suite.
+- Roadmap and preview claims were deliberately excluded from reference-profile
+  coverage.
+
+### Decisions
+
+1. Keep solution qualification state separate from flat `gaps.json` rows.
+2. Model actors, versioned components, dependency edges, NSRG layers, and source
+   references as a validated acyclic solution graph.
+3. Separate capability coverage (`covered`, `gap`, `out_of_scope`, `unknown`)
+   from validation mode (`test`, `evidence`, `skip`, `deferred`).
+4. Track both the capability owner and provider-adapter owner. They can differ,
+   which prevents the agent from treating every external layer as ISV-editable.
+5. Resolve optional step/category/class selectors deterministically. Equally
+   specific overlapping selectors are errors rather than arbitrary choices.
+6. Route resolved responsibilities to explicit actions:
+   `implement_or_fix_adapter`, `request_external_adapter`, `collect_evidence`,
+   `record_product_gap`, `skip_with_rationale`, or `request_scope_decision`.
+7. Ship BCM and NVIDIA Mission Control profiles as draft qualification
+   baselines. Their unresolved integrated-cloud domains and capability slices
+   remain visible blockers, not inferred product deficiencies or false passes.
+
+### Changed Files
+
+- `schemas/solution-profile.schema.json`
+- `src/isv_readiness/solution_profile.py`
+- `examples/profiles/bcm.reference.yaml`
+- `examples/profiles/nvidia-mission-control.reference.yaml`
+- `tests/test_solution_profile.py`
+- `SLOP.md`
+
+### Verification
+
+- Focused tests cover both reference profiles, cross-reference and dependency
+  validation, domain aliases, capability overrides, all major action routes,
+  readiness blockers, and ambiguous selectors.
+- `PYTHONPATH=src python3 -m unittest discover -s tests -v`: 28 tests passed.
+- `python3 -m compileall -q src tests`: passed.
+- `python3 -m json.tool schemas/solution-profile.schema.json`: passed.
+- `git diff --check`: passed.

@@ -1,0 +1,344 @@
+schema_version: "0.1.0"
+
+solution:
+  id: nvidia-mission-control-reference
+  name: NVIDIA Mission Control reference stack
+  vendor: NVIDIA
+  version: "2.3.0 - confirm installed component builds at intake"
+  profile_status: draft
+  target_environment: DGX or NVL GPU cluster with Kubernetes and Slurm
+
+journey:
+  stage: qualify
+  status: in_progress
+
+actors:
+  - id: nmc-isv
+    name: NVIDIA Mission Control solution team acting as the ISV
+    kind: isv
+  - id: deployment-partner
+    name: NCP or integration partner supplying external cloud services
+    kind: partner
+  - id: validation-lab
+    name: AI Cloud Ready validation lab
+    kind: lab
+
+components:
+  - id: bcm-11
+    name: NVIDIA Base Command Manager
+    version: "11.32.0 in the Mission Control 2.3.0 release notes"
+    kind: product
+    supplier_actor_id: nmc-isv
+    nsrg_layers: [2, 3]
+    source_refs: [bcm-docs, nmc-230-release-notes]
+
+  - id: mission-control-230
+    name: NVIDIA Mission Control
+    version: "2.3.0"
+    kind: product
+    supplier_actor_id: nmc-isv
+    nsrg_layers: [2, 3, 4]
+    depends_on: [bcm-11]
+    source_refs: [nmc-docs, nmc-230-release-notes]
+
+  - id: nmc-resiliency
+    name: Mission Control autonomous job and hardware recovery
+    version: "Component builds pinned by the 2.3.0 release manifest"
+    kind: service
+    supplier_actor_id: nmc-isv
+    nsrg_layers: [2, 3, 4]
+    depends_on: [mission-control-230]
+    source_refs: [nmc-230-release-notes]
+
+  - id: nmc-observability
+    name: Mission Control Grafana dashboards and monitoring integration
+    version: "Component builds pinned by the 2.3.0 release manifest"
+    kind: service
+    supplier_actor_id: nmc-isv
+    nsrg_layers: [2, 3]
+    depends_on: [mission-control-230]
+    source_refs: [nmc-docs, nmc-230-release-notes]
+
+  - id: nmc-launchpad
+    name: Mission Control LaunchPad
+    version: "0.2.13 in the 2.3.0 release notes"
+    kind: service
+    supplier_actor_id: nmc-isv
+    nsrg_layers: [3]
+    depends_on: [mission-control-230]
+    source_refs: [nmc-230-release-notes]
+
+  - id: external-network
+    name: External tenant networking and SDN stack
+    version: TBD during qualification
+    kind: external_dependency
+    supplier_actor_id: deployment-partner
+    nsrg_layers: [1]
+
+  - id: external-storage
+    name: External block, file, and object storage stack
+    version: TBD during qualification
+    kind: external_dependency
+    supplier_actor_id: deployment-partner
+    nsrg_layers: [2]
+
+  - id: external-identity
+    name: External tenant identity and access management stack
+    version: TBD during qualification
+    kind: external_dependency
+    supplier_actor_id: deployment-partner
+    nsrg_layers: [2, 3]
+
+  - id: external-registry
+    name: External tenant image registry
+    version: TBD during qualification
+    kind: external_dependency
+    supplier_actor_id: deployment-partner
+    nsrg_layers: [2, 3]
+
+domains:
+  - domain: bare_metal
+    name: Bare-metal provisioning, health, and autonomous recovery
+    required_for_full_validation: true
+    coverage: covered
+    validation_mode: test
+    capability_owner_actor_id: nmc-isv
+    provider_adapter_owner_actor_id: nmc-isv
+    component_ids: [bcm-11, mission-control-230, nmc-resiliency]
+    provider_configs: [isvctl/configs/providers/nvidia-mission-control/config/bare_metal.yaml]
+    required_inputs:
+      - Mission Control and BCM API or CLI access
+      - Supported test hardware and allowed lifecycle operations
+      - Autonomous recovery event and runbook interfaces
+    evidence_refs: [bcm-docs, nmc-docs, nmc-230-release-notes]
+    capabilities:
+      - id: nmc-autonomous-recovery
+        name: Autonomous hardware and job recovery
+        selectors:
+          validation_categories:
+            - ingestion_check
+            - host_health
+            - health_aggregation
+            - dpu_health
+        component_ids: [nmc-resiliency]
+        required_inputs:
+          - Recovery policy, event, and terminal-state evidence
+        evidence_refs: [nmc-230-release-notes]
+
+      - id: nmc-attestation-boundary
+        name: Nonce and firmware attestation
+        selectors:
+          validation_categories: [nonce_attestation, firmware_attestation]
+        coverage: unknown
+        validation_mode: deferred
+        capability_owner_actor_id: deployment-partner
+        provider_adapter_owner_actor_id: deployment-partner
+        component_ids: [mission-control-230]
+        rationale: >-
+          Current Mission Control overview and release notes do not establish
+          the attestation API contract required by these checks.
+        required_inputs:
+          - Attestation service owner and API specification
+
+  - domain: kubernetes
+    name: Kubernetes cluster and workload orchestration
+    required_for_full_validation: true
+    coverage: covered
+    validation_mode: test
+    capability_owner_actor_id: nmc-isv
+    provider_adapter_owner_actor_id: nmc-isv
+    component_ids: [bcm-11, mission-control-230, nmc-launchpad]
+    provider_configs: [isvctl/configs/providers/nvidia-mission-control.yaml]
+    required_inputs:
+      - Kubeconfig or kubectl-compatible command
+      - Mission Control NGC entitlement and installed component manifest
+      - GPU runtime, operator, and node-pool configuration
+    evidence_refs: [nmc-docs, nmc-230-release-notes]
+    capabilities:
+      - id: nmc-k8s-observability
+        name: Kubernetes observability integration
+        selectors:
+          validation_categories: [k8s_observability]
+        component_ids: [nmc-observability]
+        required_inputs:
+          - Grafana and metrics endpoints
+        evidence_refs: [nmc-docs, nmc-230-release-notes]
+
+      - id: nmc-k8s-storage
+        name: Kubernetes CSI and storage integration
+        selectors:
+          validation_categories: [k8s_storage]
+        coverage: unknown
+        validation_mode: deferred
+        capability_owner_actor_id: deployment-partner
+        provider_adapter_owner_actor_id: deployment-partner
+        component_ids: [external-storage]
+        rationale: >-
+          Mission Control does not select the deployment's block, shared-file,
+          or object storage service in the cited product overview.
+        required_inputs:
+          - CSI drivers and StorageClass names
+
+      - id: nmc-k8s-identity
+        name: Kubernetes workload identity integration
+        selectors:
+          validation_categories: [k8s_identity]
+        coverage: unknown
+        validation_mode: deferred
+        capability_owner_actor_id: deployment-partner
+        provider_adapter_owner_actor_id: deployment-partner
+        component_ids: [external-identity]
+        rationale: >-
+          Target OIDC and workload-identity ownership must be established for
+          the integrated solution.
+        required_inputs:
+          - OIDC issuer and service-account integration details
+
+      - id: nmc-k8s-network
+        name: Kubernetes CNI and network-policy integration
+        selectors:
+          validation_categories: [k8s_network]
+        coverage: unknown
+        validation_mode: deferred
+        capability_owner_actor_id: deployment-partner
+        provider_adapter_owner_actor_id: deployment-partner
+        component_ids: [external-network]
+        rationale: >-
+          Kubernetes-delivered Mission Control artifacts do not by themselves
+          establish CNI, tenant network, or API network-policy ownership.
+        required_inputs:
+          - CNI implementation and NetworkPolicy support
+
+  - domain: slurm
+    name: Slurm scheduling, workloads, and recovery
+    required_for_full_validation: true
+    coverage: covered
+    validation_mode: test
+    capability_owner_actor_id: nmc-isv
+    provider_adapter_owner_actor_id: nmc-isv
+    component_ids: [bcm-11, mission-control-230, nmc-resiliency]
+    provider_configs: [isvctl/configs/providers/nvidia-mission-control/config/slurm.yaml]
+    required_inputs:
+      - Slurm controller access and test partition
+      - Mission Control autonomous job recovery policy
+    evidence_refs: [bcm-docs, nmc-230-release-notes]
+
+  - domain: observability
+    name: Infrastructure monitoring and Grafana visualization
+    required_for_full_validation: true
+    coverage: covered
+    validation_mode: test
+    capability_owner_actor_id: nmc-isv
+    provider_adapter_owner_actor_id: nmc-isv
+    component_ids: [bcm-11, nmc-observability]
+    provider_configs: [isvctl/configs/providers/nvidia-mission-control/config/observability.yaml]
+    required_inputs:
+      - Monitoring, log, metrics, and Grafana endpoints
+      - Retention and access-control policy
+    evidence_refs: [nmc-docs, nmc-230-release-notes]
+
+  - domain: network
+    name: Tenant networking, SDN, and fabric lifecycle
+    required_for_full_validation: true
+    coverage: unknown
+    validation_mode: deferred
+    capability_owner_actor_id: deployment-partner
+    provider_adapter_owner_actor_id: deployment-partner
+    component_ids: [external-network, mission-control-230]
+    rationale: >-
+      Mission Control supports selected cluster hardware and networking, but
+      full tenant VPC, SDN, security-group, and isolation APIs require an
+      integrated network stack.
+    required_inputs:
+      - Selected SDN product and API specification
+      - Tenant and fabric network ownership matrix
+
+  - domain: control_plane
+    name: Tenant-facing cloud control plane
+    required_for_full_validation: true
+    coverage: unknown
+    validation_mode: deferred
+    capability_owner_actor_id: deployment-partner
+    provider_adapter_owner_actor_id: deployment-partner
+    component_ids: [mission-control-230]
+    rationale: >-
+      Mission Control cluster operations are not assumed to be the complete
+      tenant cloud API, quota, access-key, and object-storage control plane.
+    required_inputs:
+      - Tenant control-plane API specification and test tenant
+
+  - domain: iam
+    name: Tenant identity and credential lifecycle
+    required_for_full_validation: true
+    coverage: unknown
+    validation_mode: deferred
+    capability_owner_actor_id: deployment-partner
+    provider_adapter_owner_actor_id: deployment-partner
+    component_ids: [external-identity]
+    rationale: >-
+      Centralized product authentication does not establish the full tenant IAM
+      and credential lifecycle required by the validation suite.
+    required_inputs:
+      - IAM API, roles, credentials, MFA, and OIDC model
+
+  - domain: image_registry
+    name: Tenant image and install-configuration registry
+    required_for_full_validation: true
+    coverage: unknown
+    validation_mode: deferred
+    capability_owner_actor_id: deployment-partner
+    provider_adapter_owner_actor_id: deployment-partner
+    component_ids: [external-registry]
+    rationale: >-
+      NGC distributes Mission Control artifacts, but that is not assumed to be
+      the candidate solution's tenant image-registry service.
+    required_inputs:
+      - Tenant registry and image lifecycle API
+
+  - domain: security
+    name: Platform security, tenant isolation, and audit controls
+    required_for_full_validation: true
+    coverage: unknown
+    validation_mode: deferred
+    capability_owner_actor_id: deployment-partner
+    provider_adapter_owner_actor_id: deployment-partner
+    component_ids: [mission-control-230, external-identity, external-network]
+    rationale: >-
+      Mission Control ships cluster-security artifacts, but suite-wide MFA,
+      OIDC, KMS, audit, and tenant-isolation controls span the integrated stack.
+    required_inputs:
+      - Security architecture and shared-responsibility matrix
+      - Security-policy, identity, KMS, and audit evidence sources
+
+  - domain: vm
+    name: Virtual-machine service
+    required_for_full_validation: false
+    coverage: out_of_scope
+    validation_mode: skip
+    capability_owner_actor_id: deployment-partner
+    provider_adapter_owner_actor_id: deployment-partner
+    component_ids: [bcm-11]
+    rationale: >-
+      This reference target is a bare-metal GPU cluster. A VMaaS component must
+      be added and versioned if the candidate solution claims virtual machines.
+
+sources:
+  - id: nmc-docs
+    title: NVIDIA Mission Control Documentation
+    url: https://docs.nvidia.com/mission-control/index.html
+    kind: documentation
+  - id: nmc-230-release-notes
+    title: NVIDIA Mission Control 2.3.0 Release Notes
+    url: https://docs.nvidia.com/mission-control/docs/systems-quick-start-guide/2.3.0/nmc-release-notes.html
+    kind: documentation
+  - id: bcm-docs
+    title: NVIDIA Base Command Manager Documentation
+    url: https://docs.nvidia.com/base-command-manager/index.html
+    kind: documentation
+
+assumptions:
+  - This is a draft discovery baseline, not a validated product claim.
+  - Installed Mission Control, BCM, recovery, dashboard, and LaunchPad component builds must be captured from the deployment manifest.
+  - Full AI Cloud Ready validation requires an integrated IaaS, CaaS, and PaaS stack; Mission Control is not assumed to supply every tenant cloud service.
+  - Roadmap and preview capabilities are intentionally excluded from claimed coverage.
+  - Publication is outside the current isv-readiness implementation boundary.
