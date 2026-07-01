@@ -63,3 +63,43 @@ adding more agent behavior.
 - Both repositories were clean before implementation began.
 - Existing tests and formatting checks will be run after every behavioral step.
 
+## Step 2 - Version-Aware Validation Adapter
+
+### Objective
+
+Create a stable internal validation plan without coupling `isv-readiness` to
+private Python APIs or one revision of the upstream YAML layout.
+
+### Decisions
+
+1. Use the supported `isvctl catalog list --json` and
+   `isvctl test run --dry-run --no-upload` interfaces as the compatibility
+   boundary.
+2. Keep subprocess execution in a thin, injectable adapter and implement the
+   normalization logic as pure functions.
+3. Normalize grouped check maps, grouped check lists, direct check maps, and
+   repeated list entries into the same plan contract.
+4. Preserve unknown checks, malformed entries, extra group metadata, raw
+   parameters, version information, and deterministic fingerprints. Contract
+   drift must become visible evidence instead of silently reducing coverage.
+5. Represent non-pytest execution categories such as ReFrame explicitly so a
+   later executor can route them without changing the plan schema.
+
+### Changed Files
+
+- `src/isv_readiness/validation_adapter.py`
+- `tests/test_validation_adapter.py`
+- `SLOP.md`
+
+### Verification
+
+- Focused adapter tests cover current upstream YAML shapes, variants, unknown
+  checks, malformed input, command construction, and CLI failures.
+- `PYTHONPATH=src python3 -m unittest discover -s tests -v`: 21 tests passed.
+- `python3 -m compileall -q`: passed for the adapter and its tests.
+- `git diff --check`: passed.
+- `uv run ruff check` is currently blocked before lint execution because the
+  sibling `ai-cloud-validation` editable source is resolved as one setuptools
+  package with three top-level projects. This packaging/tooling issue is kept
+  visible for the CLI integration step; no dependency metadata was changed as
+  part of the adapter commit.
