@@ -7,12 +7,25 @@ import subprocess
 import sys
 from pathlib import Path
 
+from isv_readiness.context import (
+    ContextError,
+    build_context_pack,
+    import_context_source,
+    sync_context_sources,
+)
 from isv_readiness.fixes import FixGuardrailError, build_fix_proposal
 from isv_readiness.loop import LoopStateError, advance_loop, load_loop_state
 from isv_readiness.onboarding import (
     OnboardingError,
     build_provider_onboarding_plan,
     execute_provider_onboarding,
+)
+from isv_readiness.project import (
+    DEFAULT_VALIDATION_URL,
+    ProjectError,
+    build_bootstrap_plan,
+    execute_bootstrap,
+    load_project,
 )
 from isv_readiness.scan.dynamic import DynamicArtifacts, scan_dynamic_artifacts
 from isv_readiness.scan.k8s_dynamic import K8sDynamicArtifacts, scan_k8s_artifacts
@@ -44,6 +57,64 @@ def main(argv: list[str] | None = None) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="gapctl", description="ISV readiness gap scanner")
     subparsers = parser.add_subparsers(dest="command")
+
+    bootstrap_parser = subparsers.add_parser(
+        "bootstrap", help="Create a pinned, scoped ISV workspace and optionally clone ai-cloud-validation"
+    )
+    bootstrap_parser.add_argument("--workspace", type=Path, required=True, help="Workspace directory")
+    bootstrap_parser.add_argument("--provider-name", required=True, help="Provider name, for example acme-cloud")
+    bootstrap_parser.add_argument("--domains", required=True, help="Comma-separated ISV-owned assessment domains")
+    bootstrap_parser.add_argument(
+        "--assessment-mode",
+        choices=["qualification", "full_validation"],
+        default="qualification",
+        help="Partial selected-scope qualification or integrated full-stack validation",
+    )
+    bootstrap_parser.add_argument("--validation-root", type=Path, default=None, help="Existing checkout to use")
+    bootstrap_parser.add_argument("--validation-url", default=DEFAULT_VALIDATION_URL)
+    bootstrap_parser.add_argument("--validation-ref", default="main")
+    bootstrap_parser.add_argument("--profile", type=Path, default=None)
+    bootstrap_parser.add_argument("--api-base-url", default=None, help="Provider API endpoint (never a credential)")
+    bootstrap_parser.add_argument("--api-spec", default=None, help="Local path or URL to the provider API spec")
+    bootstrap_parser.add_argument(
+        "--auth-env",
+        action="append",
+        default=[],
+        help="Credential environment variable name; repeat for multiple inputs",
+    )
+    bootstrap_parser.add_argument("--write", action="store_true", help="Clone if needed and write isv-project.yaml")
+    bootstrap_parser.add_argument("--overwrite", action="store_true", help="Replace an existing project manifest")
+    bootstrap_parser.set_defaults(handler=_bootstrap)
+
+    context_sync_parser = subparsers.add_parser(
+        "context-sync", help="Normalize project context sources into a redacted local cache"
+    )
+    context_sync_parser.add_argument("--project", type=Path, required=True)
+    context_sync_parser.add_argument("--cache-dir", type=Path, default=None)
+    context_sync_parser.add_argument(
+        "--allow-network", action="store_true", help="Fetch declared HTTP and GitHub issue sources"
+    )
+    context_sync_parser.set_defaults(handler=_context_sync)
+
+    context_import_parser = subparsers.add_parser(
+        "context-import", help="Import a host-fetched MCP or other declared context export"
+    )
+    context_import_parser.add_argument("--project", type=Path, required=True)
+    context_import_parser.add_argument("--source-id", required=True)
+    context_import_parser.add_argument("--in", dest="input_path", type=Path, required=True)
+    context_import_parser.add_argument("--cache-dir", type=Path, default=None)
+    context_import_parser.set_defaults(handler=_context_import)
+
+    context_pack_parser = subparsers.add_parser(
+        "context-pack", help="Build one bounded, redacted context pack for a selected gap"
+    )
+    context_pack_parser.add_argument("--project", type=Path, required=True)
+    context_pack_parser.add_argument("--in", dest="input_path", type=Path, required=True, help="gaps.json")
+    context_pack_parser.add_argument("--gap-id", required=True)
+    context_pack_parser.add_argument("--cache-dir", type=Path, default=None)
+    context_pack_parser.add_argument("--max-chars", type=int, default=48_000)
+    context_pack_parser.add_argument("--out", type=Path, required=True)
+    context_pack_parser.set_defaults(handler=_context_pack)
 
     scan_parser = subparsers.add_parser("scan", help="Build a deterministic static/dynamic gaps.json report")
     scan_parser.add_argument("-p", "--provider-repo", type=Path, required=True)
@@ -136,6 +207,97 @@ def _build_parser() -> argparse.ArgumentParser:
     onboard_parser.add_argument("--overwrite", action="store_true", help="Overwrite existing generated files")
     onboard_parser.set_defaults(handler=_onboard)
     return parser
+
+
+def _bootstrap(args: argparse.Namespace) -> int:
+    try:
+        plan = build_bootstrap_plan(
+            args.workspace,
+            provider_name=args.provider_name,
+            domains=[item.strip() for item in args.domains.split(",") if item.strip()],
+            validation_root=args.validation_root,
+            validation_url=args.validation_url,
+            validation_ref=args.validation_ref,
+            assessment_mode=args.assessment_mode,
+            profile=args.profile,
+            api_base_url=args.api_base_url,
+            api_spec=args.api_spec,
+            auth_env=args.auth_env,
+        )
+        if not args.write:
+            print("Bootstrap plan:")
+            for line in plan.summary_lines():
+                print(line)
+            print("\nPass --write to clone when needed and create the project manifest.")
+            return 0
+        project = execute_bootstrap(plan, overwrite=args.overwrite)
+    except (OSError, ProjectError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(f"Wrote project: {plan.manifest_path}")
+    print(f"Pinned validation commit: {project.validation.resolved_commit}")
+    print(f"Provider state: {project.provider.state}")
+    print("Live infrastructure runs remain disabled until explicitly authorized in the project.")
+    return 0
+
+
+def _context_cache_dir(project_path: Path, override: Path | None) -> Path:
+    return override or (project_path.resolve().parent / ".gapctl" / "context-cache")
+
+
+def _context_sync(args: argparse.Namespace) -> int:
+    try:
+        project = load_project(args.project)
+        records = sync_context_sources(
+            project,
+            args.project,
+            _context_cache_dir(args.project, args.cache_dir),
+            allow_network=args.allow_network,
+        )
+    except (OSError, ProjectError, ContextError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    for record in records:
+        detail = f" ({record.error})" if record.error else ""
+        print(f"{record.source_id}: {record.status}{detail}")
+    required_failures = [record for record in records if record.status == "error"]
+    return 1 if required_failures else 0
+
+
+def _context_import(args: argparse.Namespace) -> int:
+    try:
+        record = import_context_source(
+            load_project(args.project),
+            args.source_id,
+            args.input_path,
+            _context_cache_dir(args.project, args.cache_dir),
+        )
+    except (OSError, ProjectError, ContextError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(f"Imported {record.source_id}: {record.sha256}")
+    return 0
+
+
+def _context_pack(args: argparse.Namespace) -> int:
+    try:
+        pack = build_context_pack(
+            load_project(args.project),
+            args.project,
+            load_report(args.input_path),
+            gap_id=args.gap_id,
+            cache_dir=_context_cache_dir(args.project, args.cache_dir),
+            max_chars=args.max_chars,
+        )
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps(pack.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except (OSError, json.JSONDecodeError, ProjectError, ContextError, TypeError, KeyError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(f"Wrote context pack: {args.out}")
+    print(f"Context items: {len(pack.items)}")
+    print(f"Budget: {pack.budget['used_chars']}/{pack.budget['max_chars']} characters")
+    return 0
 
 
 def _scan(args: argparse.Namespace) -> int:

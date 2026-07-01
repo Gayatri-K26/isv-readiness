@@ -32,7 +32,7 @@ class K8sOnboardingTests(unittest.TestCase):
             scope = json.loads((providers_dir / "dsx-air" / "isv-readiness.k8s.scope.json").read_text())
             self.assertEqual(scope["provider"], "dsx-air")
             self.assertIn("needed_isv_info", scope)
-            self.assertTrue(scope["owns"]["node_inventory"])
+            self.assertEqual(scope["owns"], {})
 
     def test_cli_onboard_dry_plan_and_write(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:

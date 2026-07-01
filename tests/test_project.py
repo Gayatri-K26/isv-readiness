@@ -1,0 +1,130 @@
+from __future__ import annotations
+
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+import jsonschema
+import yaml
+
+from isv_readiness.cli import main
+from isv_readiness.project import (
+    ProjectError,
+    build_bootstrap_plan,
+    execute_bootstrap,
+    load_project,
+)
+
+COMMIT = "a" * 40
+
+
+class ProjectBootstrapTests(unittest.TestCase):
+    def test_cli_bootstrap_dry_run_does_not_create_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            workspace = Path(tempdir) / "workspace"
+            exit_code = main(
+                [
+                    "bootstrap",
+                    "--workspace",
+                    str(workspace),
+                    "--provider-name",
+                    "acme",
+                    "--domains",
+                    "vm,k8s",
+                ]
+            )
+            self.assertEqual(exit_code, 0)
+            self.assertFalse(workspace.exists())
+
+    def test_existing_checkout_writes_pinned_scoped_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            workspace = Path(tempdir) / "workspace"
+            checkout = workspace / "ai-cloud-validation"
+            _make_checkout(checkout, provider="acme")
+            plan = build_bootstrap_plan(
+                workspace,
+                provider_name="acme",
+                domains=["vm", "k8s", "vm"],
+                validation_root=checkout,
+                assessment_mode="qualification",
+                api_base_url="https://api.acme.invalid/v1",
+                api_spec="docs/openapi.yaml",
+                auth_env=["ACME_TOKEN"],
+            )
+
+            project = execute_bootstrap(plan, runner=_git_runner)
+
+            self.assertEqual(project.validation.resolved_commit, COMMIT)
+            self.assertEqual(project.assessment.domains, ("vm", "kubernetes"))
+            self.assertEqual(project.provider.state, "existing")
+            self.assertFalse(project.execution.allow_live_runs)
+            self.assertEqual(project.apis[0].auth_env, ("ACME_TOKEN",))
+            self.assertEqual(load_project(plan.manifest_path), project)
+            raw = yaml.safe_load(plan.manifest_path.read_text(encoding="utf-8"))
+            schema = yaml.safe_load(
+                (Path(__file__).parents[1] / "schemas" / "project.schema.json").read_text(encoding="utf-8")
+            )
+            jsonschema.validate(raw, schema)
+
+    def test_missing_checkout_is_cloned_before_manifest_is_written(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            workspace = Path(tempdir) / "workspace"
+            commands: list[tuple[str, ...]] = []
+
+            def runner(command: list[str] | tuple[str, ...], cwd: Path, timeout: int) -> subprocess.CompletedProcess[str]:
+                del cwd, timeout
+                command = tuple(command)
+                commands.append(command)
+                if command[:2] == ("git", "clone"):
+                    _make_checkout(Path(command[-1]))
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                return subprocess.CompletedProcess(command, 0, COMMIT + "\n", "")
+
+            plan = build_bootstrap_plan(workspace, provider_name="new-isv", domains=["network"])
+            project = execute_bootstrap(plan, runner=runner)
+
+            self.assertTrue(commands[0][:4] == ("git", "clone", "--branch", "main"))
+            self.assertEqual(project.provider.state, "new")
+            self.assertTrue(plan.manifest_path.exists())
+
+    def test_rejects_secret_values_as_credential_names_and_bad_checkouts(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            workspace = Path(tempdir)
+            with self.assertRaisesRegex(ProjectError, "environment variable names"):
+                build_bootstrap_plan(
+                    workspace,
+                    provider_name="acme",
+                    domains=["vm"],
+                    auth_env=["ACME_TOKEN=secret"],
+                )
+
+            empty = workspace / "empty"
+            empty.mkdir()
+            plan = build_bootstrap_plan(
+                workspace / "project",
+                provider_name="acme",
+                domains=["vm"],
+                validation_root=empty,
+            )
+            with self.assertRaisesRegex(ProjectError, "Not an ai-cloud-validation checkout"):
+                execute_bootstrap(plan, runner=_git_runner)
+
+
+def _make_checkout(root: Path, provider: str | None = None) -> None:
+    (root / ".git").mkdir(parents=True)
+    providers = root / "isvctl" / "configs" / "providers"
+    (providers / "my-isv").mkdir(parents=True)
+    if provider:
+        (providers / provider).mkdir()
+
+
+def _git_runner(
+    command: list[str] | tuple[str, ...], cwd: Path, timeout: int
+) -> subprocess.CompletedProcess[str]:
+    del cwd, timeout
+    return subprocess.CompletedProcess(command, 0, COMMIT + "\n", "")
+
+
+if __name__ == "__main__":
+    unittest.main()

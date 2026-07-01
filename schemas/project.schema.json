@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nvidia.com/schemas/isv-readiness/project-0.1.0.schema.json",
+  "title": "ISV Readiness Workspace Project",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "validation", "provider", "assessment", "apis", "context_sources", "execution"],
+  "properties": {
+    "schema_version": {"const": "0.1.0"},
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "ref", "checkout", "resolved_commit"],
+      "properties": {
+        "url": {"type": "string", "minLength": 1},
+        "ref": {"type": "string", "minLength": 1},
+        "checkout": {"type": "string", "minLength": 1},
+        "resolved_commit": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"}
+      }
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "path", "state"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z0-9_-]+$"},
+        "path": {"type": "string", "minLength": 1},
+        "state": {"enum": ["new", "existing"]}
+      }
+    },
+    "assessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "domains", "profile"],
+      "properties": {
+        "mode": {"enum": ["qualification", "full_validation"]},
+        "domains": {
+          "type": "array",
+          "items": {"enum": ["bare_metal", "control_plane", "iam", "image_registry", "kubernetes", "network", "observability", "security", "slurm", "vm"]},
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "profile": {"type": ["string", "null"]}
+      }
+    },
+    "apis": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/api"}
+    },
+    "context_sources": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/context_source"}
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_environment", "allow_live_runs", "credential_env", "max_attempts", "cleanup_required"],
+      "properties": {
+        "run_environment": {"type": "string", "minLength": 1},
+        "allow_live_runs": {"type": "boolean"},
+        "credential_env": {"$ref": "#/$defs/string_array"},
+        "max_attempts": {"type": "integer", "minimum": 1, "maximum": 20},
+        "cleanup_required": {"type": "boolean"}
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"},
+    "string_array": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "domains": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "api": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "base_url", "spec", "auth_env", "domains"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "kind": {"enum": ["rest", "graphql", "cli", "sdk", "kubernetes", "other"]},
+        "base_url": {"type": ["string", "null"]},
+        "spec": {"type": ["string", "null"]},
+        "auth_env": {"$ref": "#/$defs/string_array"},
+        "domains": {"$ref": "#/$defs/domains"}
+      }
+    },
+    "context_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "location", "trust", "required", "domains", "labels", "query"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "kind": {"enum": ["local_file", "local_tree", "api_spec", "web_url", "github_issues", "mcp_export"]},
+        "location": {"type": "string", "minLength": 1},
+        "trust": {"enum": ["authoritative", "reference", "advisory"]},
+        "required": {"type": "boolean"},
+        "domains": {"$ref": "#/$defs/domains"},
+        "labels": {"$ref": "#/$defs/string_array"},
+        "query": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

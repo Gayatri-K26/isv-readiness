@@ -106,9 +106,16 @@ def load_k8s_scope(path: Path | None) -> K8sScope:
     expected_skips = data.get("expected_skips") or []
     if not isinstance(expected_skips, list):
         expected_skips = []
+    invalid_ownership = sorted(key for key, value in owns.items() if not isinstance(value, bool))
+    if invalid_ownership:
+        names = ", ".join(str(key) for key in invalid_ownership)
+        raise ValueError(f"Kubernetes ownership values must be true or false; leave unknown keys absent: {names}")
+    unknown_layers = sorted(set(str(key) for key in owns).difference(K8S_LAYERS))
+    if unknown_layers:
+        raise ValueError(f"Unknown Kubernetes ownership layers: {', '.join(unknown_layers)}")
     return K8sScope(
         provider=data.get("provider") if isinstance(data.get("provider"), str) else None,
-        owns={str(key): bool(value) for key, value in owns.items()},
+        owns={str(key): value for key, value in owns.items()},
         expected_skips=[str(item) for item in expected_skips],
         api_spec=data.get("api_spec") if isinstance(data.get("api_spec"), str) else None,
         run_env=data.get("run_env") if isinstance(data.get("run_env"), str) else None,

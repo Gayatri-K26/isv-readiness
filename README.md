@@ -13,6 +13,13 @@ edits provider-agnostic suites or validation-engine code.
 
 Implemented:
 
+- Pinned `isv-project.yaml` workspace bootstrap with explicit qualification
+  versus full-validation mode, selected domains, API/spec references, and
+  execution policy.
+- Redacted, network-opt-in context synchronization for local files, API specs,
+  public documentation, GitHub issues, and host-exported MCP content.
+- Bounded per-gap context packs with source trust, hashes, credential-name-only
+  availability, and relevance filtering.
 - Versioned `solution-profile.json` contract for components, dependencies,
   actors, NSRG layers, domains, capability ownership, and validation mode.
 - Draft BCM 11 and NVIDIA Mission Control 2.3 reference profiles based on
@@ -48,6 +55,30 @@ See [docs/architecture.md](docs/architecture.md) for the complete agentic design
 and implementation map.
 
 ## Workflow
+
+### 0. Bootstrap a scoped workspace
+
+Preview a workspace that will clone and pin `ai-cloud-validation`:
+
+```bash
+gapctl bootstrap \
+  --workspace /path/to/acme-readiness \
+  --provider-name acme \
+  --domains vm,network,k8s \
+  --assessment-mode qualification \
+  --api-base-url https://api.acme.example/v1 \
+  --api-spec /path/to/openapi.yaml \
+  --auth-env ACME_CLIENT_ID \
+  --auth-env ACME_CLIENT_SECRET
+```
+
+The command is a dry run until `--write` is supplied. It clones only when the
+checkout is absent, resolves the checkout to an exact commit, and writes
+`isv-project.yaml`. The manifest stores credential environment-variable names,
+never credential values. Live runs are disabled by default.
+
+Use `--validation-root /existing/ai-cloud-validation` to adopt an existing
+checkout without pulling or changing its branch.
 
 ### 1. Qualify the solution
 
@@ -142,7 +173,45 @@ TODO/Not-implemented markers, skipped steps, simple literal JSON output schema
 failures, and contract drift. A static `pass` means only that no static gap was
 found; it does not replace a real validation run.
 
-### 5. Run or ingest one dynamic domain
+### 5. Synchronize context and build one minimal context pack
+
+Declared network sources are never fetched implicitly:
+
+```bash
+gapctl context-sync \
+  --project isv-project.yaml \
+  --allow-network
+```
+
+This can cache relevant public NSRG material and open
+`NVIDIA/ai-cloud-validation` GitHub issues. `GITHUB_TOKEN`, when present, is
+used only in the request header and is not cached. A host agent with an
+authorized MCP/Confluence connector can export selected material and import it
+through the same redaction boundary:
+
+```bash
+gapctl context-import \
+  --project isv-project.yaml \
+  --source-id nvidia_ai_cloud_ready \
+  --in /path/to/host-export.json
+```
+
+Build the bounded input for one selected row:
+
+```bash
+gapctl context-pack \
+  --project isv-project.yaml \
+  --in gaps.json \
+  --gap-id gap_0123456789ab \
+  --out context-pack.json
+```
+
+Executable validation contracts and provider API specifications are
+authoritative. Reference implementations and NSRG material are guidance.
+GitHub issues and MCP exports are advisory and cannot change scope, ownership,
+or pass/fail results.
+
+### 6. Run or ingest one dynamic domain
 
 Run a configured domain in place:
 
@@ -174,7 +243,7 @@ budgets unambiguous.
 Kubernetes additionally accepts `--setup-json` and `--scope` for inventory and
 layer-aware ownership classification.
 
-### 6. Review the report
+### 7. Review the report
 
 ```bash
 gapctl report --in gaps.json --format scorecard
@@ -192,7 +261,7 @@ with a deterministic action:
 - `skip_with_rationale`
 - `request_scope_decision`
 
-### 7. Propose one guarded provider-script patch
+### 8. Propose one guarded provider-script patch
 
 `gapctl fix` accepts a candidate replacement produced by a human or a
 separately configured generator. It emits a unified diff and never changes the
@@ -212,7 +281,7 @@ The row must be profile-routed to `implement_or_fix_adapter`, marked
 tree. Path escapes, symlinks, secret-looking literals, invalid Python/JSON/YAML,
 and non-script targets are rejected.
 
-### 8. Verify and explicitly apply the candidate
+### 9. Verify and explicitly apply the candidate
 
 The verifier copies the provider into an isolated temporary workspace, writes
 the candidate there, rescans the selected static domain, and rejects a selected
@@ -248,7 +317,7 @@ Existing targets are backed up and replaced atomically. The current verifier is
 limited to static gaps; dynamic gaps still require a reviewed live `isvctl`
 rerun.
 
-### 9. Advance the deterministic loop
+### 10. Advance the deterministic loop
 
 The loop controller selects one blocker or fixable gap and persists its state;
 it does not execute the row's rerun string:
@@ -279,6 +348,10 @@ retry budgets stop the controller rather than falling through to code changes.
 
 ## Contracts
 
+- [schemas/project.schema.json](schemas/project.schema.json): pinned workspace,
+  selected assessment scope, API/context declarations, and execution policy.
+- [schemas/context-pack.schema.json](schemas/context-pack.schema.json): bounded,
+  redacted, source-ranked input for one selected gap.
 - [schemas/gaps.schema.json](schemas/gaps.schema.json): deterministic flat scan
   and dynamic-result rows.
 - [schemas/validation-plan.schema.json](schemas/validation-plan.schema.json):

@@ -13,8 +13,13 @@ or validation bundle. Publication is deliberately deferred.
 
 ```mermaid
 flowchart TD
+    Bootstrap[gapctl bootstrap] --> Project[isv-project.yaml and pinned validation commit]
     Docs[Product docs, API specs, repos] --> ProfileBuilder[Solution discovery]
+    Issues[ai-cloud-validation GitHub issues] --> ContextCache[Redacted context cache]
+    NSRG[NSRG public guidance] --> ContextCache
+    MCP[Authorized MCP exports] --> ContextCache
     ISV[ISV answers and ownership decisions] --> ProfileBuilder
+    Project --> ProfileBuilder
     ProfileBuilder --> Profile[solution-profile.yaml]
 
     ACV[ai-cloud-validation checkout or installed isvctl] --> Adapter[Version-aware isvctl adapter]
@@ -42,6 +47,8 @@ flowchart TD
 
     Actions --> Classifier[Rules-first gap classifier]
     Classifier --> Context[Minimal context pack]
+    ContextCache --> Context
+    Project --> Context
     Context --> Generator[Swappable frontier code generator]
     Generator --> Guardrail[Path, secret, schema, and diff guardrails]
     Guardrail --> Patch[Patch proposal]
@@ -96,6 +103,41 @@ slices are covered and testable.
 gap. The controller eventually processes the full selected domain.
 
 ## Core Contracts
+
+### Workspace Project
+
+`isv-project.yaml` is the local root of trust for one engagement. It records:
+
+- validation repository URL, requested ref, checkout, and resolved commit
+- provider name, path, and new/existing discovery state
+- `qualification` or `full_validation` mode and selected domains
+- provider API endpoints, API specification references, and credential
+  environment-variable names
+- declared local, web, GitHub issue, and MCP-export context sources
+- live-run, cleanup, and retry policy
+
+Partial-layer work uses `qualification`. A tool may make every selected row
+green without claiming that an integrated metal-to-model stack completed full
+validation.
+
+### Context Pack
+
+Context collection and candidate generation are separate. Network access is an
+explicit synchronization action; generation consumes a local, redacted cache.
+For one selected gap, the pack contains the current provider target/config,
+scanner evidence, relevant API operations, bounded reference excerpts, and only
+the GitHub issues or MCP-exported passages matching the gap terms.
+
+Source precedence is explicit:
+
+1. Installed validation contracts and provider-owned API specifications.
+2. Provider source/configuration and approved reference implementations.
+3. Public NSRG architecture guidance.
+4. GitHub issues and MCP/Confluence exports as advisory context.
+
+Lower-trust sources cannot override scope, ownership, validation outcomes, or
+allowed paths. Cache records and context items are hashed; common credential
+assignments, bearer tokens, cloud keys, and private keys are redacted.
 
 ### Solution Profile
 
@@ -265,6 +307,8 @@ solution supplies them.
 | Capability | Status |
 | --- | --- |
 | Version-aware catalog and dry-run adapter | Implemented |
+| Pinned workspace bootstrap and project contract | Implemented |
+| Redacted context sync and bounded context pack | Implemented |
 | Validation plan schema/export | Implemented |
 | Solution graph and responsibility schema | Implemented |
 | BCM and Mission Control draft profiles | Implemented |

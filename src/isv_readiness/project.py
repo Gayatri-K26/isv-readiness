@@ -1,0 +1,399 @@
+from __future__ import annotations
+
+import re
+import subprocess
+from collections.abc import Callable, Sequence
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any, Literal
+
+import jsonschema
+import yaml
+
+from isv_readiness.scan.k8s_onboard import PROVIDER_NAME_RE
+from isv_readiness.solution_profile import SUPPORTED_DOMAINS, canonicalize_domain
+
+PROJECT_SCHEMA_VERSION = "0.1.0"
+DEFAULT_VALIDATION_URL = "https://github.com/NVIDIA/ai-cloud-validation.git"
+DEFAULT_NSRG_URL = "https://docs.nvidia.com/dsx/ncp/software-reference-guide/introduction"
+COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+
+AssessmentMode = Literal["qualification", "full_validation"]
+ProviderState = Literal["new", "existing"]
+CommandRunner = Callable[[Sequence[str], Path, int], subprocess.CompletedProcess[str]]
+
+
+class ProjectError(ValueError):
+    """Raised when a project manifest or bootstrap operation is unsafe or invalid."""
+
+
+@dataclass(frozen=True)
+class ValidationCheckout:
+    url: str
+    ref: str
+    checkout: str
+    resolved_commit: str | None
+
+
+@dataclass(frozen=True)
+class ProviderProject:
+    name: str
+    path: str
+    state: ProviderState
+
+
+@dataclass(frozen=True)
+class Assessment:
+    mode: AssessmentMode
+    domains: tuple[str, ...]
+    profile: str | None
+
+
+@dataclass(frozen=True)
+class ApiInterface:
+    id: str
+    kind: str
+    base_url: str | None
+    spec: str | None
+    auth_env: tuple[str, ...]
+    domains: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ContextSource:
+    id: str
+    kind: str
+    location: str
+    trust: str
+    required: bool
+    domains: tuple[str, ...]
+    labels: tuple[str, ...]
+    query: str | None
+
+
+@dataclass(frozen=True)
+class ExecutionPolicy:
+    run_environment: str
+    allow_live_runs: bool
+    credential_env: tuple[str, ...]
+    max_attempts: int
+    cleanup_required: bool
+
+
+@dataclass(frozen=True)
+class ReadinessProject:
+    schema_version: str
+    validation: ValidationCheckout
+    provider: ProviderProject
+    assessment: Assessment
+    apis: tuple[ApiInterface, ...]
+    context_sources: tuple[ContextSource, ...]
+    execution: ExecutionPolicy
+
+    def to_dict(self) -> dict[str, Any]:
+        return _jsonable(asdict(self))
+
+    def resolve_path(self, manifest_path: Path, value: str) -> Path:
+        path = Path(value).expanduser()
+        return path.resolve() if path.is_absolute() else (manifest_path.resolve().parent / path).resolve()
+
+    def validation_root(self, manifest_path: Path) -> Path:
+        return self.resolve_path(manifest_path, self.validation.checkout)
+
+    def provider_root(self, manifest_path: Path) -> Path:
+        return self.resolve_path(manifest_path, self.provider.path)
+
+
+@dataclass(frozen=True)
+class BootstrapPlan:
+    manifest_path: Path
+    validation_root: Path
+    validation_url: str
+    validation_ref: str
+    provider_name: str
+    domains: tuple[str, ...]
+    assessment_mode: AssessmentMode
+    profile: Path | None
+    api_base_url: str | None
+    api_spec: str | None
+    auth_env: tuple[str, ...]
+    clone_required: bool
+
+    def summary_lines(self) -> list[str]:
+        action = "clone" if self.clone_required else "use existing checkout"
+        return [
+            f"Project: {self.manifest_path}",
+            f"Validation checkout: {self.validation_root} ({action})",
+            f"Validation source: {self.validation_url} @ {self.validation_ref}",
+            f"Provider: {self.provider_name}",
+            f"Assessment: {self.assessment_mode}",
+            "Selected domains: " + ", ".join(self.domains),
+            "Live infrastructure runs: disabled until explicitly enabled in the project",
+        ]
+
+
+def build_bootstrap_plan(
+    workspace: Path,
+    *,
+    provider_name: str,
+    domains: Sequence[str],
+    validation_root: Path | None = None,
+    validation_url: str = DEFAULT_VALIDATION_URL,
+    validation_ref: str = "main",
+    assessment_mode: AssessmentMode = "qualification",
+    profile: Path | None = None,
+    api_base_url: str | None = None,
+    api_spec: str | None = None,
+    auth_env: Sequence[str] = (),
+) -> BootstrapPlan:
+    if not PROVIDER_NAME_RE.fullmatch(provider_name):
+        raise ProjectError("Provider name must contain only lowercase letters, numbers, '_' and '-'.")
+    normalized_domains = tuple(dict.fromkeys(canonicalize_domain(item.strip()) for item in domains if item.strip()))
+    if not normalized_domains:
+        raise ProjectError("At least one assessment domain is required.")
+    unsupported = sorted(set(normalized_domains).difference(SUPPORTED_DOMAINS))
+    if unsupported:
+        raise ProjectError(f"Unsupported assessment domains: {', '.join(unsupported)}")
+    if assessment_mode not in {"qualification", "full_validation"}:
+        raise ProjectError(f"Unsupported assessment mode: {assessment_mode}")
+    if not validation_url.strip() or not validation_ref.strip():
+        raise ProjectError("Validation URL and ref must not be empty.")
+    invalid_env = [name for name in auth_env if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", name)]
+    if invalid_env:
+        raise ProjectError(f"Credential inputs must be environment variable names: {', '.join(invalid_env)}")
+
+    workspace = workspace.expanduser().resolve()
+    checkout = (validation_root or (workspace / "ai-cloud-validation")).expanduser().resolve()
+    return BootstrapPlan(
+        manifest_path=workspace / "isv-project.yaml",
+        validation_root=checkout,
+        validation_url=validation_url.strip(),
+        validation_ref=validation_ref.strip(),
+        provider_name=provider_name,
+        domains=normalized_domains,
+        assessment_mode=assessment_mode,
+        profile=profile.expanduser().resolve() if profile else None,
+        api_base_url=api_base_url.strip() if api_base_url else None,
+        api_spec=api_spec.strip() if api_spec else None,
+        auth_env=tuple(dict.fromkeys(auth_env)),
+        clone_required=not checkout.exists(),
+    )
+
+
+def execute_bootstrap(
+    plan: BootstrapPlan,
+    *,
+    overwrite: bool = False,
+    runner: CommandRunner | None = None,
+    timeout_seconds: int = 600,
+) -> ReadinessProject:
+    if plan.manifest_path.exists() and not overwrite:
+        raise ProjectError(f"Refusing to overwrite existing project: {plan.manifest_path}")
+    plan.manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    run = runner or _default_runner
+    if plan.clone_required:
+        result = run(
+            (
+                "git",
+                "clone",
+                "--branch",
+                plan.validation_ref,
+                "--single-branch",
+                plan.validation_url,
+                str(plan.validation_root),
+            ),
+            plan.manifest_path.parent,
+            timeout_seconds,
+        )
+        if result.returncode != 0:
+            details = (result.stderr or result.stdout or "").strip()
+            raise ProjectError(f"Validation checkout clone failed: {details or 'no output'}")
+    _validate_checkout(plan.validation_root)
+    commit_result = run(("git", "rev-parse", "HEAD"), plan.validation_root, 30)
+    commit = (commit_result.stdout or "").strip()
+    if commit_result.returncode != 0 or not COMMIT_RE.fullmatch(commit):
+        raise ProjectError("Could not resolve the validation checkout to an exact commit.")
+
+    providers_dir = plan.validation_root / "isvctl" / "configs" / "providers"
+    provider_path = providers_dir / plan.provider_name
+    state: ProviderState = "existing" if provider_path.is_dir() else "new"
+    manifest_dir = plan.manifest_path.parent
+    checkout_value = _portable_path(plan.validation_root, manifest_dir)
+    provider_value = _portable_path(provider_path, manifest_dir)
+    profile_value = _portable_path(plan.profile, manifest_dir) if plan.profile else None
+
+    apis: tuple[ApiInterface, ...] = ()
+    sources = [
+        ContextSource(
+            id="validation_issues",
+            kind="github_issues",
+            location="NVIDIA/ai-cloud-validation",
+            trust="advisory",
+            required=False,
+            domains=plan.domains,
+            labels=(),
+            query=None,
+        ),
+        ContextSource(
+            id="nsrg",
+            kind="web_url",
+            location=DEFAULT_NSRG_URL,
+            trust="reference",
+            required=False,
+            domains=plan.domains,
+            labels=(),
+            query=None,
+        ),
+        ContextSource(
+            id="nvidia_ai_cloud_ready",
+            kind="mcp_export",
+            location=".gapctl/context/nvidia-ai-cloud-ready.json",
+            trust="advisory",
+            required=False,
+            domains=plan.domains,
+            labels=(),
+            query="AI Cloud Ready qualification, validation, shared responsibility, and selected domain guidance",
+        ),
+    ]
+    if plan.api_base_url or plan.api_spec:
+        apis = (
+            ApiInterface(
+                id="primary_api",
+                kind="rest",
+                base_url=plan.api_base_url,
+                spec=plan.api_spec,
+                auth_env=plan.auth_env,
+                domains=plan.domains,
+            ),
+        )
+    if plan.api_spec:
+        sources.append(
+            ContextSource(
+                id="primary_api_spec",
+                kind="api_spec",
+                location=plan.api_spec,
+                trust="authoritative",
+                required=True,
+                domains=plan.domains,
+                labels=(),
+                query=None,
+            )
+        )
+
+    project = ReadinessProject(
+        schema_version=PROJECT_SCHEMA_VERSION,
+        validation=ValidationCheckout(
+            url=plan.validation_url,
+            ref=plan.validation_ref,
+            checkout=checkout_value,
+            resolved_commit=commit,
+        ),
+        provider=ProviderProject(name=plan.provider_name, path=provider_value, state=state),
+        assessment=Assessment(mode=plan.assessment_mode, domains=plan.domains, profile=profile_value),
+        apis=apis,
+        context_sources=tuple(sources),
+        execution=ExecutionPolicy(
+            run_environment="not_configured",
+            allow_live_runs=False,
+            credential_env=plan.auth_env,
+            max_attempts=3,
+            cleanup_required=True,
+        ),
+    )
+    validate_project(project.to_dict())
+    plan.manifest_path.write_text(yaml.safe_dump(project.to_dict(), sort_keys=False), encoding="utf-8")
+    return project
+
+
+def load_project(path: Path) -> ReadinessProject:
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    validate_project(raw)
+    return ReadinessProject(
+        schema_version=raw["schema_version"],
+        validation=ValidationCheckout(**raw["validation"]),
+        provider=ProviderProject(**raw["provider"]),
+        assessment=Assessment(
+            mode=raw["assessment"]["mode"],
+            domains=tuple(raw["assessment"]["domains"]),
+            profile=raw["assessment"]["profile"],
+        ),
+        apis=tuple(
+            ApiInterface(
+                id=item["id"],
+                kind=item["kind"],
+                base_url=item["base_url"],
+                spec=item["spec"],
+                auth_env=tuple(item["auth_env"]),
+                domains=tuple(item["domains"]),
+            )
+            for item in raw["apis"]
+        ),
+        context_sources=tuple(
+            ContextSource(
+                id=item["id"],
+                kind=item["kind"],
+                location=item["location"],
+                trust=item["trust"],
+                required=item["required"],
+                domains=tuple(item["domains"]),
+                labels=tuple(item["labels"]),
+                query=item["query"],
+            )
+            for item in raw["context_sources"]
+        ),
+        execution=ExecutionPolicy(
+            run_environment=raw["execution"]["run_environment"],
+            allow_live_runs=raw["execution"]["allow_live_runs"],
+            credential_env=tuple(raw["execution"]["credential_env"]),
+            max_attempts=raw["execution"]["max_attempts"],
+            cleanup_required=raw["execution"]["cleanup_required"],
+        ),
+    )
+
+
+def validate_project(raw: Any) -> None:
+    schema_path = Path(__file__).resolve().parents[2] / "schemas" / "project.schema.json"
+    schema = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+    try:
+        jsonschema.validate(raw, schema)
+    except jsonschema.ValidationError as exc:
+        location = ".".join(str(item) for item in exc.absolute_path) or "project"
+        raise ProjectError(f"Invalid project at {location}: {exc.message}") from exc
+    ids = [item["id"] for item in raw["apis"]] + [item["id"] for item in raw["context_sources"]]
+    if len(ids) != len(set(ids)):
+        raise ProjectError("API and context source IDs must be unique across the project.")
+    secrets = [value for value in raw["execution"]["credential_env"] if "=" in value]
+    if secrets:
+        raise ProjectError("Project files store credential environment variable names, never secret values.")
+
+
+def _validate_checkout(root: Path) -> None:
+    required = root / "isvctl" / "configs" / "providers" / "my-isv"
+    if not (root / ".git").exists() or not required.is_dir():
+        raise ProjectError(f"Not an ai-cloud-validation checkout: {root}")
+
+
+def _portable_path(path: Path, base: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(base.resolve()))
+    except ValueError:
+        return str(path.resolve())
+
+
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    return value
+
+
+def _default_runner(command: Sequence[str], cwd: Path, timeout_seconds: int) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        list(command),
+        cwd=cwd,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=timeout_seconds,
+    )

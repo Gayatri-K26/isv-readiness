@@ -22,18 +22,9 @@ K8S_ISV_INFO_FIELDS = [
     "provider API docs or repo access when setup scripts need TODO implementation",
 ]
 
-SCOPE_TEMPLATE_OWNS = {
-    "cluster_lifecycle": False,
-    "node_inventory": True,
-    "node_pools": False,
-    "gpu_operator": False,
-    "network_policy": False,
-    "storage_csi": False,
-    "identity_oidc": False,
-    "observability": False,
-    "workloads": False,
-    "api_network_acl": False,
-}
+# Missing ownership means unknown. Only an explicit SME/ISV answer may turn a
+# layer into in-scope (true) or out-of-scope (false).
+SCOPE_TEMPLATE_OWNS: dict[str, bool] = {}
 
 
 @dataclass(frozen=True)

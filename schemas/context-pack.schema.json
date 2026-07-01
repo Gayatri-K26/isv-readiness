@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nvidia.com/schemas/isv-readiness/context-pack-0.1.0.schema.json",
+  "title": "ISV Readiness Minimal Agent Context Pack",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project", "gap", "credentials", "constraints", "items", "budget"],
+  "properties": {
+    "schema_version": {"const": "0.1.0"},
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "assessment_mode", "selected_domains", "validation_commit", "api_interfaces"],
+      "properties": {
+        "provider": {"type": "string", "minLength": 1},
+        "assessment_mode": {"enum": ["qualification", "full_validation"]},
+        "selected_domains": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "validation_commit": {"type": ["string", "null"]},
+        "api_interfaces": {"type": "array", "items": {"type": "object"}}
+      }
+    },
+    "gap": {"type": "object"},
+    "credentials": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required_env", "available_env"],
+      "properties": {
+        "required_env": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "available_env": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+      }
+    },
+    "constraints": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_id", "kind", "trust", "origin", "sha256", "content", "truncated", "relevance"],
+        "properties": {
+          "source_id": {"type": "string", "minLength": 1},
+          "kind": {"type": "string", "minLength": 1},
+          "trust": {"enum": ["authoritative", "reference", "advisory"]},
+          "origin": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "content": {"type": "string"},
+          "truncated": {"type": "boolean"},
+          "relevance": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_chars", "used_chars", "omitted_items"],
+      "properties": {
+        "max_chars": {"type": "integer", "minimum": 1},
+        "used_chars": {"type": "integer", "minimum": 0},
+        "omitted_items": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

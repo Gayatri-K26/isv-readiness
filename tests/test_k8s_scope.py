@@ -77,6 +77,26 @@ class K8sScopeTests(unittest.TestCase):
         self.assertEqual(scope.expected_skips, ["K8sNimHelmWorkload-1b"])
         self.assertEqual(scope.run_env, "dsx-air-admin-node")
 
+    def test_scope_preserves_unknown_ownership_and_rejects_null(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            path = Path(tempdir) / "scope.json"
+            path.write_text(json.dumps({"provider": "acme", "owns": {}}), encoding="utf-8")
+            self.assertIsNone(load_k8s_scope(path).owns_layer("node_inventory"))
+
+            path.write_text(
+                json.dumps({"provider": "acme", "owns": {"node_inventory": None}}),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "leave unknown keys absent"):
+                load_k8s_scope(path)
+
+            path.write_text(
+                json.dumps({"provider": "acme", "owns": {"invented_layer": True}}),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "Unknown Kubernetes ownership layers"):
+                load_k8s_scope(path)
+
 
 if __name__ == "__main__":
     unittest.main()

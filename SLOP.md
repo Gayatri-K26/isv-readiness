@@ -592,3 +592,87 @@ write authority.
 - `uvx ruff check src tests`: passed.
 - Both new JSON schemas, Python compilation, the lockfile, and
   `git diff --check` passed.
+
+## Step 10 - Workspace Bootstrap and Agent Context Boundary
+
+### Objective
+
+Give an ISV one reproducible entry point that can adopt or clone
+`ai-cloud-validation`, pin the exact upstream commit, define the ISV-owned
+assessment scope, and assemble useful implementation context without exposing
+credentials or allowing secondary sources to redefine validation.
+
+### Brain-Food Investigation
+
+- The public validation repository describes itself as a provider-agnostic test
+  framework that maps high-level requirements to provider stubs. Its public
+  issues also contain validation backlog and requirement discussions that can
+  clarify intent but may be newer, older, or less authoritative than the
+  installed checkout.
+- The public NSRG describes capability layers and shared infrastructure
+  responsibilities without prescribing a product implementation. It is useful
+  for qualification and scope questions, not as an executable pass/fail oracle.
+- Available NVIDIA program material distinguishes selected-scope qualification
+  from integrated full-stack validation. Partial solutions can be assessed and
+  documented, but selected green rows must not be presented as complete
+  metal-to-model validation.
+- MCP availability belongs to the agent host, not this Python package. A local
+  CLI cannot assume a Confluence connector, authentication model, or server
+  name. A normalized import boundary preserves portability while allowing an
+  authorized host agent to contribute selected evidence.
+
+### Decisions
+
+1. Use a local agentic CLI/workflow engine as the product boundary. Keep scope,
+   selection, verification, and execution deterministic; reserve a frontier
+   model for bounded candidate synthesis.
+2. Add `isv-project.yaml` as the engagement root of trust. Record repository
+   URL/ref and resolved commit, provider discovery state, assessment mode,
+   selected domains, API/spec references, context declarations, and execution
+   policy.
+3. Store only credential environment-variable names. Reject assignment-shaped
+   values during bootstrap and never serialize values when reporting which
+   inputs are available.
+4. Make bootstrap dry-run by default. `--write` may clone a missing checkout but
+   never pulls, switches, or rewrites an existing checkout.
+5. Make all HTTP and GitHub synchronization opt-in through `--allow-network`.
+   Use `GITHUB_TOKEN` only in request headers and persist only filtered issue
+   fields.
+6. Normalize local files, API specs, public docs, issues, and MCP exports into a
+   redacted cache. Reject oversized inputs and exclude common secret files from
+   tree ingestion.
+7. Build one context pack per selected gap. Prefer executable contracts and API
+   specifications, limit excerpts by relevance and character budget, and mark
+   issues/MCP exports advisory.
+8. Default Kubernetes ownership to unknown. Require literal booleans for
+   answered layers and reject null/coerced/unknown keys so unanswered intake is
+   never silently converted to out-of-scope.
+
+### Changed Files
+
+- `schemas/project.schema.json`
+- `schemas/context-pack.schema.json`
+- `src/isv_readiness/project.py`
+- `src/isv_readiness/context.py`
+- `src/isv_readiness/scan/k8s_onboard.py`
+- `src/isv_readiness/scan/k8s_scope.py`
+- `src/isv_readiness/cli.py`
+- `tests/test_project.py`
+- `tests/test_context.py`
+- `tests/test_k8s_onboard.py`
+- `tests/test_k8s_scope.py`
+- `README.md`
+- `docs/architecture.md`
+- `AGENTS.md`
+- `SLOP.md`
+
+### Verification
+
+- Focused tests cover dry-run bootstrap, existing checkout adoption, clone
+  planning, exact commit pinning, provider discovery, project schema validity,
+  credential-name validation, network opt-in, GitHub PR filtering, token
+  non-persistence, redaction, MCP import, relevance filtering, context-pack
+  schema validity, and unknown Kubernetes ownership.
+- `uv run python -m unittest discover -s tests`: 66 tests passed.
+- `uvx ruff check src tests`, Python compilation, all JSON schemas,
+  `uv lock --check`, and `git diff --check`: passed.
