@@ -676,3 +676,70 @@ credentials or allowing secondary sources to redefine validation.
 - `uv run python -m unittest discover -s tests`: 66 tests passed.
 - `uvx ruff check src tests`, Python compilation, all JSON schemas,
   `uv lock --check`, and `git diff --check`: passed.
+
+## Step 11 - Generator Contract and Transactional Multi-file Changes
+
+### Objective
+
+Fill the agentic generation seam without coupling the workflow to one model
+vendor or giving a model direct filesystem authority, while supporting the
+small multi-file edits real provider onboarding requires.
+
+### Decisions
+
+1. Use an explicit command adapter as the portable model boundary. Send one
+   JSON request over stdin, require one JSON object on stdout, invoke without a
+   shell, enforce a timeout, and pass only explicitly allowlisted environment
+   variables in addition to minimal process variables.
+2. Bind generator output to both the selected gap and canonical context-pack
+   SHA-256. Reject Markdown fences, logs mixed with output, wrong gap IDs,
+   context drift, duplicate targets, bad content hashes, and oversized sets.
+3. Keep the model's output declarative. It may request `create` or `replace`,
+   but the deterministic guard resolves every path, validates syntax/secrets,
+   checks operation preconditions, and emits the actual patch.
+4. Allow at most 12 files and 2 MB. Permit provider `scripts/`, only the config
+   filename corresponding to the selected domain, and only the exact selected
+   provider wrapper for Kubernetes. Require the scanner-selected remediation
+   target to be included so helper/config edits cannot replace the primary fix.
+5. Preserve the earlier single-file commands for compatibility while making
+   `generate`, `change-propose`, `change-verify`, and `change-apply` the complete
+   multi-file path.
+6. Verify the whole set in an isolated provider copy and reject a selected gap
+   that does not pass or any newly introduced static regression.
+7. Treat application as a transaction: re-derive the proposal, compare all
+   source/content/patch hashes, stage every file on its destination filesystem,
+   create durable per-transaction backups, then replace. Restore replaced files
+   and remove newly created files if a later replacement or hash check fails.
+8. Keep live infrastructure execution outside this stage. Static success makes
+   a change eligible for a reviewed targeted run; it is not dynamic proof.
+
+### Changed Files
+
+- `schemas/change-set.schema.json`
+- `schemas/change-proposal.schema.json`
+- `schemas/change-verification.schema.json`
+- `schemas/change-application.schema.json`
+- `src/isv_readiness/generation.py`
+- `src/isv_readiness/changes.py`
+- `src/isv_readiness/change_verification.py`
+- `src/isv_readiness/fixes.py`
+- `src/isv_readiness/verification.py`
+- `src/isv_readiness/cli.py`
+- `tests/test_generation.py`
+- `tests/test_changes.py`
+- `tests/test_change_verification.py`
+- `README.md`
+- `docs/architecture.md`
+- `AGENTS.md`
+- `SLOP.md`
+
+### Verification
+
+- Tests cover strict generator I/O, environment isolation, context/gap binding,
+  content hashes, duplicate targets, combined patches, selected-domain config,
+  Kubernetes wrapper limits, required primary target, secret rejection,
+  isolated multi-file success, source non-mutation, schema validation,
+  transactional backups, application, and drift rejection.
+- `uv run python -m unittest discover -s tests`: 74 tests passed.
+- `uvx ruff check src tests`, Python compilation, all JSON schemas, and
+  `git diff --check`: passed.

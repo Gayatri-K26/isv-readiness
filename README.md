@@ -20,6 +20,10 @@ Implemented:
   public documentation, GitHub issues, and host-exported MCP content.
 - Bounded per-gap context packs with source trust, hashes, credential-name-only
   availability, and relevance filtering.
+- Explicit command-based generator adapter with a strict JSON/stdin contract
+  and hash-bound multi-file change-set output.
+- Transactional multi-file proposal, isolated static verification, backups,
+  drift checks, explicit application, and rollback-on-application-failure.
 - Versioned `solution-profile.json` contract for components, dependencies,
   actors, NSRG layers, domains, capability ownership, and validation mode.
 - Draft BCM 11 and NVIDIA Mission Control 2.3 reference profiles based on
@@ -42,7 +46,8 @@ Implemented:
 
 Not implemented yet:
 
-- Frontier-model integration that produces candidate source files.
+- Built-in model-vendor adapters; the implemented generator boundary accepts an
+  explicitly selected command adapter.
 - Live/dynamic targeted verification, rollback commands, and pull-request
   submission.
 - An autonomous runner that repeatedly scans, generates, applies, and verifies;
@@ -211,6 +216,47 @@ authoritative. Reference implementations and NSRG material are guidance.
 GitHub issues and MCP exports are advisory and cannot change scope, ownership,
 or pass/fail results.
 
+Run an explicitly chosen model adapter after reviewing the context pack:
+
+```bash
+gapctl generate \
+  --context-pack context-pack.json \
+  --generator /path/to/model-adapter \
+  --generator-env MODEL_API_KEY \
+  --out changes.json
+
+gapctl change-propose \
+  --in gaps.json \
+  --provider-repo /path/to/provider \
+  --changes changes.json \
+  --patch-out proposal.patch \
+  --out proposal.json
+
+gapctl change-verify \
+  --in gaps.json \
+  --provider-repo /path/to/provider \
+  --changes changes.json \
+  --validation-root /path/to/ai-cloud-validation \
+  --out change-verification.json
+```
+
+The generator runs without a shell and receives only an explicit environment
+allowlist. Its output may touch up to 12 files, but the deterministic guard
+requires the selected target and restricts additional edits to provider scripts,
+the selected domain config, and the exact Kubernetes wrapper. Apply a successful
+manifest only after reviewing the patch:
+
+```bash
+gapctl change-apply \
+  --in gaps.json \
+  --provider-repo /path/to/provider \
+  --changes changes.json \
+  --verification change-verification.json \
+  --backup-dir backups \
+  --out application.json \
+  --apply
+```
+
 ### 6. Run or ingest one dynamic domain
 
 Run a configured domain in place:
@@ -352,6 +398,14 @@ retry budgets stop the controller rather than falling through to code changes.
   selected assessment scope, API/context declarations, and execution policy.
 - [schemas/context-pack.schema.json](schemas/context-pack.schema.json): bounded,
   redacted, source-ranked input for one selected gap.
+- [schemas/change-set.schema.json](schemas/change-set.schema.json): generated,
+  context-bound multi-file provider changes.
+- [schemas/change-proposal.schema.json](schemas/change-proposal.schema.json):
+  guarded combined patch and per-file before/after hashes.
+- [schemas/change-verification.schema.json](schemas/change-verification.schema.json):
+  isolated rescan result for the complete transaction.
+- [schemas/change-application.schema.json](schemas/change-application.schema.json):
+  applied files and durable backup locations.
 - [schemas/gaps.schema.json](schemas/gaps.schema.json): deterministic flat scan
   and dynamic-result rows.
 - [schemas/validation-plan.schema.json](schemas/validation-plan.schema.json):

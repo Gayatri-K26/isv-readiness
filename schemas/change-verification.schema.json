@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nvidia.com/schemas/isv-readiness/change-verification-0.1.0.schema.json",
+  "title": "ISV Readiness Multi-file Verification Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "verification_mode", "gap_id", "domain", "change_set_sha256", "patch_sha256", "files", "selected_status_before", "selected_status_after", "regressions", "success"],
+  "properties": {
+    "schema_version": {"const": "0.1.0"},
+    "verification_mode": {"const": "isolated_static_change_set_rescan"},
+    "gap_id": {"type": "string"},
+    "domain": {"type": "string"},
+    "change_set_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "patch_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "files": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/file"}},
+    "selected_status_before": {"type": "string"},
+    "selected_status_after": {"type": ["string", "null"]},
+    "regressions": {"type": "array", "items": {"type": "string"}},
+    "success": {"type": "boolean"}
+  },
+  "$defs": {
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_root", "path", "operation", "before_sha256", "after_sha256"],
+      "properties": {
+        "target_root": {"enum": ["provider", "providers"]},
+        "path": {"type": "string"},
+        "operation": {"enum": ["create", "replace"]},
+        "before_sha256": {"type": ["string", "null"]},
+        "after_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

@@ -119,7 +119,7 @@ def verify_fix_candidate(
 
     selected_after = next((row for row in rescanned["rows"] if row.get("id") == gap_id), None)
     selected_status_after = selected_after.get("status") if selected_after else None
-    regressions = _find_regressions(report, rescanned, domain=domain, selected_gap_id=gap_id)
+    regressions = find_regressions(report, rescanned, domain=domain, selected_gap_id=gap_id)
     success = selected_status_after == "pass" and not regressions
     return VerificationManifest(
         schema_version=VERIFICATION_MANIFEST_VERSION,
@@ -251,7 +251,7 @@ def _copy_top_level_wrapper(provider_root: Path, isolated_provider: Path) -> Non
             shutil.copy2(wrapper, isolated_provider.with_suffix(suffix))
 
 
-def _find_regressions(
+def find_regressions(
     baseline: dict[str, Any],
     rescanned: dict[str, Any],
     *,

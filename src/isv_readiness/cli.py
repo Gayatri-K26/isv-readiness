@@ -7,6 +7,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+from isv_readiness.change_verification import (
+    apply_verified_change_set,
+    load_change_verification,
+    verify_change_set,
+)
+from isv_readiness.changes import build_change_proposal, load_change_set
 from isv_readiness.context import (
     ContextError,
     build_context_pack,
@@ -14,6 +20,7 @@ from isv_readiness.context import (
     sync_context_sources,
 )
 from isv_readiness.fixes import FixGuardrailError, build_fix_proposal
+from isv_readiness.generation import run_generator
 from isv_readiness.loop import LoopStateError, advance_loop, load_loop_state
 from isv_readiness.onboarding import (
     OnboardingError,
@@ -115,6 +122,50 @@ def _build_parser() -> argparse.ArgumentParser:
     context_pack_parser.add_argument("--max-chars", type=int, default=48_000)
     context_pack_parser.add_argument("--out", type=Path, required=True)
     context_pack_parser.set_defaults(handler=_context_pack)
+
+    generate_parser = subparsers.add_parser(
+        "generate", help="Run an explicit generator adapter and require a schema-valid, hash-bound change set"
+    )
+    generate_parser.add_argument("--context-pack", type=Path, required=True)
+    generate_parser.add_argument("--generator", required=True, help="Generator adapter executable (no shell)")
+    generate_parser.add_argument("--generator-arg", action="append", default=[])
+    generate_parser.add_argument("--generator-env", action="append", default=[])
+    generate_parser.add_argument("--cwd", type=Path, default=Path.cwd())
+    generate_parser.add_argument("--timeout", type=int, default=300)
+    generate_parser.add_argument("--out", type=Path, required=True)
+    generate_parser.set_defaults(handler=_generate)
+
+    change_propose_parser = subparsers.add_parser(
+        "change-propose", help="Guard a generated multi-file change set and emit an auditable proposal"
+    )
+    change_propose_parser.add_argument("--in", dest="input_path", type=Path, required=True, help="gaps.json")
+    change_propose_parser.add_argument("--provider-repo", type=Path, required=True)
+    change_propose_parser.add_argument("--changes", type=Path, required=True)
+    change_propose_parser.add_argument("--out", type=Path, required=True)
+    change_propose_parser.add_argument("--patch-out", type=Path, default=None)
+    change_propose_parser.set_defaults(handler=_change_propose)
+
+    change_verify_parser = subparsers.add_parser(
+        "change-verify", help="Verify a guarded multi-file change set in an isolated static rescan"
+    )
+    change_verify_parser.add_argument("--in", dest="input_path", type=Path, required=True, help="gaps.json")
+    change_verify_parser.add_argument("--provider-repo", type=Path, required=True)
+    change_verify_parser.add_argument("--changes", type=Path, required=True)
+    change_verify_parser.add_argument("--validation-root", type=Path, default=None)
+    change_verify_parser.add_argument("--out", type=Path, required=True)
+    change_verify_parser.set_defaults(handler=_change_verify)
+
+    change_apply_parser = subparsers.add_parser(
+        "change-apply", help="Explicitly apply a verified multi-file transaction with backups"
+    )
+    change_apply_parser.add_argument("--in", dest="input_path", type=Path, required=True, help="gaps.json")
+    change_apply_parser.add_argument("--provider-repo", type=Path, required=True)
+    change_apply_parser.add_argument("--changes", type=Path, required=True)
+    change_apply_parser.add_argument("--verification", type=Path, required=True)
+    change_apply_parser.add_argument("--backup-dir", type=Path, required=True)
+    change_apply_parser.add_argument("--out", type=Path, required=True)
+    change_apply_parser.add_argument("--apply", action="store_true")
+    change_apply_parser.set_defaults(handler=_change_apply)
 
     scan_parser = subparsers.add_parser("scan", help="Build a deterministic static/dynamic gaps.json report")
     scan_parser.add_argument("-p", "--provider-repo", type=Path, required=True)
@@ -297,6 +348,90 @@ def _context_pack(args: argparse.Namespace) -> int:
     print(f"Wrote context pack: {args.out}")
     print(f"Context items: {len(pack.items)}")
     print(f"Budget: {pack.budget['used_chars']}/{pack.budget['max_chars']} characters")
+    return 0
+
+
+def _generate(args: argparse.Namespace) -> int:
+    try:
+        context_pack = json.loads(args.context_pack.read_text(encoding="utf-8"))
+        change_set = run_generator(
+            context_pack,
+            command=[args.generator, *args.generator_arg],
+            cwd=args.cwd,
+            pass_env=args.generator_env,
+            timeout_seconds=args.timeout,
+        )
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps(change_set.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except (OSError, json.JSONDecodeError, subprocess.SubprocessError, FixGuardrailError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(f"Wrote generated change set: {args.out}")
+    print(f"Gap: {change_set.gap_id}")
+    print(f"Files: {len(change_set.changes)}")
+    print("No provider source was changed; run change-propose and review the patch next.")
+    return 0
+
+
+def _change_propose(args: argparse.Namespace) -> int:
+    try:
+        proposal = build_change_proposal(
+            load_report(args.input_path),
+            provider_repo=args.provider_repo,
+            change_set=load_change_set(args.changes),
+        )
+        args.out.write_text(json.dumps(proposal.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        if args.patch_out:
+            args.patch_out.write_text(proposal.patch, encoding="utf-8")
+    except (OSError, json.JSONDecodeError, FixGuardrailError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(f"Wrote guarded change proposal: {args.out}")
+    if args.patch_out:
+        print(f"Wrote review patch: {args.patch_out}")
+    print(f"Files: {len(proposal.files)}")
+    print("Provider source was not modified.")
+    return 0
+
+
+def _change_verify(args: argparse.Namespace) -> int:
+    try:
+        manifest = verify_change_set(
+            load_report(args.input_path),
+            provider_repo=args.provider_repo,
+            change_set=load_change_set(args.changes),
+            validation_root=args.validation_root,
+        )
+        args.out.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except (OSError, json.JSONDecodeError, FixGuardrailError, VerificationError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(f"Verification success: {'yes' if manifest.success else 'no'}")
+    print(f"Files: {len(manifest.files)}")
+    print(f"Regressions: {len(manifest.regressions)}")
+    print(f"Manifest: {args.out}")
+    return 0 if manifest.success else 1
+
+
+def _change_apply(args: argparse.Namespace) -> int:
+    if not args.apply:
+        print("Refusing to change source without the explicit --apply flag.", file=sys.stderr)
+        return 2
+    try:
+        result = apply_verified_change_set(
+            load_report(args.input_path),
+            provider_repo=args.provider_repo,
+            change_set=load_change_set(args.changes),
+            manifest=load_change_verification(args.verification),
+            backup_dir=args.backup_dir,
+        )
+        args.out.write_text(json.dumps(result.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except (OSError, json.JSONDecodeError, FixGuardrailError, VerificationError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(f"Applied verified change set: {len(result.files)} file(s)")
+    print(f"Result: {args.out}")
+    print("Run a fresh static scan and the reviewed targeted live validation next.")
     return 0
 
 

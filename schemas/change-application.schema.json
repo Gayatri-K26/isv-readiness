@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nvidia.com/schemas/isv-readiness/change-application-0.1.0.schema.json",
+  "title": "ISV Readiness Multi-file Application Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "gap_id", "change_set_sha256", "patch_sha256", "files", "applied"],
+  "properties": {
+    "schema_version": {"const": "0.1.0"},
+    "gap_id": {"type": "string"},
+    "change_set_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "patch_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target_root", "path", "before_sha256", "after_sha256", "backup_path"],
+        "properties": {
+          "target_root": {"enum": ["provider", "providers"]},
+          "path": {"type": "string"},
+          "before_sha256": {"type": ["string", "null"]},
+          "after_sha256": {"type": "string"},
+          "backup_path": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "applied": {"const": true}
+  }
+}

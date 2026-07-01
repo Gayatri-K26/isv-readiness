@@ -82,8 +82,7 @@ def build_fix_proposal(
     except UnicodeDecodeError as exc:
         raise FixGuardrailError("Candidate must be UTF-8 text.") from exc
 
-    _reject_secrets(candidate_text)
-    _validate_candidate_syntax(relative_target, candidate_text)
+    validate_candidate_content(relative_target, candidate_text)
 
     creates_file = not target.exists()
     original_text = target.read_text(encoding="utf-8") if target.exists() else ""
@@ -132,6 +131,12 @@ def _reject_secrets(candidate_text: str) -> None:
     for label, pattern in SECRET_PATTERNS:
         if pattern.search(candidate_text):
             raise FixGuardrailError(f"Candidate contains secret-looking material ({label}).")
+
+
+def validate_candidate_content(relative_target: Path, candidate_text: str) -> None:
+    """Apply the reusable content boundary used by single and multi-file fixes."""
+    _reject_secrets(candidate_text)
+    _validate_candidate_syntax(relative_target, candidate_text)
 
 
 def _validate_candidate_syntax(relative_target: Path, candidate_text: str) -> None:

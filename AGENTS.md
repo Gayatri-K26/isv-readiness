@@ -12,8 +12,8 @@ guardrails, verification, and application as separate stages.
   and test outcomes.
 - Do not edit NVIDIA-owned suites, validation classes, catalog code, or engine
   code from this repository.
-- Limit generated fixes to profile-approved provider scripts under the selected
-  provider's `scripts/` directory.
+- Limit generated fixes to profile-approved provider scripts, the selected
+  domain's scaffolded config, and the exact selected Kubernetes wrapper.
 - Never infer product ownership from limited lab access. Profile selectors and
   SME answers determine ownership; unresolved facts remain
   `request_scope_decision` or `lab_env`.
@@ -62,6 +62,10 @@ python3 -m json.tool schemas/verification-manifest.schema.json >/dev/null
 python3 -m json.tool schemas/application-result.schema.json >/dev/null
 python3 -m json.tool schemas/project.schema.json >/dev/null
 python3 -m json.tool schemas/context-pack.schema.json >/dev/null
+python3 -m json.tool schemas/change-set.schema.json >/dev/null
+python3 -m json.tool schemas/change-proposal.schema.json >/dev/null
+python3 -m json.tool schemas/change-verification.schema.json >/dev/null
+python3 -m json.tool schemas/change-application.schema.json >/dev/null
 uv lock --check
 git diff --check
 ```

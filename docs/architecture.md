@@ -62,10 +62,11 @@ flowchart TD
     Actions --> Skip[Documented skip or scope decision]
 ```
 
-Solid contracts through guarded patch proposal, isolated static verification,
-explicit hash-bound application, and deterministic loop-state advancement are
-implemented. Frontier-model candidate generation, live/dynamic verification,
-rollback/PR submission, and an autonomous runner remain future work.
+Solid contracts through context collection, an explicit generator adapter,
+guarded multi-file patch proposal, isolated static verification, transactional
+hash-bound application, and deterministic loop-state advancement are
+implemented. Built-in model-vendor adapters, live/dynamic verification, PR
+submission, and an autonomous runner remain future work.
 
 ## Journey Stages
 
@@ -211,7 +212,7 @@ remain deterministic. The current generator seam is a candidate replacement
 file supplied to `gapctl fix`; this allows human-authored, model-authored, or
 tool-authored candidates to pass through the same policy.
 
-The generator interface should accept a minimal context pack:
+The generator interface accepts a minimal context pack:
 
 - one gap row
 - selected provider script and config fragments
@@ -222,14 +223,19 @@ The generator interface should accept a minimal context pack:
 - one relevant reference implementation when license and policy permit
 - previous attempt and verifier feedback
 
-The guardrail emits a unified patch without modifying source. The verifier
+The command adapter receives a JSON request on stdin, runs without a shell and
+with an explicit environment allowlist, and must return one schema-valid change
+set bound to the context-pack hash. The guardrail emits a combined unified patch
+without modifying source. It requires the selected remediation target and
+allows additional changes only under provider scripts, the selected domain
+config, or the exact Kubernetes wrapper. The verifier
 copies the provider into a temporary workspace, installs the candidate there,
 rescans the selected static domain, and records selected-row status and
-regressions in a hash-bound manifest. Application requires an explicit flag,
-rebuilds the proposal from current inputs, compares candidate/patch/target
-hashes, creates a backup, and atomically replaces the provider script. A future
-model adapter can also return a structured explanation, but it never chooses
-the next gap, retry budget, allowed path, or merge action.
+regressions in a hash-bound manifest. Transactional application requires an
+explicit flag, rebuilds the proposal, compares every hash, stages all files,
+creates backups, and restores already-applied files if the transaction fails.
+The model never chooses the next gap, retry budget, allowed path, or merge
+action.
 
 ## Deterministic Loop
 
@@ -309,6 +315,8 @@ solution supplies them.
 | Version-aware catalog and dry-run adapter | Implemented |
 | Pinned workspace bootstrap and project contract | Implemented |
 | Redacted context sync and bounded context pack | Implemented |
+| Explicit generator command adapter and change-set contract | Implemented |
+| Multi-file guard, isolated verifier, and transactional apply | Implemented |
 | Validation plan schema/export | Implemented |
 | Solution graph and responsibility schema | Implemented |
 | BCM and Mission Control draft profiles | Implemented |
@@ -323,7 +331,7 @@ solution supplies them.
 | Isolated static verifier and manifest | Implemented |
 | Explicit hash-bound atomic application | Implemented |
 | Persistent deterministic loop-state controller | Implemented |
-| Frontier generator integration | Next |
+| Built-in model-vendor generator adapters | Optional next |
 | Live/dynamic targeted verifier and rollback command | Next |
 | Autonomous until-green runner | Next |
 | MCP enrichment adapters | Later, optional |
