@@ -840,3 +840,48 @@ without weakening scope, review, credential, or infrastructure gates.
 - `uv run python -m unittest discover -s tests`: 83 tests passed.
 - `uvx ruff check src tests`, Python compilation, all JSON schemas,
   `uv lock --check`, and `git diff --check`: passed.
+
+## Step 13 - Concrete Codex Generator Adapter
+
+### Objective
+
+Ship one usable model adapter without coupling the workflow contracts to Codex
+or granting a generation subprocess repository write authority.
+
+### Evidence and Decisions
+
+1. The installed Codex CLI exposes non-interactive stdin plus
+   `--output-schema`, `--output-last-message`, `--ephemeral`,
+   `--ignore-user-config`, and `--sandbox read-only`.
+2. Add `gapctl-codex-generator` as a reference implementation of the existing
+   command-adapter contract. It writes the request's output schema into an empty
+   temporary directory, sends the complete redacted request over stdin, and
+   reads only the schema-constrained final-message file.
+3. Run Codex ephemerally, ignore user configuration, skip the Git-repository
+   requirement, and select a read-only sandbox. The adapter therefore has no
+   provider checkout in its working directory and cannot directly implement or
+   apply its proposal.
+4. Keep model selection optional. Codex authentication remains owned by the
+   installed CLI; the adapter does not read, accept, or serialize an API key.
+5. Emit one compact JSON object to stdout. All Codex event/progress output stays
+   inside the adapter process, and the existing generator/change-set guards
+   independently revalidate the result.
+
+### Changed Files
+
+- `src/isv_readiness/codex_generator.py`
+- `tests/test_codex_generator.py`
+- `pyproject.toml`
+- `README.md`
+- `docs/architecture.md`
+- `SLOP.md`
+
+### Verification
+
+- Tests cover Codex executable selection, ephemeral/user-config/read-only
+  flags, stdin request delivery, output-schema/final-message paths, optional
+  model selection, nonzero exit handling, missing schema, and missing output.
+- `uv run python -m unittest discover -s tests`: 85 tests passed.
+- `uvx ruff check src tests`, Python compilation, all JSON schemas,
+  `uv lock --check`, `git diff --check`, and the installed adapter `--help`:
+  passed.

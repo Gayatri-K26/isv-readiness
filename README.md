@@ -22,6 +22,8 @@ Implemented:
   availability, and relevance filtering.
 - Explicit command-based generator adapter with a strict JSON/stdin contract
   and hash-bound multi-file change-set output.
+- Reference `gapctl-codex-generator` adapter that uses Codex ephemeral,
+  schema-constrained, read-only execution in an empty temporary directory.
 - Transactional multi-file proposal, isolated static verification, backups,
   drift checks, explicit application, and rollback-on-application-failure.
 - Policy-gated targeted/full-domain live runs with pinned-checkout enforcement,
@@ -52,8 +54,8 @@ Implemented:
 
 Not implemented yet:
 
-- Built-in model-vendor adapters; the implemented generator boundary accepts an
-  explicitly selected command adapter.
+- Additional model-vendor-native adapters; the command contract and Codex
+  reference adapter are implemented.
 - Pull-request submission and publication workflows.
 - Publication workflows. The current boundary ends with a reproducible
   qualification or validation bundle.
@@ -229,8 +231,7 @@ Run an explicitly chosen model adapter after reviewing the context pack:
 ```bash
 gapctl generate \
   --context-pack context-pack.json \
-  --generator /path/to/model-adapter \
-  --generator-env MODEL_API_KEY \
+  --generator gapctl-codex-generator \
   --out changes.json
 
 gapctl change-propose \
@@ -251,8 +252,14 @@ gapctl change-verify \
 The generator runs without a shell and receives only an explicit environment
 allowlist. Its output may touch up to 12 files, but the deterministic guard
 requires the selected target and restricts additional edits to provider scripts,
-the selected domain config, and the exact Kubernetes wrapper. Apply a successful
-manifest only after reviewing the patch:
+the selected domain config, and the exact Kubernetes wrapper.
+
+The Codex reference adapter invokes `codex exec` with `--ephemeral`,
+`--ignore-user-config`, `--sandbox read-only`, `--output-schema`, and an empty
+temporary working directory. Other model hosts can implement the same stdin /
+stdout contract and be selected with `--generator`.
+
+Apply a successful manifest only after reviewing the patch:
 
 ```bash
 gapctl change-apply \
@@ -287,8 +294,7 @@ gapctl agent-run \
   --domain vm \
   --work-dir .gapctl/agent/vm \
   --onboard \
-  --generator /path/to/model-adapter \
-  --generator-env MODEL_API_KEY
+  --generator gapctl-codex-generator
 ```
 
 After reviewing the emitted patch, bind approval to the printed hash:
@@ -298,8 +304,7 @@ gapctl agent-run \
   --project isv-project.yaml \
   --domain vm \
   --work-dir .gapctl/agent/vm \
-  --generator /path/to/model-adapter \
-  --generator-env MODEL_API_KEY \
+  --generator gapctl-codex-generator \
   --approve-patch <exact-sha256> \
   --apply \
   --run-live

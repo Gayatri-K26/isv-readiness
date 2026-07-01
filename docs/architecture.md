@@ -66,8 +66,8 @@ Solid contracts through context collection, an explicit generator adapter,
 guarded multi-file patch proposal, isolated static verification, transactional
 hash-bound application/rollback, targeted and full-domain live verification,
 persistent agent orchestration, and evidence bundling are implemented. Built-in
-model-vendor adapters, PR submission, and publication remain optional future
-integrations.
+model-vendor adapters beyond the included Codex reference adapter, PR
+submission, and publication remain optional future integrations.
 
 ## Journey Stages
 
@@ -338,6 +338,7 @@ solution supplies them.
 | Pinned workspace bootstrap and project contract | Implemented |
 | Redacted context sync and bounded context pack | Implemented |
 | Explicit generator command adapter and change-set contract | Implemented |
+| Ephemeral schema-constrained Codex generator adapter | Implemented |
 | Multi-file guard, isolated verifier, and transactional apply | Implemented |
 | Validation plan schema/export | Implemented |
 | Solution graph and responsibility schema | Implemented |
@@ -356,7 +357,7 @@ solution supplies them.
 | Explicit rollback and policy-gated live verifier | Implemented |
 | Persistent review-gated agent runner | Implemented |
 | Sanitized evidence bundle | Implemented |
-| Built-in model-vendor generator adapters | Optional next |
+| Additional model-vendor generator adapters | Optional next |
 | MCP enrichment adapters | Later, optional |
 | Pull-request creation | Optional next |
 | Publication workflow | Deferred |
