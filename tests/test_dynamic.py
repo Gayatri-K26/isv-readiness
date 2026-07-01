@@ -11,7 +11,6 @@ from isv_readiness.cli import main
 from isv_readiness.scan.dynamic import DynamicArtifacts, scan_dynamic_artifacts
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
 
-
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
 PROVIDER = FIXTURES / "provider_repo"

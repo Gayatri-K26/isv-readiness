@@ -6,9 +6,8 @@ decision log, not a transcript of private model reasoning.
 
 ## Working Assumptions
 
-- "BMC" in the implementation request means NVIDIA Base Command Manager (BCM).
-  If it instead means Baseboard Management Controller, the reference profile
-  will be corrected without changing the solution model.
+- The user confirmed that "BMC" in the implementation request means NVIDIA
+  Base Command Manager (BCM), not Baseboard Management Controller.
 - Publication remains deferred. The current boundary ends with a reproducible
   technical qualification or validation bundle.
 - Kubernetes remains the first executable vertical slice, but shared contracts
@@ -102,7 +101,8 @@ private Python APIs or one revision of the upstream YAML layout.
   sibling `ai-cloud-validation` editable source is resolved as one setuptools
   package with three top-level projects. This packaging/tooling issue is kept
   visible for the CLI integration step; no dependency metadata was changed as
-  part of the adapter commit.
+  part of the adapter commit. It was resolved in Step 5d by using the supported
+  external CLI boundary instead of an umbrella editable package dependency.
 
 ## Step 3 - Scanner Contract-Drift Integration
 
@@ -336,4 +336,57 @@ specialized K8s ownership classifier.
   preservation.
 - `PYTHONPATH=src python3 -m unittest discover -s tests -v`: 40 tests passed.
 - `python3 -m compileall -q src tests`: passed.
+- `git diff --check`: passed.
+
+## Step 5d - Documentation, Packaging, and End-to-End Verification
+
+### Objective
+
+Make the implemented qualify-to-validate flow reproducible from the CLI and
+remove development setup that contradicted the supported integration boundary.
+
+### Decisions
+
+1. Document the complete agentic architecture, deterministic contracts,
+   guardrails, stage gates, action routes, and current-versus-next status.
+2. Remove the direct editable dependency on the `ai-cloud-validation` umbrella
+   project. `isv-readiness` shells out to a sibling checkout or an independently
+   installed `isvctl`; it does not import the multi-project workspace as one
+   package.
+3. Commit the compact `uv.lock` for the actual runtime dependencies.
+4. Permit `gapctl plan` to omit `--validation-root` when `isvctl` is already on
+   `PATH`.
+5. Exclude provider fixtures from Ruff because they model externally owned code;
+   lint all project-owned source and tests.
+
+### Changed Files
+
+- `README.md`
+- `docs/architecture.md`
+- `pyproject.toml`
+- `uv.lock`
+- `src/isv_readiness/cli.py`
+- Lint-only formatting in project-owned source/tests
+- `SLOP.md`
+
+### End-to-End Evidence
+
+- `uv sync` resolves 8 packages and builds `isv-readiness` without installing
+  the validation workspace or GPU dependencies.
+- Installed `gapctl` help exposes scan, report, profile, plan, onboard, and the
+  explicitly reserved fix/loop commands.
+- A real K3s plan export remains schema-valid with 42 validations and no
+  malformed entries.
+- A real profile-aware K3s scan emits 44 unique rows: 39 pass and 5
+  not-implemented. The BCM profile routes 38 rows to adapter work and 6 CSI,
+  identity, or network checks to `request_scope_decision`.
+- The real plan and gap artifacts both validate against their committed schemas.
+
+### Verification
+
+- `uv run python -m unittest discover -s tests -v`: 41 tests passed.
+- `uvx ruff check src tests`: passed.
+- `python3 -m compileall -q src tests`: passed.
+- All three JSON schemas pass `python3 -m json.tool`.
+- `uv lock --check`: passed.
 - `git diff --check`: passed.

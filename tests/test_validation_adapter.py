@@ -18,7 +18,6 @@ from isv_readiness.validation_adapter import (
     normalize_validation_plan,
 )
 
-
 CATALOG_PAYLOAD = {
     "isvTestVersion": "0.8.0",
     "entries": [
@@ -292,6 +291,31 @@ class IsvctlAdapterTests(unittest.TestCase):
         adapter_class.assert_called_once_with(validation_root)
         schema = json.loads((ROOT / "schemas" / "validation-plan.schema.json").read_text(encoding="utf-8"))
         jsonschema.Draft202012Validator(schema).validate(payload)
+
+    def test_cli_plan_allows_isvctl_from_path_without_checkout(self) -> None:
+        from isv_readiness.cli import main
+
+        plan = normalize_validation_plan(
+            {"tests": {"platform": "vm", "validations": {}}},
+            normalize_catalog({"entries": []}),
+            config_files=("provider.yaml",),
+        )
+        with tempfile.TemporaryDirectory() as tempdir:
+            output = Path(tempdir) / "validation-plan.json"
+            with patch("isv_readiness.cli.IsvctlAdapter") as adapter_class:
+                adapter_class.return_value.plan.return_value = plan
+                exit_code = main(
+                    [
+                        "plan",
+                        "-f",
+                        "provider.yaml",
+                        "--out",
+                        str(output),
+                    ]
+                )
+
+        self.assertEqual(exit_code, 0)
+        adapter_class.assert_called_once_with(None)
 
 
 if __name__ == "__main__":

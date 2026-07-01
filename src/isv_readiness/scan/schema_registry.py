@@ -9,7 +9,6 @@ from typing import Any
 
 import jsonschema
 
-
 FALLBACK_STEP_SCHEMA_MAPPING: dict[str, str | None] = {
     "launch_instance": "instance",
     "create_instance": "instance",

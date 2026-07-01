@@ -15,7 +15,6 @@ from isv_readiness.onboarding import (
 )
 from isv_readiness.solution_profile import load_solution_profile
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 

@@ -4,9 +4,8 @@ import hashlib
 import json
 import re
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 from isv_readiness.scan.k8s_scope import K8sScope, classify_k8s_gap
 from isv_readiness.scan.models import Evidence, GapRow, Remediation, Status
@@ -22,7 +21,7 @@ class K8sDynamicArtifacts:
     log_path: Path | None = None
     setup_json_path: Path | None = None
     config_path: Path | None = None
-    scope: K8sScope = K8sScope()
+    scope: K8sScope = field(default_factory=K8sScope)
 
 
 def scan_k8s_artifacts(options: K8sDynamicArtifacts) -> list[GapRow]:

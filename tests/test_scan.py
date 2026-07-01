@@ -11,7 +11,6 @@ from isv_readiness.scan.models import SCHEMA_VERSION
 from isv_readiness.scan.report import render_report
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
 
-
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
 

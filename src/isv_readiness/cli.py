@@ -64,7 +64,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     plan_parser = subparsers.add_parser("plan", help="Export the merged, normalized isvctl validation plan")
     plan_parser.add_argument("-f", "--config", type=Path, action="append", required=True)
-    plan_parser.add_argument("--validation-root", type=Path, required=True)
+    plan_parser.add_argument("--validation-root", type=Path, default=None, help="Checkout root; omit for isvctl on PATH")
     plan_parser.add_argument("--out", type=Path, default=Path("validation-plan.json"))
     plan_parser.set_defaults(handler=_plan)
 

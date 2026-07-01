@@ -1,142 +1,250 @@
 # ISV Readiness
 
-`isv-readiness` finds and closes gaps between an ISV provider implementation and NVIDIA's `ai-cloud-validation` bar, one domain at a time.
+`isv-readiness` helps an infrastructure ISV move from initial capability
+discovery to reproducible NVIDIA `ai-cloud-validation` results. It models the
+complete solution, creates or discovers provider wiring, finds static coverage
+gaps, ingests dynamic results, and routes each gap according to ownership.
 
-It is a separate repo. It depends one-way on `ai-cloud-validation`, reads provider configs and scripts, emits a deterministic `gaps.json`, and leaves `ai-cloud-validation` as the source of truth for pass/fail.
+`ai-cloud-validation` remains the source of truth for configuration validity
+and pass/fail. This repository consumes its supported CLI contracts and never
+edits provider-agnostic suites or validation-engine code.
 
-## What This Is
+## Current Status
 
-- A `gapctl` CLI for static v0.1 coverage/correctness scans.
-- A clean `isv_readiness.scan` library with no agent, MCP, or model dependencies.
-- A versioned flat gap report contract in `schemas/gaps.schema.json`.
-- A first-stage scanner for provider repos shaped like `config/*.yaml` plus `scripts/<domain>/...`.
+Implemented:
 
-## What This Is Not
+- Versioned `solution-profile.json` contract for components, dependencies,
+  actors, NSRG layers, domains, capability ownership, and validation mode.
+- Draft BCM 11 and NVIDIA Mission Control 2.3 reference profiles based on
+  current public product documentation.
+- Cross-domain provider onboarding through `isvctl provider scaffold`, plus
+  completion of the known Kubernetes top-level wrapper gap.
+- Version-aware validation plan export through `isvctl catalog list --json` and
+  `isvctl test run --dry-run --no-upload`.
+- Static scans across all current suite domains and every supported validation
+  YAML shape.
+- Dynamic JUnit ingestion for any single domain, with specialized K8s ownership
+  classification and setup-inventory parsing.
+- Profile-aware action routing that can suppress unsafe automatic edits.
+- Flat, schema-valid `gaps.json` reports and scorecard/tree/Markdown views.
 
-- Not a fork of `ai-cloud-validation`.
-- Not the source of truth for validation pass/fail.
-- Not allowed to edit provider-agnostic suites, validation classes, or the validation engine.
-- Not an auto-merge system. Later fix loops create patch/PR output behind human review.
+Not implemented yet:
 
-## Dependency Options
+- Frontier-model code generation for `gapctl fix`.
+- Guarded patch creation and pull-request submission.
+- The deterministic `gapctl loop --until-green` retry/stop controller.
+- Publication workflows. The current boundary ends with a reproducible
+  qualification or validation bundle.
 
-For the omnistation/sibling-checkout workflow, this repo is configured for uv with:
+See [docs/architecture.md](docs/architecture.md) for the complete agentic design
+and implementation map.
 
-```toml
-[tool.uv.sources]
-ai-cloud-validation = { path = "../ai-cloud-validation", editable = true }
-```
+## Workflow
 
-For a registry/package workflow, remove that block and resolve the package normally:
+### 1. Qualify the solution
 
-```toml
-dependencies = [
-    "ai-cloud-validation>=0.8.0",
-    "jsonschema>=4.23.0,<5.0.0",
-    "pyyaml>=6.0.2,<7.0.0",
-]
-```
-
-The v0.1 scanner does not import validation internals. It opportunistically reads `isvctl.config.output_schemas` from the installed package or sibling checkout to validate static JSON samples.
-
-## CLI
+Start from a reference profile or create one for the candidate stack.
 
 ```bash
-gapctl scan -p /path/to/provider-repo --domains vm,network
-gapctl scan -p /path/to/provider-repo --domains vm --out gaps.json
+gapctl profile --in examples/profiles/bcm.reference.yaml
+gapctl profile --in examples/profiles/nvidia-mission-control.reference.yaml
+```
+
+Reference profiles are discovery baselines, not product certifications. They
+intentionally leave tenant control-plane, IAM, image-registry, SDN, and security
+ownership unresolved until the integrated stack is confirmed.
+
+### 2. Onboard a provider
+
+For a complete provider scaffold, choose domains directly:
+
+```bash
+gapctl onboard \
+  --provider-name acme \
+  --validation-root /path/to/ai-cloud-validation \
+  --domains bare_metal,k8s,slurm,observability
+```
+
+Or derive covered/testable domains and intake questions from a profile:
+
+```bash
+gapctl onboard \
+  --provider-name bcm-lab \
+  --validation-root /path/to/ai-cloud-validation \
+  --profile examples/profiles/bcm.reference.yaml
+```
+
+Both commands are dry runs until `--write` is supplied. The broad flow delegates
+creation to the authoritative command:
+
+```text
+isvctl provider scaffold <provider-name>
+```
+
+The existing lightweight K8s-only flow remains available:
+
+```bash
+gapctl onboard \
+  --domain k8s \
+  --provider-name dsx-air \
+  --validation-root /path/to/ai-cloud-validation \
+  --write
+```
+
+### 3. Export the authoritative plan
+
+Before running a suite, merge and validate its configuration and join it to the
+installed catalog:
+
+```bash
+gapctl plan \
+  -f isvctl/configs/providers/k3s.yaml \
+  --validation-root /path/to/ai-cloud-validation \
+  --out validation-plan.json
+```
+
+The plan records suite/config/catalog versions, fingerprints, lifecycle steps,
+validation categories, repeated variants, execution adapters, and malformed or
+unknown entries. Unknown entries remain visible.
+
+### 4. Scan static coverage
+
+Scan explicit domains:
+
+```bash
+gapctl scan \
+  -p /path/to/provider \
+  --domains vm,network \
+  --validation-root /path/to/ai-cloud-validation \
+  --out gaps.json
+```
+
+Or derive domains and responsibility routing from a solution profile:
+
+```bash
+gapctl scan \
+  -p /path/to/provider \
+  --profile examples/profiles/bcm.reference.yaml \
+  --validation-root /path/to/ai-cloud-validation \
+  --out gaps.json
+```
+
+Static scanning detects missing configs and commands, missing scripts,
+TODO/Not-implemented markers, skipped steps, simple literal JSON output schema
+failures, and contract drift. A static `pass` means only that no static gap was
+found; it does not replace a real validation run.
+
+### 5. Run or ingest one dynamic domain
+
+Run a configured domain in place:
+
+```bash
+gapctl scan \
+  -p /path/to/provider \
+  --domains vm \
+  --validation-root /path/to/ai-cloud-validation \
+  --run \
+  --out vm-gaps.json
+```
+
+Or ingest artifacts captured by the ISV:
+
+```bash
+gapctl scan \
+  -p /path/to/provider \
+  --domains vm \
+  --validation-root /path/to/ai-cloud-validation \
+  --junit /path/to/junit.xml \
+  --log /path/to/isvctl.log \
+  --out vm-gaps.json
+```
+
+Dynamic execution and artifact ingestion intentionally accept one domain per
+invocation. This keeps config paths, JUnit cases, rerun commands, and retry
+budgets unambiguous.
+
+Kubernetes additionally accepts `--setup-json` and `--scope` for inventory and
+layer-aware ownership classification.
+
+### 6. Review the report
+
+```bash
 gapctl report --in gaps.json --format scorecard
 gapctl report --in gaps.json --format tree
 gapctl report --in gaps.json --format md
 ```
 
-For brand-new K8s providers, start with onboarding. The dry run prints the
-wrapper/scripts/scope plan and the ISV information the agent needs; `--write`
-creates the starter files.
+When a profile is supplied, each row includes a `solution_profile` enrichment
+with a deterministic action:
 
-```bash
-gapctl onboard --domain k8s --provider-name dsx-air --validation-root /path/to/ai-cloud-validation
-gapctl onboard --domain k8s --provider-name dsx-air --validation-root /path/to/ai-cloud-validation --write
-```
+- `implement_or_fix_adapter`
+- `request_external_adapter`
+- `collect_evidence`
+- `record_product_gap`
+- `skip_with_rationale`
+- `request_scope_decision`
 
-For K8s dynamic scans, either ingest saved artifacts from an ISV-run validation
-or let `gapctl` run `isvctl` in the validation checkout and then parse the
-artifacts it writes:
+## Contracts
 
-```bash
-gapctl scan -p /path/to/providers/dsx-air --domains k8s --validation-root /path/to/ai-cloud-validation --run --scope /path/to/scope.json
-```
+- [schemas/gaps.schema.json](schemas/gaps.schema.json): deterministic flat scan
+  and dynamic-result rows.
+- [schemas/validation-plan.schema.json](schemas/validation-plan.schema.json):
+  normalized, version-aware `isvctl` plan.
+- [schemas/solution-profile.schema.json](schemas/solution-profile.schema.json):
+  versioned solution graph and responsibility model.
 
-Provider repo layout:
+`gaps.json` stays flat so the future loop can select one row deterministically.
+Profile data is enrichment and guardrail context; it does not rewrite test
+outcomes.
 
-```text
-provider-repo/
-  config/
-    vm.yaml
-  scripts/
-    vm/
-      launch_instance.py
-```
+## Kubernetes Wrapper Note
 
-Kubernetes is a special case in the current `ai-cloud-validation` tree. The
-`isvctl provider scaffold <name>` flow creates `providers/<name>/scripts/k8s/`,
-but the scaffold does not currently create `providers/<name>/config/k8s.yaml`.
-Existing local K8s providers are modeled as top-level files such as
-`isvctl/configs/providers/k3s.yaml`, `microk8s.yaml`, and `minikube.yaml`; those
-files import `suites/k8s.yaml` and override commands to point at provider
-scripts. For a DSX Air pretend-ISV run, use the same pattern with a wrapper like
-`isvctl/configs/providers/dsx-air.yaml` that points setup/teardown at
-`providers/dsx-air/scripts/k8s/`.
+The current upstream provider scaffold creates
+`providers/<name>/scripts/k8s/`, but not a matching
+`providers/<name>/config/k8s.yaml`. Existing K8s providers use top-level files
+such as `providers/k3s.yaml` that import `suites/k8s.yaml` and point commands at
+provider scripts. Cross-domain onboarding preserves scaffolded scripts and adds
+that wrapper plus an ownership-scope template.
 
-When the sibling checkout is not adjacent to the provider repo, pass it explicitly:
+## Dependency Boundary
 
-```bash
-gapctl scan -p /path/to/provider-repo --domains vm --validation-root /path/to/ai-cloud-validation
-```
+The Python package depends only on JSON Schema and YAML libraries. Validation is
+integrated through a supported external CLI boundary:
 
-## Gap Contract
+1. Preferred development flow: pass a sibling checkout with
+   `--validation-root`. Its existing `.venv/bin/isvctl` is used when present,
+   otherwise the tool runs `uv run isvctl` in that checkout.
+2. Installed flow: install `ai-cloud-validation` separately so `isvctl` is on
+   `PATH`, then use adapter APIs without a checkout root.
 
-`gaps.json` is a flat list of rows so an agent can iterate it deterministically. The row spine is:
+This avoids importing private validation internals and avoids trying to install
+the multi-project `ai-cloud-validation` workspace as one editable setuptools
+package.
 
-```text
-domain + step_name + validation_class + requirement_id + milestone
-```
+## Safety Boundary
 
-Each row carries:
-
-- `status`: `pass`, `fail`, `not_implemented`, `skipped`, or `error`
-- `detection`: `static` in v0.1
-- `stage`: `coverage` or `correctness`
-- `gap_type`: routing for future fix/ticket behavior
-- `evidence`: messages, schema errors, missing JSON fields, script/config paths
-- `remediation`: auto-fix hint, edit target, rerun command, AWS reference
-- `enrichment`: optional non-authoritative links
-
-Static `pass` means the scanner found no static gap for that row. It does not replace a real `isvctl test run`.
-
-## v0.1 Scanner Behavior
-
-`gapctl scan` currently:
-
-- Reads provider config steps for selected domains.
-- Reads imported suites or falls back to `ai-cloud-validation/isvctl/configs/suites/<domain>.yaml`.
-- Produces one row per suite validation check.
-- Detects missing steps, missing scripts, TODO/Not implemented stubs, and skipped steps.
-- Extracts simple literal JSON outputs from Python scripts and validates them against expected step output schemas.
-- Adds AWS reference paths when a sibling `ai-cloud-validation` checkout is available.
-
-The scanner never writes into the provider repo or into `ai-cloud-validation`.
-
-## Roadmap
-
-- v0.2: dynamic scan from validation JUnit and per-step JSON, requirement/milestone joins, richer scorecards.
-- v0.3: guarded `gapctl fix` for one row and a Cursor `SKILL.md` wrapper.
-- v0.4: deterministic `gapctl loop --until-green` with optional MCP enrichment hooks.
-- v0.5: lib adoption module and service packaging.
+- Never edit `ai-cloud-validation` suites, validation classes, or engine code.
+- Provider and product changes remain human-gated.
+- A profile may disable `auto_fixable`; it can never enable an edit that the
+  deterministic scanner marked unsafe.
+- Future generation is limited to provider scripts and explicitly approved
+  integration manifests, with patch/PR output rather than auto-merge.
+- Credentials and private source remain in the ISV environment. Only reports
+  and reviewed patches need to leave that boundary.
 
 ## Development
 
-Run the stdlib tests:
+Run the test suite:
 
 ```bash
-PYTHONPATH=src python3 -m unittest discover -s tests
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+```
+
+Validate all schemas and compile Python sources:
+
+```bash
+python3 -m json.tool schemas/gaps.schema.json >/dev/null
+python3 -m json.tool schemas/validation-plan.schema.json >/dev/null
+python3 -m json.tool schemas/solution-profile.schema.json >/dev/null
+python3 -m compileall -q src tests
 ```

@@ -5,7 +5,6 @@ description = "Gap scanner and readiness loop helpers for ai-cloud-validation pr
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "ai-cloud-validation>=0.8.0",
     "jsonschema>=4.23.0,<5.0.0",
     "pyyaml>=6.0.2,<7.0.0",
 ]
@@ -20,14 +19,10 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.uv.sources]
-# Local development option when ai-cloud-validation is checked out next to this repo.
-# For registry installs, remove this block and let uv/pip resolve ai-cloud-validation normally.
-ai-cloud-validation = { path = "../ai-cloud-validation", editable = true }
-
 [tool.ruff]
 line-length = 120
 target-version = "py312"
+extend-exclude = ["tests/fixtures"]
 
 [tool.ruff.format]
 quote-style = "double"

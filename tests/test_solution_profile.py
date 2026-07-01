@@ -13,7 +13,6 @@ from isv_readiness.solution_profile import (
     parse_solution_profile,
 )
 
-
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ROOT / "examples" / "profiles"
 

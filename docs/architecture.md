@@ -1,0 +1,261 @@
+# Agentic Solution Architecture
+
+## Objective
+
+The full system helps an ISV qualify a versioned metal-to-model solution,
+prepare its `ai-cloud-validation` provider implementation, execute validation,
+and close actionable gaps with human-reviewed changes.
+
+The current project boundary ends with a reproducible technical qualification
+or validation bundle. Publication is deliberately deferred.
+
+## System View
+
+```mermaid
+flowchart TD
+    Docs[Product docs, API specs, repos] --> ProfileBuilder[Solution discovery]
+    ISV[ISV answers and ownership decisions] --> ProfileBuilder
+    ProfileBuilder --> Profile[solution-profile.yaml]
+
+    ACV[ai-cloud-validation checkout or installed isvctl] --> Adapter[Version-aware isvctl adapter]
+    Adapter --> Plan[validation-plan.json]
+
+    Profile --> Gate{Qualification scope resolved?}
+    Gate -->|No| Questions[Targeted ISV questions and product gaps]
+    Questions --> ProfileBuilder
+    Gate -->|Yes| Onboard[Provider onboarding]
+    Plan --> Onboard
+    Onboard --> Provider[Provider configs and scripts]
+
+    Provider --> Static[Static coverage scanner]
+    Plan --> Static
+    Static --> Gaps[gaps.json]
+
+    Provider --> Run[One-domain isvctl run]
+    Run --> Artifacts[JUnit, logs, step JSON]
+    Artifacts --> Dynamic[Dynamic correctness scanner]
+    Dynamic --> Gaps
+
+    Profile --> Resolver[Responsibility resolver]
+    Gaps --> Resolver
+    Resolver --> Actions[Deterministic action queue]
+
+    Actions --> Classifier[Rules-first gap classifier]
+    Classifier --> Context[Minimal context pack]
+    Context --> Generator[Swappable frontier code generator]
+    Generator --> Guardrail[Path, secret, schema, and diff guardrails]
+    Guardrail --> Patch[Patch or pull request]
+    Patch --> Human[Human review and merge]
+    Human --> Run
+
+    Actions --> Ticket[Product-gap ticket draft]
+    Actions --> Evidence[Evidence request]
+    Actions --> Skip[Documented skip or scope decision]
+```
+
+Solid contracts through action routing are implemented. Code generation,
+guarded patch creation, ticket submission, and the until-green controller are
+the next implementation phase.
+
+## Journey Stages
+
+### Qualify
+
+1. Identify the exact product and component versions.
+2. Build the component dependency graph and map components to NSRG layers 1-4.
+3. Identify actors: ISV, NCP, integration partner, NVIDIA, customer, and lab.
+4. Set each domain and capability to `covered`, `gap`, `out_of_scope`, or
+   `unknown`.
+5. Separately choose `test`, `evidence`, `skip`, or `deferred` validation mode.
+6. Record both capability ownership and provider-adapter ownership.
+7. Resolve all required unknowns or document a gap-closure path before entering
+   full validation.
+
+Partial stacks can be qualified and documented. They are not labeled fully
+validation-ready until required IaaS, CaaS, and PaaS domains and capability
+slices are covered and testable.
+
+### Validate
+
+1. Scaffold or discover provider configs.
+2. Export the merged, schema-validated plan from the installed `isvctl`.
+3. Run static coverage scanning.
+4. Select one domain and execute or ingest its dynamic artifacts.
+5. Resolve every row against the solution profile.
+6. Route adapter work, external handoffs, evidence requests, product gaps,
+   skips, and unresolved scope separately.
+7. Fix and rerun one selected gap at a time until all required rows are green or
+   have approved dispositions.
+8. Freeze versions, configuration, hardware inventory, plan fingerprints,
+   reports, logs, and exceptions into the validation bundle.
+
+"One gap at a time" means serial, reviewable changes, not stopping after one
+gap. The controller eventually processes the full selected domain.
+
+## Core Contracts
+
+### Solution Profile
+
+The profile answers what is being validated and who owns it:
+
+- exact solution and component versions
+- component dependency graph
+- NSRG layers
+- source references
+- domain coverage
+- validation mode
+- capability selectors
+- capability owner
+- provider-adapter owner
+- required ISV inputs
+- qualification blockers
+
+Capability selectors can match provider step, validation category, and
+validation class. Equally specific overlapping selectors are rejected.
+
+### Validation Plan
+
+The plan answers what this installed test suite will do:
+
+- config, catalog, and `isvctl` versions
+- deterministic config/catalog fingerprints
+- merged lifecycle steps
+- every validation shape and repeated variant
+- categories, phases, labels, and platforms
+- execution-adapter routing such as ReFrame
+- unknown or malformed entries
+
+The supported machine boundary is:
+
+```text
+isvctl catalog list --json
+isvctl test run -f <config> --dry-run --no-upload
+```
+
+This design tolerates suite iteration without importing private parser classes.
+
+### Gap Report
+
+`gaps.json` is flat deterministic truth plus optional enrichment. A row carries:
+
+- domain, provider step, validation class, requirement, and milestone spine
+- static or dynamic detection
+- coverage or correctness stage
+- status and evidence
+- remediation target and exact rerun command
+- optional profile responsibility and action
+
+The profile cannot change a validation result. It can remove automatic edit
+permission when ownership or scope does not allow the agent to patch.
+
+## Agent Actions
+
+| Action | Meaning | Automated edit allowed |
+| --- | --- | --- |
+| `implement_or_fix_adapter` | ISV owns the provider adapter for a covered/testable capability | Only when the scanner also marks it fixable |
+| `request_external_adapter` | Another actor owns the adapter or probe | No |
+| `collect_evidence` | The agreed validation mode is evidence rather than execution | No |
+| `record_product_gap` | Required capability is missing from the product solution | No; draft ticket/integration plan |
+| `skip_with_rationale` | Capability is approved out of scope or intentionally excluded | No |
+| `request_scope_decision` | Ownership, product coverage, or validation mode is unresolved | No |
+
+## Future Fix Node
+
+Only code generation needs a frontier model. The surrounding loop remains
+deterministic.
+
+The generator interface should accept a minimal context pack:
+
+- one gap row
+- selected provider script and config fragments
+- expected JSON output schema
+- matching validation metadata
+- solution responsibility
+- approved API/repository documentation
+- one relevant reference implementation when license and policy permit
+- previous attempt and verifier feedback
+
+It returns a proposed patch and a structured explanation. The model never
+chooses the next gap, retry budget, allowed path, or merge action.
+
+## Deterministic Loop
+
+The future controller state machine is:
+
+```text
+SCAN
+  -> SELECT_NEXT_REQUIRED_GAP
+  -> ROUTE
+      -> QUESTION / EVIDENCE / TICKET / SKIP
+      -> BUILD_CONTEXT
+  -> GENERATE_PATCH
+  -> GUARDRAIL
+  -> HUMAN_REVIEW
+  -> VERIFY_TARGET
+  -> RESCAN_DOMAIN
+  -> COMPLETE | NEXT_GAP | STOP_WITH_BLOCKER
+```
+
+Suggested stop conditions:
+
+- selected domain has no unresolved required fail/error/not-implemented rows
+- retry budget for the same gap is exhausted
+- verifier regression outside the selected gap
+- missing credential, environment, API contract, or ownership decision
+- proposed edit escapes the approved path boundary
+- human rejects or pauses the change
+
+## Guardrails
+
+- Never edit NVIDIA-owned suites, validation classes, catalog code, or engine
+  code.
+- Allow provider-script edits only under the selected provider directory.
+- Allow integration-manifest edits only for an explicitly approved
+  `lib_adoption` task.
+- Reject secret-looking material in prompts, patches, reports, and logs.
+- Validate generated JSON output against the expected step schema before a
+  dynamic run.
+- Run the narrow targeted validation before the full domain.
+- Produce a patch or pull request; never auto-merge.
+- Keep credentials, private source, and execution inside the ISV environment.
+
+## BCM and Mission Control Baselines
+
+The included profiles are useful agent testbeds because current public
+documentation gives concrete deployment and operations context.
+
+BCM coverage is initially modeled around:
+
+- bare-metal cluster provisioning and lifecycle
+- Kubernetes integration
+- Slurm scheduling and workloads
+- infrastructure monitoring
+
+Mission Control composes BCM with documented current components for autonomous
+job recovery, autonomous hardware recovery, Grafana dashboards, LaunchPad, and
+Kubernetes artifacts.
+
+Neither baseline assumes that cluster management automatically equals a full
+tenant cloud. Control plane, IAM, registry, SDN/VPC, storage, and suite-wide
+security ownership remain explicit qualification questions until an integrated
+solution supplies them.
+
+## Implementation Map
+
+| Capability | Status |
+| --- | --- |
+| Version-aware catalog and dry-run adapter | Implemented |
+| Validation plan schema/export | Implemented |
+| Solution graph and responsibility schema | Implemented |
+| BCM and Mission Control draft profiles | Implemented |
+| Cross-domain provider onboarding | Implemented |
+| K8s wrapper completion | Implemented |
+| Static scan across current suite shapes | Implemented |
+| Generic single-domain JUnit ingestion | Implemented |
+| K8s setup and layer-aware dynamic classification | Implemented |
+| Profile-aware action routing | Implemented |
+| Frontier generator interface and implementation | Next |
+| Patch guardrail and targeted verifier | Next |
+| Deterministic until-green controller | Next |
+| MCP enrichment adapters | Later, optional |
+| Publication workflow | Deferred |

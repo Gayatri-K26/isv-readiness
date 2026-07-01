@@ -208,8 +208,7 @@ def _default_runner(
         list(command),
         cwd=cwd,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=False,
         timeout=timeout_seconds,
     )
