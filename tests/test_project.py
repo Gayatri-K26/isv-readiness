@@ -15,6 +15,7 @@ from isv_readiness.project import (
     execute_bootstrap,
     load_project,
 )
+from isv_readiness.solution_profile import load_solution_profile
 
 COMMIT = "a" * 40
 
@@ -60,6 +61,8 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertEqual(project.provider.state, "existing")
             self.assertFalse(project.execution.allow_live_runs)
             self.assertEqual(project.apis[0].auth_env, ("ACME_TOKEN",))
+            profile = load_solution_profile(project.resolve_path(plan.manifest_path, project.assessment.profile))
+            self.assertEqual(profile.resolve("vm").action, "implement_or_fix_adapter")
             self.assertEqual(load_project(plan.manifest_path), project)
             raw = yaml.safe_load(plan.manifest_path.read_text(encoding="utf-8"))
             schema = yaml.safe_load(
@@ -109,6 +112,16 @@ class ProjectBootstrapTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ProjectError, "Not an ai-cloud-validation checkout"):
                 execute_bootstrap(plan, runner=_git_runner)
+
+    def test_full_validation_requires_an_explicit_reviewed_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            with self.assertRaisesRegex(ProjectError, "requires an explicit reviewed solution profile"):
+                build_bootstrap_plan(
+                    Path(tempdir),
+                    provider_name="acme",
+                    domains=["vm"],
+                    assessment_mode="full_validation",
+                )
 
 
 def _make_checkout(root: Path, provider: str | None = None) -> None:

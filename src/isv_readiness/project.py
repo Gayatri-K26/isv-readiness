@@ -11,7 +11,7 @@ import jsonschema
 import yaml
 
 from isv_readiness.scan.k8s_onboard import PROVIDER_NAME_RE
-from isv_readiness.solution_profile import SUPPORTED_DOMAINS, canonicalize_domain
+from isv_readiness.solution_profile import SUPPORTED_DOMAINS, canonicalize_domain, parse_solution_profile
 
 PROJECT_SCHEMA_VERSION = "0.1.0"
 DEFAULT_VALIDATION_URL = "https://github.com/NVIDIA/ai-cloud-validation.git"
@@ -54,6 +54,7 @@ class ApiInterface:
     id: str
     kind: str
     base_url: str | None
+    base_url_env: str | None
     spec: str | None
     auth_env: tuple[str, ...]
     domains: tuple[str, ...]
@@ -76,6 +77,7 @@ class ExecutionPolicy:
     run_environment: str
     allow_live_runs: bool
     credential_env: tuple[str, ...]
+    pass_env: tuple[str, ...]
     max_attempts: int
     cleanup_required: bool
 
@@ -115,8 +117,10 @@ class BootstrapPlan:
     assessment_mode: AssessmentMode
     profile: Path | None
     api_base_url: str | None
+    api_base_url_env: str | None
     api_spec: str | None
     auth_env: tuple[str, ...]
+    pass_env: tuple[str, ...]
     clone_required: bool
 
     def summary_lines(self) -> list[str]:
@@ -143,8 +147,10 @@ def build_bootstrap_plan(
     assessment_mode: AssessmentMode = "qualification",
     profile: Path | None = None,
     api_base_url: str | None = None,
+    api_base_url_env: str | None = None,
     api_spec: str | None = None,
     auth_env: Sequence[str] = (),
+    pass_env: Sequence[str] = (),
 ) -> BootstrapPlan:
     if not PROVIDER_NAME_RE.fullmatch(provider_name):
         raise ProjectError("Provider name must contain only lowercase letters, numbers, '_' and '-'.")
@@ -156,9 +162,12 @@ def build_bootstrap_plan(
         raise ProjectError(f"Unsupported assessment domains: {', '.join(unsupported)}")
     if assessment_mode not in {"qualification", "full_validation"}:
         raise ProjectError(f"Unsupported assessment mode: {assessment_mode}")
+    if assessment_mode == "full_validation" and profile is None:
+        raise ProjectError("Full validation requires an explicit reviewed solution profile.")
     if not validation_url.strip() or not validation_ref.strip():
         raise ProjectError("Validation URL and ref must not be empty.")
-    invalid_env = [name for name in auth_env if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", name)]
+    declared_env = [*auth_env, *pass_env, *([api_base_url_env] if api_base_url_env else [])]
+    invalid_env = [name for name in declared_env if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", name)]
     if invalid_env:
         raise ProjectError(f"Credential inputs must be environment variable names: {', '.join(invalid_env)}")
 
@@ -174,8 +183,10 @@ def build_bootstrap_plan(
         assessment_mode=assessment_mode,
         profile=profile.expanduser().resolve() if profile else None,
         api_base_url=api_base_url.strip() if api_base_url else None,
+        api_base_url_env=api_base_url_env,
         api_spec=api_spec.strip() if api_spec else None,
         auth_env=tuple(dict.fromkeys(auth_env)),
+        pass_env=tuple(dict.fromkeys(pass_env)),
         clone_required=not checkout.exists(),
     )
 
@@ -220,7 +231,8 @@ def execute_bootstrap(
     manifest_dir = plan.manifest_path.parent
     checkout_value = _portable_path(plan.validation_root, manifest_dir)
     provider_value = _portable_path(provider_path, manifest_dir)
-    profile_value = _portable_path(plan.profile, manifest_dir) if plan.profile else None
+    profile_path = plan.profile or (manifest_dir / "solution-profile.yaml")
+    profile_value = _portable_path(profile_path, manifest_dir)
 
     apis: tuple[ApiInterface, ...] = ()
     sources = [
@@ -261,6 +273,7 @@ def execute_bootstrap(
                 id="primary_api",
                 kind="rest",
                 base_url=plan.api_base_url,
+                base_url_env=plan.api_base_url_env,
                 spec=plan.api_spec,
                 auth_env=plan.auth_env,
                 domains=plan.domains,
@@ -296,11 +309,18 @@ def execute_bootstrap(
             run_environment="not_configured",
             allow_live_runs=False,
             credential_env=plan.auth_env,
+            pass_env=plan.pass_env,
             max_attempts=3,
             cleanup_required=True,
         ),
     )
     validate_project(project.to_dict())
+    if plan.profile is None:
+        if profile_path.exists() and not overwrite:
+            raise ProjectError(f"Refusing to overwrite existing generated profile: {profile_path}")
+        draft_profile = _draft_qualification_profile(plan)
+        parse_solution_profile(draft_profile)
+        profile_path.write_text(yaml.safe_dump(draft_profile, sort_keys=False), encoding="utf-8")
     plan.manifest_path.write_text(yaml.safe_dump(project.to_dict(), sort_keys=False), encoding="utf-8")
     return project
 
@@ -322,6 +342,7 @@ def load_project(path: Path) -> ReadinessProject:
                 id=item["id"],
                 kind=item["kind"],
                 base_url=item["base_url"],
+                base_url_env=item["base_url_env"],
                 spec=item["spec"],
                 auth_env=tuple(item["auth_env"]),
                 domains=tuple(item["domains"]),
@@ -345,6 +366,7 @@ def load_project(path: Path) -> ReadinessProject:
             run_environment=raw["execution"]["run_environment"],
             allow_live_runs=raw["execution"]["allow_live_runs"],
             credential_env=tuple(raw["execution"]["credential_env"]),
+            pass_env=tuple(raw["execution"]["pass_env"]),
             max_attempts=raw["execution"]["max_attempts"],
             cleanup_required=raw["execution"]["cleanup_required"],
         ),
@@ -365,12 +387,85 @@ def validate_project(raw: Any) -> None:
     secrets = [value for value in raw["execution"]["credential_env"] if "=" in value]
     if secrets:
         raise ProjectError("Project files store credential environment variable names, never secret values.")
+    environment_names = [
+        *raw["execution"]["credential_env"],
+        *raw["execution"]["pass_env"],
+        *(item["base_url_env"] for item in raw["apis"] if item["base_url_env"]),
+    ]
+    invalid_env = [name for name in environment_names if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", name)]
+    if invalid_env:
+        raise ProjectError(f"Invalid environment variable names: {', '.join(invalid_env)}")
 
 
 def _validate_checkout(root: Path) -> None:
     required = root / "isvctl" / "configs" / "providers" / "my-isv"
     if not (root / ".git").exists() or not required.is_dir():
         raise ProjectError(f"Not an ai-cloud-validation checkout: {root}")
+
+
+def _draft_qualification_profile(plan: BootstrapPlan) -> dict[str, Any]:
+    solution_id = re.sub(r"[^a-z0-9_-]", "_", plan.provider_name.lower())
+    if not solution_id[0].isalpha():
+        solution_id = f"isv_{solution_id}"
+    layer_by_domain = {
+        "network": [1],
+        "bare_metal": [2],
+        "vm": [2],
+        "control_plane": [2],
+        "iam": [2],
+        "image_registry": [2],
+        "observability": [2, 3, 4],
+        "security": [1, 2, 3, 4],
+        "kubernetes": [3],
+        "slurm": [4],
+    }
+    return {
+        "schema_version": "0.1.0",
+        "solution": {
+            "id": solution_id,
+            "name": plan.provider_name,
+            "vendor": plan.provider_name,
+            "version": "unknown",
+            "profile_status": "draft",
+            "target_environment": "not_configured",
+        },
+        "journey": {"stage": "qualify", "status": "in_progress"},
+        "actors": [{"id": "isv", "name": plan.provider_name, "kind": "isv"}],
+        "components": [
+            {
+                "id": "provider",
+                "name": plan.provider_name,
+                "version": "unknown",
+                "kind": "product",
+                "supplier_actor_id": "isv",
+                "nsrg_layers": sorted({layer for domain in plan.domains for layer in layer_by_domain[domain]}),
+                "depends_on": [],
+                "source_refs": [],
+            }
+        ],
+        "domains": [
+            {
+                "domain": domain,
+                "name": domain.replace("_", " ").title(),
+                "required_for_full_validation": False,
+                "coverage": "covered",
+                "validation_mode": "test",
+                "capability_owner_actor_id": "isv",
+                "provider_adapter_owner_actor_id": "isv",
+                "component_ids": ["provider"],
+                "provider_configs": [],
+                "rationale": "Explicitly selected as ISV-owned qualification scope during bootstrap.",
+                "required_inputs": [],
+                "evidence_refs": [],
+                "capabilities": [],
+            }
+            for domain in plan.domains
+        ],
+        "sources": [],
+        "assumptions": [
+            "This draft records operator-selected qualification scope only; an SME must review versions and capability ownership."
+        ],
+    }
 
 
 def _portable_path(path: Path, base: Path) -> str:

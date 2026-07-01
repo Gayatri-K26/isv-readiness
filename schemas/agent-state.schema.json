@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nvidia.com/schemas/isv-readiness/agent-state-0.1.0.schema.json",
+  "title": "ISV Readiness Agent Workflow State",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project_sha256", "domain", "status", "iteration", "attempts", "selected_gap_id", "patch_sha256", "reason", "artifacts", "feedback", "history"],
+  "properties": {
+    "schema_version": {"const": "0.1.0"},
+    "project_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "domain": {"type": "string"},
+    "status": {"enum": ["ready", "awaiting_generator", "awaiting_review", "awaiting_live", "blocked", "complete"]},
+    "iteration": {"type": "integer", "minimum": 0},
+    "attempts": {"type": "integer", "minimum": 0},
+    "selected_gap_id": {"type": ["string", "null"]},
+    "patch_sha256": {"type": ["string", "null"]},
+    "reason": {"type": "string"},
+    "artifacts": {"type": "object", "additionalProperties": {"type": "string"}},
+    "feedback": {"type": "array", "items": {"type": "string"}},
+    "history": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status", "gap_id", "reason"],
+        "properties": {
+          "status": {"type": "string"},
+          "gap_id": {"type": ["string", "null"]},
+          "reason": {"type": "string"}
+        }
+      }
+    }
+  }
+}

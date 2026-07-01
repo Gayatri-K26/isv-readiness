@@ -64,9 +64,10 @@ flowchart TD
 
 Solid contracts through context collection, an explicit generator adapter,
 guarded multi-file patch proposal, isolated static verification, transactional
-hash-bound application, and deterministic loop-state advancement are
-implemented. Built-in model-vendor adapters, live/dynamic verification, PR
-submission, and an autonomous runner remain future work.
+hash-bound application/rollback, targeted and full-domain live verification,
+persistent agent orchestration, and evidence bundling are implemented. Built-in
+model-vendor adapters, PR submission, and publication remain optional future
+integrations.
 
 ## Journey Stages
 
@@ -237,14 +238,34 @@ creates backups, and restores already-applied files if the transaction fails.
 The model never chooses the next gap, retry budget, allowed path, or merge
 action.
 
+### Live Verification and Agent Turns
+
+Live execution has two independent gates: reviewed project policy and an
+explicit `--run-live` invocation. The runner verifies the checkout still
+matches the pinned commit, constructs the command from the supported `isvctl`
+interface, passes only declared environment inputs, disables result upload,
+redacts the captured log, and ingests JUnit back into the gap model.
+
+For a selected validation class, the runner passes `-- -k <class>` to upstream
+pytest. Upstream `isvctl` still executes its configured lifecycle, so targeted
+selection does not bypass setup or teardown. If a newly applied transaction
+fails live verification, the orchestrator restores it from the hash-bound
+application record before considering feedback or stopping at a blocker.
+
+`agent-run` advances one safe turn at a time. It may generate and statically
+verify without approval, but pauses at `awaiting_review`. Exact patch-hash
+approval authorizes one application. It then pauses at `awaiting_live` unless a
+live run is explicitly authorized. A domain is `complete` only after static
+selected scope is green and a final full-domain live run passes.
+
 ## Deterministic Loop
 
 The implemented controller consumes successive `gaps.json` reports and records
 explicit attempts in `loop-state.json`. It selects one row, blocks before unsafe
 routes, enforces a per-gap retry budget, and reports `ready`, `blocked`, or
 `complete`. It deliberately does not execute remediation strings or apply
-patches. A future autonomous runner may orchestrate these existing state
-transitions around human review and targeted verification.
+patches. `agent-run` orchestrates these existing decisions while preserving
+separate patch-review, application, and live-execution gates.
 
 The complete target state machine is:
 
@@ -275,7 +296,8 @@ Suggested stop conditions:
 
 - Never edit NVIDIA-owned suites, validation classes, catalog code, or engine
   code.
-- Allow provider-script edits only under the selected provider directory.
+- Allow only provider scripts, the selected domain config, and the exact
+  selected Kubernetes wrapper.
 - Allow integration-manifest edits only for an explicitly approved
   `lib_adoption` task.
 - Reject secret-looking material in prompts, patches, reports, and logs.
@@ -331,8 +353,10 @@ solution supplies them.
 | Isolated static verifier and manifest | Implemented |
 | Explicit hash-bound atomic application | Implemented |
 | Persistent deterministic loop-state controller | Implemented |
+| Explicit rollback and policy-gated live verifier | Implemented |
+| Persistent review-gated agent runner | Implemented |
+| Sanitized evidence bundle | Implemented |
 | Built-in model-vendor generator adapters | Optional next |
-| Live/dynamic targeted verifier and rollback command | Next |
-| Autonomous until-green runner | Next |
 | MCP enrichment adapters | Later, optional |
+| Pull-request creation | Optional next |
 | Publication workflow | Deferred |

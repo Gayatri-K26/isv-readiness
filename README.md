@@ -24,6 +24,12 @@ Implemented:
   and hash-bound multi-file change-set output.
 - Transactional multi-file proposal, isolated static verification, backups,
   drift checks, explicit application, and rollback-on-application-failure.
+- Policy-gated targeted/full-domain live runs with pinned-checkout enforcement,
+  minimal runtime environments, redacted logs, JUnit ingestion, and explicit
+  rollback.
+- Persistent `agent-run` orchestration across scan, context, generation, review,
+  apply, targeted live feedback, final full-domain validation, and retry gates.
+- Sanitized, hash-inventoried qualification/validation evidence bundles.
 - Versioned `solution-profile.json` contract for components, dependencies,
   actors, NSRG layers, domains, capability ownership, and validation mode.
 - Draft BCM 11 and NVIDIA Mission Control 2.3 reference profiles based on
@@ -48,11 +54,7 @@ Not implemented yet:
 
 - Built-in model-vendor adapters; the implemented generator boundary accepts an
   explicitly selected command adapter.
-- Live/dynamic targeted verification, rollback commands, and pull-request
-  submission.
-- An autonomous runner that repeatedly scans, generates, applies, and verifies;
-  the implemented loop controller advances only from explicit reports and
-  human-recorded attempts.
+- Pull-request submission and publication workflows.
 - Publication workflows. The current boundary ends with a reproducible
   qualification or validation bundle.
 
@@ -72,6 +74,7 @@ gapctl bootstrap \
   --domains vm,network,k8s \
   --assessment-mode qualification \
   --api-base-url https://api.acme.example/v1 \
+  --api-base-url-env ACME_API_BASE \
   --api-spec /path/to/openapi.yaml \
   --auth-env ACME_CLIENT_ID \
   --auth-env ACME_CLIENT_SECRET
@@ -84,6 +87,11 @@ never credential values. Live runs are disabled by default.
 
 Use `--validation-root /existing/ai-cloud-validation` to adopt an existing
 checkout without pulling or changing its branch.
+
+Qualification bootstrap also creates a draft profile from the domains the
+operator explicitly marked ISV-owned. An SME should review product versions and
+capability-level ownership. `--assessment-mode full_validation` requires an
+explicit profile instead of generating this draft.
 
 ### 1. Qualify the solution
 
@@ -257,6 +265,64 @@ gapctl change-apply \
   --apply
 ```
 
+An explicit rollback is hash-gated against the application result:
+
+```bash
+gapctl change-rollback \
+  --application application.json \
+  --provider-repo /path/to/provider \
+  --out rollback.json \
+  --rollback
+```
+
+### 5.5. Run the gated agent workflow
+
+`agent-run` persists one domain's state and stops at review and infrastructure
+boundaries. It can scaffold a missing provider when `--onboard` is explicitly
+supplied:
+
+```bash
+gapctl agent-run \
+  --project isv-project.yaml \
+  --domain vm \
+  --work-dir .gapctl/agent/vm \
+  --onboard \
+  --generator /path/to/model-adapter \
+  --generator-env MODEL_API_KEY
+```
+
+After reviewing the emitted patch, bind approval to the printed hash:
+
+```bash
+gapctl agent-run \
+  --project isv-project.yaml \
+  --domain vm \
+  --work-dir .gapctl/agent/vm \
+  --generator /path/to/model-adapter \
+  --generator-env MODEL_API_KEY \
+  --approve-patch <exact-sha256> \
+  --apply \
+  --run-live
+```
+
+Live execution requires `execution.allow_live_runs: true` in the reviewed
+project. Only declared credential/runtime environment names are passed to
+`isvctl`; API endpoints can be injected through an API's `base_url_env`. The
+targeted selection uses the installed validation class with upstream `pytest
+-k`, while `isvctl` still owns setup, test, and teardown. After all static gaps
+are resolved, one final `agent-run --run-live` executes the entire domain before
+the state becomes `complete`.
+
+Assemble completed domain states without copying raw context, API specs,
+credentials, model payloads, backups, or logs:
+
+```bash
+gapctl bundle \
+  --project isv-project.yaml \
+  --agent-work-dir .gapctl/agent/vm \
+  --out-dir readiness-bundle
+```
+
 ### 6. Run or ingest one dynamic domain
 
 Run a configured domain in place:
@@ -406,6 +472,14 @@ retry budgets stop the controller rather than falling through to code changes.
   isolated rescan result for the complete transaction.
 - [schemas/change-application.schema.json](schemas/change-application.schema.json):
   applied files and durable backup locations.
+- [schemas/change-rollback.schema.json](schemas/change-rollback.schema.json):
+  explicit restoration/removal evidence.
+- [schemas/live-run.schema.json](schemas/live-run.schema.json): policy-authorized
+  command, artifacts, selected outcomes, and normalized report.
+- [schemas/agent-state.schema.json](schemas/agent-state.schema.json): persistent
+  review/live/retry state for one selected domain.
+- [schemas/bundle-manifest.schema.json](schemas/bundle-manifest.schema.json):
+  sanitized artifact and provider-file hash inventory.
 - [schemas/gaps.schema.json](schemas/gaps.schema.json): deterministic flat scan
   and dynamic-result rows.
 - [schemas/validation-plan.schema.json](schemas/validation-plan.schema.json):

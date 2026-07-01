@@ -14,7 +14,7 @@ from typing import Any
 import jsonschema
 
 from isv_readiness.project import ContextSource, ReadinessProject
-from isv_readiness.scan.models import GapReport, GapRow
+from isv_readiness.scan.models import Evidence, GapReport, GapRow, Remediation
 
 CONTEXT_PACK_SCHEMA_VERSION = "0.1.0"
 MAX_SOURCE_BYTES = 1_000_000
@@ -162,16 +162,18 @@ def load_context_records(cache_dir: Path) -> tuple[ContextRecord, ...]:
 def build_context_pack(
     project: ReadinessProject,
     manifest_path: Path,
-    report: GapReport,
+    report: GapReport | dict[str, Any],
     *,
     gap_id: str,
     cache_dir: Path,
     environment: Mapping[str, str] | None = None,
     max_chars: int = 48_000,
+    feedback: Sequence[str] = (),
 ) -> ContextPack:
     if max_chars < 4_000:
         raise ContextError("Context budget must be at least 4000 characters.")
-    gap = next((row for row in report.rows if row.id == gap_id), None)
+    rows = report.rows if isinstance(report, GapReport) else [_gap_from_dict(row) for row in report.get("rows", [])]
+    gap = next((row for row in rows if row.id == gap_id), None)
     if gap is None:
         raise ContextError(f"Gap not found: {gap_id}")
     if gap.domain not in project.assessment.domains:
@@ -182,6 +184,17 @@ def build_context_pack(
     available_env = sorted(name for name in required_env if env.get(name))
     terms = _gap_terms(gap)
     candidates = _local_gap_items(project, manifest_path, gap, terms)
+    if feedback:
+        candidates.append(
+            _item(
+                "previous_attempt_feedback",
+                "verifier_feedback",
+                "authoritative",
+                "gapctl://previous-attempt",
+                "\n\n".join(feedback),
+                "feedback from the prior static or live verification attempt",
+            )
+        )
     candidates.extend(_cached_items(load_context_records(cache_dir), gap, terms))
     candidates.sort(key=lambda item: (_trust_rank(item.trust), item.source_id, item.origin))
 
@@ -227,6 +240,7 @@ def build_context_pack(
                     "id": api.id,
                     "kind": api.kind,
                     "base_url": api.base_url,
+                    "base_url_env": api.base_url_env,
                     "spec": api.spec,
                     "auth_env": list(api.auth_env),
                     "domains": list(api.domains),
@@ -457,6 +471,11 @@ def _redact_text(text: str) -> str:
     return AWS_KEY_RE.sub("[REDACTED AWS KEY]", text)
 
 
+def redact_text(text: str) -> str:
+    """Redact common credential forms before persisting external command output."""
+    return _redact_text(text)
+
+
 def _decode_json_or_text(text: str) -> Any:
     try:
         return json.loads(text)
@@ -562,3 +581,21 @@ def _fetch_url(url: str, headers: Mapping[str, str]) -> bytes:
     request = urllib.request.Request(url, headers=dict(headers))
     with urllib.request.urlopen(request, timeout=30) as response:
         return response.read(MAX_SOURCE_BYTES + 1)
+
+
+def _gap_from_dict(raw: Mapping[str, Any]) -> GapRow:
+    return GapRow(
+        id=str(raw["id"]),
+        domain=str(raw["domain"]),
+        step_name=str(raw["step_name"]),
+        validation_class=raw.get("validation_class"),
+        requirement_id=raw.get("requirement_id"),
+        milestone=raw.get("milestone"),
+        status=raw["status"],
+        detection=raw["detection"],
+        stage=raw["stage"],
+        gap_type=raw["gap_type"],
+        evidence=Evidence(**raw["evidence"]),
+        remediation=Remediation(**raw["remediation"]),
+        enrichment=dict(raw.get("enrichment") or {}),
+    )

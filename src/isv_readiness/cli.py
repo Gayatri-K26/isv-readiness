@@ -7,9 +7,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+from isv_readiness.agent import AgentWorkflowError, run_agent_turn
+from isv_readiness.bundle import BundleError, build_bundle
 from isv_readiness.change_verification import (
     apply_verified_change_set,
+    load_change_application,
     load_change_verification,
+    rollback_change_application,
     verify_change_set,
 )
 from isv_readiness.changes import build_change_proposal, load_change_set
@@ -21,6 +25,7 @@ from isv_readiness.context import (
 )
 from isv_readiness.fixes import FixGuardrailError, build_fix_proposal
 from isv_readiness.generation import run_generator
+from isv_readiness.live import LiveRunError, run_live_domain
 from isv_readiness.loop import LoopStateError, advance_loop, load_loop_state
 from isv_readiness.onboarding import (
     OnboardingError,
@@ -82,12 +87,21 @@ def _build_parser() -> argparse.ArgumentParser:
     bootstrap_parser.add_argument("--validation-ref", default="main")
     bootstrap_parser.add_argument("--profile", type=Path, default=None)
     bootstrap_parser.add_argument("--api-base-url", default=None, help="Provider API endpoint (never a credential)")
+    bootstrap_parser.add_argument(
+        "--api-base-url-env", default=None, help="Environment variable name used by provider scripts for the API URL"
+    )
     bootstrap_parser.add_argument("--api-spec", default=None, help="Local path or URL to the provider API spec")
     bootstrap_parser.add_argument(
         "--auth-env",
         action="append",
         default=[],
         help="Credential environment variable name; repeat for multiple inputs",
+    )
+    bootstrap_parser.add_argument(
+        "--runtime-env",
+        action="append",
+        default=[],
+        help="Non-secret runtime environment variable name to pass to isvctl; repeat as needed",
     )
     bootstrap_parser.add_argument("--write", action="store_true", help="Clone if needed and write isv-project.yaml")
     bootstrap_parser.add_argument("--overwrite", action="store_true", help="Replace an existing project manifest")
@@ -166,6 +180,51 @@ def _build_parser() -> argparse.ArgumentParser:
     change_apply_parser.add_argument("--out", type=Path, required=True)
     change_apply_parser.add_argument("--apply", action="store_true")
     change_apply_parser.set_defaults(handler=_change_apply)
+
+    change_rollback_parser = subparsers.add_parser(
+        "change-rollback", help="Explicitly restore a recorded multi-file application transaction"
+    )
+    change_rollback_parser.add_argument("--application", type=Path, required=True)
+    change_rollback_parser.add_argument("--provider-repo", type=Path, required=True)
+    change_rollback_parser.add_argument("--out", type=Path, required=True)
+    change_rollback_parser.add_argument("--rollback", action="store_true")
+    change_rollback_parser.set_defaults(handler=_change_rollback)
+
+    live_parser = subparsers.add_parser(
+        "live-run", help="Run one policy-authorized domain or validation selection and preserve artifacts"
+    )
+    live_parser.add_argument("--project", type=Path, required=True)
+    live_parser.add_argument("--domain", required=True)
+    live_parser.add_argument("--selection", default=None, help="Validation class to pass to pytest -k")
+    live_parser.add_argument("--scope", type=Path, default=None, help="Kubernetes ownership scope")
+    live_parser.add_argument("--artifacts-dir", type=Path, required=True)
+    live_parser.add_argument("--timeout", type=int, default=3600)
+    live_parser.add_argument("--out", type=Path, required=True)
+    live_parser.add_argument("--run-live", action="store_true", help="Required explicit infrastructure-run authorization")
+    live_parser.set_defaults(handler=_live_run)
+
+    agent_parser = subparsers.add_parser(
+        "agent-run", help="Advance the scoped scan/generate/review/apply/live workflow by one safe turn"
+    )
+    agent_parser.add_argument("--project", type=Path, required=True)
+    agent_parser.add_argument("--domain", required=True)
+    agent_parser.add_argument("--work-dir", type=Path, required=True)
+    agent_parser.add_argument("--generator", default=None, help="Explicit generator adapter executable")
+    agent_parser.add_argument("--generator-arg", action="append", default=[])
+    agent_parser.add_argument("--generator-env", action="append", default=[])
+    agent_parser.add_argument("--approve-patch", default=None, help="Exact reviewed patch SHA-256")
+    agent_parser.add_argument("--apply", action="store_true", help="Apply only the exact --approve-patch transaction")
+    agent_parser.add_argument("--run-live", action="store_true", help="Run policy-authorized targeted validation")
+    agent_parser.add_argument("--onboard", action="store_true", help="Scaffold a missing provider before scanning")
+    agent_parser.set_defaults(handler=_agent_run)
+
+    bundle_parser = subparsers.add_parser(
+        "bundle", help="Assemble a sanitized, hash-inventoried qualification or validation evidence bundle"
+    )
+    bundle_parser.add_argument("--project", type=Path, required=True)
+    bundle_parser.add_argument("--agent-work-dir", type=Path, action="append", required=True)
+    bundle_parser.add_argument("--out-dir", type=Path, required=True)
+    bundle_parser.set_defaults(handler=_bundle)
 
     scan_parser = subparsers.add_parser("scan", help="Build a deterministic static/dynamic gaps.json report")
     scan_parser.add_argument("-p", "--provider-repo", type=Path, required=True)
@@ -272,8 +331,10 @@ def _bootstrap(args: argparse.Namespace) -> int:
             assessment_mode=args.assessment_mode,
             profile=args.profile,
             api_base_url=args.api_base_url,
+            api_base_url_env=args.api_base_url_env,
             api_spec=args.api_spec,
             auth_env=args.auth_env,
+            pass_env=args.runtime_env,
         )
         if not args.write:
             print("Bootstrap plan:")
@@ -433,6 +494,106 @@ def _change_apply(args: argparse.Namespace) -> int:
     print(f"Result: {args.out}")
     print("Run a fresh static scan and the reviewed targeted live validation next.")
     return 0
+
+
+def _change_rollback(args: argparse.Namespace) -> int:
+    if not args.rollback:
+        print("Refusing to restore source without the explicit --rollback flag.", file=sys.stderr)
+        return 2
+    try:
+        result = rollback_change_application(
+            load_change_application(args.application),
+            provider_repo=args.provider_repo,
+        )
+        args.out.write_text(json.dumps(result.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except (OSError, json.JSONDecodeError, VerificationError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(f"Rolled back change set: {result.gap_id}")
+    print(f"Files restored or removed: {len(result.files)}")
+    print(f"Result: {args.out}")
+    return 0
+
+
+def _live_run(args: argparse.Namespace) -> int:
+    try:
+        result = run_live_domain(
+            load_project(args.project),
+            args.project,
+            domain=args.domain,
+            artifacts_dir=args.artifacts_dir,
+            explicit_authorization=args.run_live,
+            selection=args.selection,
+            scope_path=args.scope,
+            timeout_seconds=args.timeout,
+        )
+        args.out.write_text(json.dumps(result.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except (OSError, json.JSONDecodeError, ProjectError, LiveRunError, subprocess.SubprocessError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(f"Live verification success: {'yes' if result.success else 'no'}")
+    print(f"Selection: {result.selection or 'entire domain'}")
+    print(f"Statuses: {', '.join(result.selected_statuses) or 'no JUnit rows'}")
+    print(f"Artifacts: {args.artifacts_dir}")
+    print(f"Result: {args.out}")
+    return 0 if result.success else 1
+
+
+def _agent_run(args: argparse.Namespace) -> int:
+    command = [args.generator, *args.generator_arg] if args.generator else None
+    try:
+        state = run_agent_turn(
+            args.project,
+            domain=args.domain,
+            work_dir=args.work_dir,
+            generator_command=command,
+            generator_pass_env=args.generator_env,
+            approval_patch_sha256=args.approve_patch,
+            apply_changes=args.apply,
+            run_live=args.run_live,
+            onboard_if_missing=args.onboard,
+        )
+    except (
+        OSError,
+        json.JSONDecodeError,
+        subprocess.SubprocessError,
+        AgentWorkflowError,
+        ContextError,
+        ProjectError,
+        FixGuardrailError,
+        VerificationError,
+        LiveRunError,
+        OnboardingError,
+        LoopStateError,
+        SolutionProfileError,
+    ) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(f"Agent status: {state.status}")
+    print(f"Domain: {state.domain}")
+    print(f"Selected gap: {state.selected_gap_id or 'none'}")
+    print(f"Reason: {state.reason}")
+    if state.patch_sha256:
+        print(f"Review patch SHA-256: {state.patch_sha256}")
+    print(f"State: {args.work_dir.resolve() / 'agent-state.json'}")
+    return 1 if state.status == "blocked" else 0
+
+
+def _bundle(args: argparse.Namespace) -> int:
+    try:
+        manifest = build_bundle(
+            args.project,
+            agent_work_dirs=args.agent_work_dir,
+            output_dir=args.out_dir,
+        )
+    except (OSError, json.JSONDecodeError, ProjectError, AgentWorkflowError, BundleError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(f"Bundle outcome: {manifest.outcome}")
+    print(f"Domains: {len(manifest.domains)}")
+    print(f"Included artifacts: {len(manifest.files)}")
+    print(f"Bundle: {args.out_dir.resolve()}")
+    return 0 if manifest.outcome != "incomplete" else 1
 
 
 def _scan(args: argparse.Namespace) -> int:

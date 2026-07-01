@@ -12,6 +12,7 @@ import jsonschema
 from isv_readiness.change_verification import (
     apply_verified_change_set,
     load_change_verification,
+    rollback_change_application,
     verify_change_set,
 )
 from isv_readiness.changes import Change, ChangeSet, canonical_sha256
@@ -72,6 +73,15 @@ class ChangeVerificationTests(unittest.TestCase):
             )
             jsonschema.validate(result.to_dict(), application_schema)
 
+            rollback = rollback_change_application(result, provider_repo=provider)
+            self.assertTrue(rollback.rolled_back)
+            self.assertEqual(script.read_text(encoding="utf-8"), script_before)
+            self.assertEqual(config.read_text(encoding="utf-8"), config_before)
+            rollback_schema = json.loads(
+                (ROOT / "schemas" / "change-rollback.schema.json").read_text(encoding="utf-8")
+            )
+            jsonschema.validate(rollback.to_dict(), rollback_schema)
+
     def test_application_rejects_any_file_drift(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             root = Path(tempdir)
@@ -96,6 +106,32 @@ class ChangeVerificationTests(unittest.TestCase):
                     manifest=manifest,
                     backup_dir=root / "backups",
                 )
+
+    def test_rollback_rejects_post_application_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            provider = root / "provider"
+            shutil.copytree(FIXTURES / "provider_repo", provider)
+            report, gap_id = _fixture_report(provider)
+            config = provider / "config" / "vm.yaml"
+            change_set = _change_set(gap_id, config.read_text(encoding="utf-8"))
+            manifest = verify_change_set(
+                report,
+                provider_repo=provider,
+                change_set=change_set,
+                validation_root=FIXTURES / "ai-cloud-validation",
+            )
+            result = apply_verified_change_set(
+                report,
+                provider_repo=provider,
+                change_set=change_set,
+                manifest=manifest,
+                backup_dir=root / "backups",
+            )
+            config.write_text(config.read_text(encoding="utf-8") + "# changed later\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(VerificationError, "changed after application"):
+                rollback_change_application(result, provider_repo=provider)
 
 
 def _fixture_report(provider: Path) -> tuple[dict, str]:

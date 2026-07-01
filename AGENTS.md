@@ -66,6 +66,10 @@ python3 -m json.tool schemas/change-set.schema.json >/dev/null
 python3 -m json.tool schemas/change-proposal.schema.json >/dev/null
 python3 -m json.tool schemas/change-verification.schema.json >/dev/null
 python3 -m json.tool schemas/change-application.schema.json >/dev/null
+python3 -m json.tool schemas/change-rollback.schema.json >/dev/null
+python3 -m json.tool schemas/live-run.schema.json >/dev/null
+python3 -m json.tool schemas/agent-state.schema.json >/dev/null
+python3 -m json.tool schemas/bundle-manifest.schema.json >/dev/null
 uv lock --check
 git diff --check
 ```

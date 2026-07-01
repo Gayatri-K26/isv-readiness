@@ -743,3 +743,100 @@ small multi-file edits real provider onboarding requires.
 - `uv run python -m unittest discover -s tests`: 74 tests passed.
 - `uvx ruff check src tests`, Python compilation, all JSON schemas, and
   `git diff --check`: passed.
+
+## Step 12 - Live Feedback, Review-gated Agent Runner, and Evidence Bundle
+
+### Objective
+
+Connect the implemented contracts into a usable domain workflow that can
+scaffold an unstarted provider, close eligible gaps, learn from real validation
+artifacts, restore failed attempts, and produce a reproducible review bundle
+without weakening scope, review, credential, or infrastructure gates.
+
+### Upstream Contract Investigation
+
+- Current `isvctl test run` supports config files, lifecycle phases, repeated
+  labels, a JUnit output path, `--no-upload`, and extra pytest arguments after
+  `--`.
+- A gap row carries the installed validation class but not necessarily all
+  upstream labels. Targeted verification therefore uses the validated class as
+  a safe pytest `-k` selection. `isvctl` continues to execute configured setup,
+  test, and teardown phases; selection does not bypass lifecycle management.
+- JUnit is the authoritative feedback contract. Process exit status alone is
+  insufficient because missing, skipped, or malformed result rows must remain
+  visible to the deterministic classifier.
+
+### Decisions
+
+1. Add both a project policy (`execution.allow_live_runs`) and an invocation
+   gate (`--run-live`). Require both for infrastructure execution.
+2. Verify the checkout still matches the manifest's pinned commit immediately
+   before a live run. Construct the command from supported `isvctl` options,
+   never from a report's remediation string.
+3. Build a minimal child environment from declared credential and runtime
+   variable names. Inject a non-secret API endpoint only through its declared
+   `base_url_env`. Reject missing required credentials before executing.
+4. Redact captured command output before writing it. Preserve JUnit, the
+   redacted log path, the exact command arguments, exit status, normalized gap
+   report, and selected statuses in a versioned live-run result.
+5. Generate a draft qualification profile when bootstrap domains are explicitly
+   declared ISV-owned. Keep it draft and record its assumption. Require an
+   explicit reviewed profile for `full_validation`; never synthesize one.
+6. Within the adapter-work route, select an authorized/fixable row before a
+   non-editable row. Non-code scope/evidence/product routes still take priority,
+   and an uneditable adapter gap remains a blocker after eligible work is done.
+7. Let dynamic gaps pass isolated *static safety* verification when no static
+   regression is introduced, but require the subsequent live result to resolve
+   the dynamic gap. Static verification never claims dynamic success.
+8. Persist `agent-run` state by project/profile identity and domain. Advance
+   through `awaiting_generator`, `awaiting_review`, and `awaiting_live`; exact
+   patch-hash approval authorizes only one transaction.
+9. On targeted live failure, use the application record to restore replaced
+   files or remove created files. Refuse rollback if applied files or backups
+   drifted. Feed redacted verifier evidence into a later context pack only when
+   deterministic routing still authorizes an edit.
+10. Require a final whole-domain live pass after static selected scope is green.
+    Report `complete` only after both conditions hold.
+11. Build a sanitized evidence directory containing project/profile, agent
+    state, reports, proposals/patches, verification, application/rollback, and
+    live result JSON. Inventory provider files by hash without copying source.
+    Exclude raw contexts, API specs, MCP exports, generated source payloads,
+    credential/process environments, backups, and raw logs.
+
+### Changed Files
+
+- `schemas/live-run.schema.json`
+- `schemas/agent-state.schema.json`
+- `schemas/change-rollback.schema.json`
+- `schemas/bundle-manifest.schema.json`
+- `schemas/project.schema.json`
+- `src/isv_readiness/live.py`
+- `src/isv_readiness/agent.py`
+- `src/isv_readiness/bundle.py`
+- `src/isv_readiness/change_verification.py`
+- `src/isv_readiness/context.py`
+- `src/isv_readiness/project.py`
+- `src/isv_readiness/loop.py`
+- `src/isv_readiness/cli.py`
+- `tests/test_live.py`
+- `tests/test_agent.py`
+- `tests/test_bundle.py`
+- `tests/test_change_verification.py`
+- `tests/test_loop.py`
+- `tests/test_project.py`
+- `README.md`
+- `docs/architecture.md`
+- `AGENTS.md`
+- `SLOP.md`
+
+### Verification
+
+- Tests cover both live-run gates, checkout drift, missing credentials, minimal
+  environment injection, API URL injection, targeted selection, redaction,
+  JUnit ingestion, generated qualification scope, full-validation profile
+  refusal, fixable-row ordering, agent review/hash gates, targeted and final
+  live completion, explicit rollback, rollback drift, bundle exclusions,
+  provider inventory, and bundle schemas.
+- `uv run python -m unittest discover -s tests`: 83 tests passed.
+- `uvx ruff check src tests`, Python compilation, all JSON schemas,
+  `uv lock --check`, and `git diff --check`: passed.

@@ -24,6 +24,7 @@ from isv_readiness.verification import VerificationError, find_regressions
 
 CHANGE_VERIFICATION_VERSION = "0.1.0"
 CHANGE_APPLICATION_VERSION = "0.1.0"
+CHANGE_ROLLBACK_VERSION = "0.1.0"
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,28 @@ class ChangeApplicationResult:
         return payload
 
 
+@dataclass(frozen=True)
+class RolledBackFile:
+    target_root: str
+    path: str
+    restored_sha256: str | None
+    removed: bool
+
+
+@dataclass(frozen=True)
+class ChangeRollbackResult:
+    schema_version: str
+    gap_id: str
+    change_set_sha256: str
+    files: tuple[RolledBackFile, ...]
+    rolled_back: bool
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["files"] = [asdict(item) for item in self.files]
+        return payload
+
+
 def verify_change_set(
     report: dict[str, Any],
     *,
@@ -79,10 +102,9 @@ def verify_change_set(
     validation_root: Path | None,
 ) -> ChangeVerificationManifest:
     selected = select_gap(report, change_set.gap_id)
-    if selected.get("detection") != "static":
-        raise VerificationError(
-            "Isolated change-set verification supports static gaps only; dynamic gaps require a reviewed live rerun."
-        )
+    detection = selected.get("detection")
+    if detection not in {"static", "dynamic"}:
+        raise VerificationError(f"Gap {change_set.gap_id} has no supported detection mode.")
     proposal = build_change_proposal(report, provider_repo=provider_repo, change_set=change_set)
     provider_root = provider_repo.resolve()
     with tempfile.TemporaryDirectory(prefix="gapctl-change-verify-") as tempdir:
@@ -118,6 +140,7 @@ def verify_change_set(
         domain=proposal.domain,
         selected_gap_id=change_set.gap_id,
     )
+    static_success = status_after == "pass" if detection == "static" else True
     manifest = ChangeVerificationManifest(
         schema_version=CHANGE_VERIFICATION_VERSION,
         verification_mode="isolated_static_change_set_rescan",
@@ -129,7 +152,7 @@ def verify_change_set(
         selected_status_before=str(selected.get("status")),
         selected_status_after=str(status_after) if status_after is not None else None,
         regressions=tuple(regressions),
-        success=status_after == "pass" and not regressions,
+        success=static_success and not regressions,
     )
     _validate_schema(manifest.to_dict(), "change-verification.schema.json")
     return manifest
@@ -244,6 +267,90 @@ def apply_verified_change_set(
     return result
 
 
+def load_change_application(path: Path) -> ChangeApplicationResult:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    _validate_schema(raw, "change-application.schema.json")
+    return ChangeApplicationResult(
+        schema_version=raw["schema_version"],
+        gap_id=raw["gap_id"],
+        change_set_sha256=raw["change_set_sha256"],
+        patch_sha256=raw["patch_sha256"],
+        files=tuple(AppliedFile(**item) for item in raw["files"]),
+        applied=raw["applied"],
+    )
+
+
+def rollback_change_application(
+    application: ChangeApplicationResult,
+    *,
+    provider_repo: Path,
+) -> ChangeRollbackResult:
+    if not application.applied:
+        raise VerificationError("Application result is not marked applied.")
+    provider_root = provider_repo.resolve()
+    targets: list[tuple[AppliedFile, Path, bytes | None, int | None]] = []
+    for item in application.files:
+        target = _application_target(provider_root, item.target_root, item.path)
+        if not target.is_file():
+            raise VerificationError(f"Applied target is missing; refusing rollback: {item.path}")
+        if _file_sha256(target) != item.after_sha256:
+            raise VerificationError(f"Applied target changed after application; refusing rollback: {item.path}")
+        restore_bytes = None
+        restore_mode = None
+        if item.backup_path:
+            backup = Path(item.backup_path)
+            if not backup.is_file():
+                raise VerificationError(f"Rollback backup is missing: {backup}")
+            restore_bytes = backup.read_bytes()
+            restore_mode = stat.S_IMODE(backup.stat().st_mode)
+            if item.before_sha256 != _file_sha256(backup):
+                raise VerificationError(f"Rollback backup hash mismatch: {backup}")
+        elif item.before_sha256 is not None:
+            raise VerificationError(f"Existing target has no rollback backup: {item.path}")
+        targets.append((item, target, restore_bytes, restore_mode))
+
+    original = {target: (target.read_bytes(), stat.S_IMODE(target.stat().st_mode)) for _, target, _, _ in targets}
+    processed: list[Path] = []
+    results: list[RolledBackFile] = []
+    try:
+        for item, target, restore_bytes, restore_mode in reversed(targets):
+            if restore_bytes is None:
+                target.unlink()
+                results.append(RolledBackFile(item.target_root, item.path, None, True))
+            else:
+                _atomic_write(target, restore_bytes, restore_mode or 0o644)
+                restored = _file_sha256(target)
+                if restored != item.before_sha256:
+                    raise VerificationError(f"Rollback restored the wrong content hash: {item.path}")
+                results.append(RolledBackFile(item.target_root, item.path, restored, False))
+            processed.append(target)
+    except Exception as exc:
+        recovery_errors = []
+        for target in reversed(processed):
+            try:
+                content, mode = original[target]
+                _atomic_write(target, content, mode)
+            except OSError as recovery_exc:
+                recovery_errors.append(f"{target}: {recovery_exc}")
+        if recovery_errors:
+            raise VerificationError(
+                f"Rollback failed and forward-state recovery was incomplete: {exc}; {'; '.join(recovery_errors)}"
+            ) from exc
+        if isinstance(exc, VerificationError):
+            raise
+        raise VerificationError(f"Rollback failed; applied state was restored: {exc}") from exc
+
+    result = ChangeRollbackResult(
+        schema_version=CHANGE_ROLLBACK_VERSION,
+        gap_id=application.gap_id,
+        change_set_sha256=application.change_set_sha256,
+        files=tuple(reversed(results)),
+        rolled_back=True,
+    )
+    _validate_schema(result.to_dict(), "change-rollback.schema.json")
+    return result
+
+
 def _match_manifest(proposal: ChangeProposal, manifest: ChangeVerificationManifest) -> None:
     if manifest.gap_id != proposal.gap_id:
         raise VerificationError("Verification gap does not match the requested change set.")
@@ -276,6 +383,37 @@ def _rollback(applied: list[Path], backups: dict[Path, Path]) -> list[str]:
         except OSError as exc:
             errors.append(f"{target}: {exc}")
     return errors
+
+
+def _application_target(provider_root: Path, target_root: str, path: str) -> Path:
+    raw = Path(path)
+    if raw.is_absolute() or ".." in raw.parts:
+        raise VerificationError(f"Unsafe application target path: {path}")
+    base = provider_root if target_root == "provider" else provider_root.parent
+    target = (base / raw).resolve()
+    try:
+        target.relative_to(base.resolve())
+    except ValueError as exc:
+        raise VerificationError(f"Application target escapes its root: {path}") from exc
+    if target_root == "providers" and target.name not in {f"{provider_root.name}.yaml", f"{provider_root.name}.yml"}:
+        raise VerificationError(f"Application wrapper does not belong to selected provider: {path}")
+    return target
+
+
+def _atomic_write(target: Path, content: bytes, mode: int) -> None:
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=target.parent, prefix=f".{target.name}.", delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.chmod(mode)
+        os.replace(temporary, target)
+        temporary = None
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
 
 
 def _validate_schema(raw: Any, name: str) -> None:

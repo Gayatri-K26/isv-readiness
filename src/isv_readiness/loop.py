@@ -219,11 +219,18 @@ def _action(row: dict[str, Any]) -> str:
     return str(action) if action else "request_scope_decision"
 
 
-def _selection_key(row: dict[str, Any]) -> tuple[int, int, str, str, str]:
+def _selection_key(row: dict[str, Any]) -> tuple[int, int, int, str, str, str]:
     action = _action(row)
+    remediation = row.get("remediation") or {}
+    fixability_priority = (
+        0
+        if action == FIX_ACTION and remediation.get("auto_fixable") is True and remediation.get("target")
+        else 1
+    )
     stage_priority = 0 if row.get("stage") == "coverage" else 1
     return (
         ACTION_PRIORITY.get(action, 0),
+        fixability_priority,
         stage_priority,
         str(row.get("step_name", "")),
         str(row.get("validation_class", "")),

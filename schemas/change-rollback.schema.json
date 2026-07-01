@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nvidia.com/schemas/isv-readiness/change-rollback-0.1.0.schema.json",
+  "title": "ISV Readiness Change-set Rollback Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "gap_id", "change_set_sha256", "files", "rolled_back"],
+  "properties": {
+    "schema_version": {"const": "0.1.0"},
+    "gap_id": {"type": "string"},
+    "change_set_sha256": {"type": "string"},
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target_root", "path", "restored_sha256", "removed"],
+        "properties": {
+          "target_root": {"enum": ["provider", "providers"]},
+          "path": {"type": "string"},
+          "restored_sha256": {"type": ["string", "null"]},
+          "removed": {"type": "boolean"}
+        }
+      }
+    },
+    "rolled_back": {"const": true}
+  }
+}

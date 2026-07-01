@@ -54,11 +54,12 @@
     "execution": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["run_environment", "allow_live_runs", "credential_env", "max_attempts", "cleanup_required"],
+      "required": ["run_environment", "allow_live_runs", "credential_env", "pass_env", "max_attempts", "cleanup_required"],
       "properties": {
         "run_environment": {"type": "string", "minLength": 1},
         "allow_live_runs": {"type": "boolean"},
         "credential_env": {"$ref": "#/$defs/string_array"},
+        "pass_env": {"$ref": "#/$defs/string_array"},
         "max_attempts": {"type": "integer", "minimum": 1, "maximum": 20},
         "cleanup_required": {"type": "boolean"}
       }
@@ -79,11 +80,12 @@
     "api": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "kind", "base_url", "spec", "auth_env", "domains"],
+      "required": ["id", "kind", "base_url", "base_url_env", "spec", "auth_env", "domains"],
       "properties": {
         "id": {"$ref": "#/$defs/identifier"},
         "kind": {"enum": ["rest", "graphql", "cli", "sdk", "kubernetes", "other"]},
         "base_url": {"type": ["string", "null"]},
+        "base_url_env": {"type": ["string", "null"], "pattern": "^[A-Z_][A-Z0-9_]*$"},
         "spec": {"type": ["string", "null"]},
         "auth_env": {"$ref": "#/$defs/string_array"},
         "domains": {"$ref": "#/$defs/domains"}

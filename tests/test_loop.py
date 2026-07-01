@@ -65,6 +65,20 @@ def _report(rows: list[dict]) -> dict:
 
 
 class LoopControllerTests(unittest.TestCase):
+    def test_fixable_adapter_work_advances_before_noneditable_adapter_gap(self) -> None:
+        state = advance_loop(
+            _report(
+                [
+                    _row("gap_aaa_nonedit", auto_fixable=False),
+                    _row("gap_zzz_fixable"),
+                ]
+            ),
+            domain="vm",
+        )
+
+        self.assertEqual(state.status, "ready")
+        self.assertEqual(state.selected_gap_id, "gap_zzz_fixable")
+
     def test_scope_blocker_is_selected_before_fixable_work(self) -> None:
         state = advance_loop(
             _report(
