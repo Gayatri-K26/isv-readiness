@@ -82,7 +82,7 @@ class ValidationPlan:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return json.loads(json.dumps(asdict(self), default=str))
 
 
 CommandRunner = Callable[[Sequence[str], Path | None, int], subprocess.CompletedProcess[str]]
@@ -234,7 +234,12 @@ class IsvctlAdapter:
         if executable is not None:
             self.command_prefix = tuple(executable)
         elif self.validation_root is not None:
-            self.command_prefix = ("uv", "run", "isvctl")
+            local_executable = self.validation_root / ".venv" / "bin" / "isvctl"
+            self.command_prefix = (
+                (str(local_executable),)
+                if local_executable.is_file()
+                else ("uv", "run", "isvctl")
+            )
         else:
             self.command_prefix = ("isvctl",)
         self.timeout_seconds = timeout_seconds

@@ -81,28 +81,35 @@ def build_k8s_onboarding_plan(validation_root: Path, provider_name: str) -> K8sO
     )
 
 
-def write_k8s_onboarding_files(plan: K8sOnboardingPlan, *, overwrite: bool = False) -> list[Path]:
+def write_k8s_onboarding_files(
+    plan: K8sOnboardingPlan,
+    *,
+    overwrite: bool = False,
+    preserve_existing_scripts: bool = False,
+) -> list[Path]:
     written: list[Path] = []
     plan.provider_dir.joinpath("scripts", "k8s").mkdir(parents=True, exist_ok=True)
 
     _write_text(plan.wrapper_path, _wrapper_text(plan.provider_name), overwrite=overwrite)
     written.append(plan.wrapper_path)
 
-    _copy_or_write_script(
-        source=plan.template_setup_script,
-        target=plan.setup_script_path,
-        fallback=_fallback_setup_script(),
-        overwrite=overwrite,
-    )
-    written.append(plan.setup_script_path)
+    if not preserve_existing_scripts or not plan.setup_script_path.exists():
+        _copy_or_write_script(
+            source=plan.template_setup_script,
+            target=plan.setup_script_path,
+            fallback=_fallback_setup_script(),
+            overwrite=overwrite,
+        )
+        written.append(plan.setup_script_path)
 
-    _copy_or_write_script(
-        source=plan.template_teardown_script,
-        target=plan.teardown_script_path,
-        fallback=_fallback_teardown_script(),
-        overwrite=overwrite,
-    )
-    written.append(plan.teardown_script_path)
+    if not preserve_existing_scripts or not plan.teardown_script_path.exists():
+        _copy_or_write_script(
+            source=plan.template_teardown_script,
+            target=plan.teardown_script_path,
+            fallback=_fallback_teardown_script(),
+            overwrite=overwrite,
+        )
+        written.append(plan.teardown_script_path)
 
     _write_text(plan.scope_template_path, _scope_template_text(plan.provider_name), overwrite=overwrite)
     written.append(plan.scope_template_path)

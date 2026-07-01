@@ -245,3 +245,51 @@ changing `ai-cloud-validation` outcomes.
 - `PYTHONPATH=src python3 -m unittest discover -s tests -v`: 32 tests passed.
 - `python3 -m compileall -q src tests`: passed.
 - `git diff --check`: passed.
+
+## Step 5b - Cross-Domain Onboarding and Plan Export
+
+### Objective
+
+Cover both brand-new providers and existing configurations without duplicating
+the upstream scaffold or executing tests before the merged plan is understood.
+
+### Decisions
+
+1. Delegate broad provider creation to the supported
+   `isvctl provider scaffold` command; do not copy or reinterpret its template
+   inside `isv-readiness`.
+2. Treat selected domains as the readiness work scope. The upstream command may
+   create the complete template, while the agent only asks for and scans inputs
+   relevant to selected/profile-covered domains.
+3. Preserve the lightweight `--domain k8s` flow for existing users. In the
+   cross-domain flow, preserve K8s scripts created by the upstream scaffold and
+   add only the missing top-level wrapper and ownership scope.
+4. Prefer a checkout's existing `.venv/bin/isvctl`; fall back to
+   `uv run isvctl` when no local executable exists.
+5. Export the authoritative merged dry-run and catalog as a versioned,
+   schema-valid `validation-plan.json` via `gapctl plan`.
+
+### Changed Files
+
+- `src/isv_readiness/onboarding.py`
+- `src/isv_readiness/scan/k8s_onboard.py`
+- `src/isv_readiness/validation_adapter.py`
+- `src/isv_readiness/cli.py`
+- `schemas/validation-plan.schema.json`
+- `tests/test_onboarding.py`
+- `tests/test_validation_adapter.py`
+- `SLOP.md`
+
+### Verification
+
+- A real `gapctl plan` run against the current K3s provider produced a
+  schema-valid plan with config/catalog version `0.8.0`, 2 steps, 42 validation
+  entries, and 0 malformed entries. The 2 catalog-unknown entries are retained
+  ReFrame adapter checks.
+- Focused tests cover scaffold delegation, profile-derived intake questions,
+  K8s script preservation, backward-compatible K8s onboarding, local executable
+  selection, CLI plan export, and plan-schema validation.
+- `PYTHONPATH=src python3 -m unittest discover -s tests -v`: 37 tests passed.
+- `python3 -m compileall -q src tests`: passed.
+- `python3 -m json.tool schemas/validation-plan.schema.json`: passed.
+- `git diff --check`: passed.

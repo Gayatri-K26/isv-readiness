@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import json
 import subprocess
+import tempfile
 import unittest
 from collections.abc import Sequence
 from pathlib import Path
+from unittest.mock import patch
+
+import jsonschema
 
 from isv_readiness.validation_adapter import (
     ADAPTER_CONTRACT_VERSION,
@@ -41,6 +45,8 @@ CATALOG_PAYLOAD = {
         },
     ],
 }
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class ValidationNormalizationTests(unittest.TestCase):
@@ -185,6 +191,8 @@ class IsvctlAdapterTests(unittest.TestCase):
         self.assertEqual(plan.isvctl_version, "isvctl 0.8.0")
         self.assertEqual(plan.catalog_version, "0.8.0")
         self.assertEqual(len(plan.validations), 1)
+        schema = json.loads((ROOT / "schemas" / "validation-plan.schema.json").read_text(encoding="utf-8"))
+        jsonschema.Draft202012Validator(schema).validate(plan.to_dict())
         self.assertEqual(
             calls[0][0],
             ("uv", "run", "isvctl", "--version"),
@@ -226,6 +234,64 @@ class IsvctlAdapterTests(unittest.TestCase):
         adapter = IsvctlAdapter(executable=("isvctl",), runner=invalid_json_runner)
         with self.assertRaisesRegex(ValidationAdapterError, "did not emit valid JSON"):
             adapter.catalog()
+
+    def test_prefers_checkout_virtual_environment_executable(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            validation_root = Path(tempdir) / "ai-cloud-validation"
+            executable = validation_root / ".venv" / "bin" / "isvctl"
+            executable.parent.mkdir(parents=True)
+            executable.write_text("", encoding="utf-8")
+            calls: list[tuple[str, ...]] = []
+
+            def runner(
+                command: Sequence[str], cwd: Path | None, timeout_seconds: int
+            ) -> subprocess.CompletedProcess[str]:
+                calls.append(tuple(command))
+                return subprocess.CompletedProcess(command, 0, json.dumps(CATALOG_PAYLOAD), "")
+
+            adapter = IsvctlAdapter(validation_root, runner=runner)
+            adapter.catalog()
+
+        self.assertEqual(calls[0], (str(executable), "catalog", "list", "--json"))
+
+    def test_cli_exports_schema_valid_validation_plan(self) -> None:
+        from isv_readiness.cli import main
+
+        catalog = normalize_catalog(CATALOG_PAYLOAD)
+        plan = normalize_validation_plan(
+            {
+                "version": "1.0",
+                "tests": {
+                    "platform": "kubernetes",
+                    "validations": {"kubernetes": {"checks": {"K8sNodeCountCheck": {}}}},
+                },
+            },
+            catalog,
+            config_files=("provider.yaml",),
+            isvctl_version="isvctl 0.8.0",
+        )
+        with tempfile.TemporaryDirectory() as tempdir:
+            output = Path(tempdir) / "validation-plan.json"
+            validation_root = Path(tempdir) / "ai-cloud-validation"
+            with patch("isv_readiness.cli.IsvctlAdapter") as adapter_class:
+                adapter_class.return_value.plan.return_value = plan
+                exit_code = main(
+                    [
+                        "plan",
+                        "-f",
+                        "provider.yaml",
+                        "--validation-root",
+                        str(validation_root),
+                        "--out",
+                        str(output),
+                    ]
+                )
+            payload = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 0)
+        adapter_class.assert_called_once_with(validation_root)
+        schema = json.loads((ROOT / "schemas" / "validation-plan.schema.json").read_text(encoding="utf-8"))
+        jsonschema.Draft202012Validator(schema).validate(payload)
 
 
 if __name__ == "__main__":

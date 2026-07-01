@@ -7,6 +7,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+from isv_readiness.onboarding import (
+    OnboardingError,
+    build_provider_onboarding_plan,
+    execute_provider_onboarding,
+)
 from isv_readiness.scan.k8s_dynamic import K8sDynamicArtifacts, scan_k8s_artifacts
 from isv_readiness.scan.k8s_onboard import build_k8s_onboarding_plan, write_k8s_onboarding_files
 from isv_readiness.scan.k8s_scope import load_k8s_scope
@@ -15,6 +20,7 @@ from isv_readiness.scan.profile import enrich_report_with_profile
 from isv_readiness.scan.report import load_report, render_report
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
 from isv_readiness.solution_profile import SolutionProfile, SolutionProfileError, load_solution_profile
+from isv_readiness.validation_adapter import IsvctlAdapter, ValidationAdapterError
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -55,6 +61,12 @@ def _build_parser() -> argparse.ArgumentParser:
     profile_parser.add_argument("--format", choices=["summary", "json"], default="summary")
     profile_parser.set_defaults(handler=_profile)
 
+    plan_parser = subparsers.add_parser("plan", help="Export the merged, normalized isvctl validation plan")
+    plan_parser.add_argument("-f", "--config", type=Path, action="append", required=True)
+    plan_parser.add_argument("--validation-root", type=Path, required=True)
+    plan_parser.add_argument("--out", type=Path, default=Path("validation-plan.json"))
+    plan_parser.set_defaults(handler=_plan)
+
     fix_parser = subparsers.add_parser("fix", help="Reserved for v0.3 agent fixes")
     fix_parser.set_defaults(handler=_reserved("gapctl fix ships in v0.3."))
 
@@ -62,7 +74,9 @@ def _build_parser() -> argparse.ArgumentParser:
     loop_parser.set_defaults(handler=_reserved("gapctl loop ships in v0.4."))
 
     onboard_parser = subparsers.add_parser("onboard", help="Prepare a provider for readiness scanning")
-    onboard_parser.add_argument("--domain", choices=["k8s"], default="k8s")
+    onboard_parser.add_argument("--domain", default=None, help="One domain; --domain k8s keeps the lightweight K8s flow")
+    onboard_parser.add_argument("--domains", default=None, help="Comma-separated domains for the full provider scaffold")
+    onboard_parser.add_argument("--profile", type=Path, default=None, help="Derive domains and ISV inputs from a profile")
     onboard_parser.add_argument("--provider-name", required=True, help="Provider name, for example dsx-air")
     onboard_parser.add_argument("--validation-root", type=Path, required=True, help="Path to ai-cloud-validation checkout")
     onboard_parser.add_argument("--write", action="store_true", help="Create the wrapper/scripts/scope template")
@@ -198,9 +212,43 @@ def _first_config_path(report: GapReport, provider_repo: Path) -> Path | None:
 
 
 def _onboard(args: argparse.Namespace) -> int:
-    if args.domain != "k8s":
-        print("Only K8s onboarding is implemented in v1.", file=sys.stderr)
+    if args.domain and args.domains:
+        print("Use either --domain or --domains, not both.", file=sys.stderr)
         return 2
+    if args.domain == "k8s" and args.domains is None and args.profile is None:
+        return _onboard_k8s(args)
+
+    profile = _load_profile_arg(args.profile)
+    if args.profile is not None and profile is None:
+        return 2
+    domains = _onboarding_domains(args.domain, args.domains, profile)
+    if not domains:
+        print("Onboarding requires --domain, --domains, or a profile with covered/test domains.", file=sys.stderr)
+        return 2
+    try:
+        plan = build_provider_onboarding_plan(
+            args.validation_root,
+            args.provider_name,
+            domains,
+            profile=profile,
+        )
+        if args.write:
+            written = execute_provider_onboarding(plan, overwrite=args.overwrite)
+            print("Created provider onboarding files:")
+            for path in written:
+                print(f"- {path}")
+        else:
+            print("Provider onboarding plan:")
+            for line in plan.summary_lines():
+                print(line)
+            print("\nPass --write to run the upstream scaffold and complete selected-domain wiring.")
+    except (FileExistsError, OnboardingError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    return 0
+
+
+def _onboard_k8s(args: argparse.Namespace) -> int:
     try:
         plan = build_k8s_onboarding_plan(args.validation_root, args.provider_name)
         if args.write:
@@ -249,6 +297,20 @@ def _profile(args: argparse.Namespace) -> int:
     return 0
 
 
+def _plan(args: argparse.Namespace) -> int:
+    try:
+        plan = IsvctlAdapter(args.validation_root).plan(args.config)
+        args.out.write_text(
+            json.dumps(plan.to_dict(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    except (OSError, ValidationAdapterError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(f"Wrote {args.out}")
+    return 0
+
+
 def _load_profile_arg(path: Path | None) -> SolutionProfile | None:
     if path is None:
         return None
@@ -269,6 +331,16 @@ def _scan_domains(raw_domains: str | None, profile: SolutionProfile | None) -> l
         for domain in profile.domains
         if domain.coverage == "covered" and domain.validation_mode == "test"
     ]
+
+
+def _onboarding_domains(
+    single_domain: str | None,
+    raw_domains: str | None,
+    profile: SolutionProfile | None,
+) -> list[str]:
+    if single_domain:
+        return [single_domain]
+    return _scan_domains(raw_domains, profile)
 
 
 def _reserved(message: str):
