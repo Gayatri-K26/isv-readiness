@@ -42,6 +42,7 @@ class K8sDynamicScanTests(unittest.TestCase):
         self.assertEqual(by_validation["K8sNimHelmWorkload-1b"].gap_type, "lab_env")
         self.assertEqual(by_validation["K8sNodePoolCheck"].step_name, "create_test_node_pool")
         self.assertEqual(by_validation["K8sNodePoolCheck"].gap_type, "semantic_mismatch")
+        self.assertEqual(by_validation["K8sNodePoolCheck"].enrichment["junit_reason"], "step_not_configured")
 
     def test_cli_merges_static_and_dynamic_k8s_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:

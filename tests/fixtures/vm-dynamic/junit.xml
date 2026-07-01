@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites name="isvctl VM validation tests">
+  <testsuite name="vm/test" tests="4" failures="1" errors="1" skipped="1">
+    <testcase name="test_validation[InstanceStateCheck]" time="0.1" />
+    <testcase name="test_validation[InstanceListCheck]" time="0.1">
+      <failure message="Validation failed: expected at least one instance" />
+    </testcase>
+    <testcase name="test_validation[InstanceCreatedCheck]" time="0.1">
+      <skipped type="step_not_configured" message="step 'launch_instance' is not configured for this run" />
+    </testcase>
+    <testcase name="test_validation[StepSuccessCheck]" time="0.1">
+      <error type="template_render_failed" message="failed to render validation parameters: missing tenant_id" />
+    </testcase>
+  </testsuite>
+</testsuites>

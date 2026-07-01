@@ -1,0 +1,5 @@
+Starting VM validation
+InstanceStateCheck passed
+InstanceListCheck failed: expected at least one instance
+InstanceCreatedCheck skipped: launch_instance is not configured
+StepSuccessCheck error: missing tenant_id

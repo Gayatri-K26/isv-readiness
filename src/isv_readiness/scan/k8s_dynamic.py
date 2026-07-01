@@ -107,7 +107,7 @@ def _scan_junit(options: K8sDynamicArtifacts, log_text: str | None) -> list[GapR
     seen: set[tuple[str, str | None, Status]] = set()
     for case in tree.iter("testcase"):
         validation_class = _validation_class_from_case(case)
-        status, message = _status_and_message(case)
+        status, message, junit_reason = _status_message_and_reason(case)
         step_name = _step_for_validation(validation_class, message)
         key = (step_name, validation_class, status)
         if key in seen:
@@ -128,6 +128,7 @@ def _scan_junit(options: K8sDynamicArtifacts, log_text: str | None) -> list[GapR
                 layer=classification.layer,
                 classification_note=classification.note,
                 stderr_excerpt=_log_excerpt(log_text, validation_class),
+                junit_reason=junit_reason,
             )
         )
     return rows
@@ -143,17 +144,19 @@ def _validation_class_from_case(case: ET.Element) -> str | None:
     return name or None
 
 
-def _status_and_message(case: ET.Element) -> tuple[Status, str]:
+def _status_message_and_reason(case: ET.Element) -> tuple[Status, str, str | None]:
     failure = case.find("failure")
     if failure is not None:
-        return "fail", _element_message(failure)
+        return "fail", _element_message(failure), failure.get("type")
     error = case.find("error")
     if error is not None:
-        return "error", _element_message(error)
+        return "error", _element_message(error), error.get("type")
     skipped = case.find("skipped")
     if skipped is not None:
-        return "skipped", _element_message(skipped)
-    return "pass", "Validation passed."
+        message = _element_message(skipped)
+        reason = skipped.get("type") or message.split(":", 1)[0].strip()
+        return "skipped", message, reason or None
+    return "pass", "Validation passed.", None
 
 
 def _element_message(element: ET.Element) -> str:
@@ -220,6 +223,7 @@ def _dynamic_row(
     layer: str | None,
     classification_note: str,
     stderr_excerpt: str | None = None,
+    junit_reason: str | None = None,
 ) -> GapRow:
     spine = "|".join(["k8s", step_name, validation_class or "", "", "dynamic"])
     return GapRow(
@@ -248,7 +252,10 @@ def _dynamic_row(
             rerun_command=_rerun_command(options),
             aws_reference=None,
         ),
-        enrichment=options.scope.to_enrichment(layer, classification_note),
+        enrichment={
+            **options.scope.to_enrichment(layer, classification_note),
+            "junit_reason": junit_reason,
+        },
     )
 
 

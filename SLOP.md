@@ -293,3 +293,47 @@ the upstream scaffold or executing tests before the merged plan is understood.
 - `python3 -m compileall -q src tests`: passed.
 - `python3 -m json.tool schemas/validation-plan.schema.json`: passed.
 - `git diff --check`: passed.
+
+## Step 5c - Cross-Domain Dynamic Ingestion
+
+### Objective
+
+Extend correctness-stage evidence beyond Kubernetes while retaining the
+specialized K8s ownership classifier.
+
+### Decisions
+
+1. Execute or ingest exactly one domain per dynamic invocation so each JUnit
+   artifact has an unambiguous provider config and rerun command.
+2. Keep K8s setup-inventory and layer-aware classification specialized; route
+   every other domain through a generic JUnit contract.
+3. Join dynamic cases to static rows to recover provider step and validation
+   category context without importing private validation internals.
+4. Preserve testcase names and structured JUnit reason codes such as
+   `step_not_configured` and `template_render_failed` in row enrichment.
+5. Classify generic failures conservatively. Profile routing still decides
+   whether the owning party permits an adapter edit, external handoff, evidence
+   collection, or product-gap ticket.
+6. Convert malformed or missing JUnit into an explicit `lab_env` error row
+   rather than aborting report generation.
+
+### Changed Files
+
+- `src/isv_readiness/scan/dynamic.py`
+- `src/isv_readiness/scan/k8s_dynamic.py`
+- `src/isv_readiness/cli.py`
+- `tests/test_dynamic.py`
+- `tests/test_k8s_dynamic.py`
+- `tests/fixtures/vm-dynamic/`
+- `SLOP.md`
+
+### Verification
+
+- VM fixture tests cover pass, failure, missing-step skip, template-render
+  error, log excerpts, static context joins, malformed XML, CLI merge, and gap
+  schema validation.
+- Existing K8s dynamic tests remain green and now assert structured reason
+  preservation.
+- `PYTHONPATH=src python3 -m unittest discover -s tests -v`: 40 tests passed.
+- `python3 -m compileall -q src tests`: passed.
+- `git diff --check`: passed.
