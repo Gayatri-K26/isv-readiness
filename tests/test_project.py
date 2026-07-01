@@ -123,6 +123,28 @@ class ProjectBootstrapTests(unittest.TestCase):
                     assessment_mode="full_validation",
                 )
 
+            root = Path(tempdir)
+            checkout = root / "ai-cloud-validation"
+            _make_checkout(checkout)
+            qualification = build_bootstrap_plan(
+                root / "qualification",
+                provider_name="acme",
+                domains=["vm"],
+                validation_root=checkout,
+            )
+            execute_bootstrap(qualification, runner=_git_runner)
+            draft_profile = qualification.manifest_path.parent / "solution-profile.yaml"
+            full = build_bootstrap_plan(
+                root / "full",
+                provider_name="acme",
+                domains=["vm"],
+                validation_root=checkout,
+                assessment_mode="full_validation",
+                profile=draft_profile,
+            )
+            with self.assertRaisesRegex(ProjectError, "reviewed or confirmed"):
+                execute_bootstrap(full, runner=_git_runner)
+
 
 def _make_checkout(root: Path, provider: str | None = None) -> None:
     (root / ".git").mkdir(parents=True)

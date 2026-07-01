@@ -93,7 +93,10 @@ checkout without pulling or changing its branch.
 Qualification bootstrap also creates a draft profile from the domains the
 operator explicitly marked ISV-owned. An SME should review product versions and
 capability-level ownership. `--assessment-mode full_validation` requires an
-explicit profile instead of generating this draft.
+explicit profile instead of generating this draft. That profile must be
+reviewed or confirmed, be in the `validate` journey stage, represent NSRG
+layers 1-4, cover the selected domains, and have no declared full-validation
+blockers.
 
 ### 1. Qualify the solution
 

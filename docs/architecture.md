@@ -120,7 +120,9 @@ gap. The controller eventually processes the full selected domain.
 
 Partial-layer work uses `qualification`. A tool may make every selected row
 green without claiming that an integrated metal-to-model stack completed full
-validation.
+validation. Full-validation bootstrap accepts only a reviewed/confirmed profile
+in the validate stage whose components span NSRG layers 1-4, whose selected
+domains resolve, and whose declared required scopes are qualification-ready.
 
 ### Context Pack
 

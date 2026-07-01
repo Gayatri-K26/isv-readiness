@@ -11,7 +11,14 @@ import jsonschema
 import yaml
 
 from isv_readiness.scan.k8s_onboard import PROVIDER_NAME_RE
-from isv_readiness.solution_profile import SUPPORTED_DOMAINS, canonicalize_domain, parse_solution_profile
+from isv_readiness.solution_profile import (
+    SUPPORTED_DOMAINS,
+    SolutionProfile,
+    SolutionProfileError,
+    canonicalize_domain,
+    load_solution_profile,
+    parse_solution_profile,
+)
 
 PROJECT_SCHEMA_VERSION = "0.1.0"
 DEFAULT_VALIDATION_URL = "https://github.com/NVIDIA/ai-cloud-validation.git"
@@ -200,6 +207,7 @@ def execute_bootstrap(
 ) -> ReadinessProject:
     if plan.manifest_path.exists() and not overwrite:
         raise ProjectError(f"Refusing to overwrite existing project: {plan.manifest_path}")
+    supplied_profile = _validate_supplied_profile(plan) if plan.profile else None
     plan.manifest_path.parent.mkdir(parents=True, exist_ok=True)
     run = runner or _default_runner
     if plan.clone_required:
@@ -321,6 +329,8 @@ def execute_bootstrap(
         draft_profile = _draft_qualification_profile(plan)
         parse_solution_profile(draft_profile)
         profile_path.write_text(yaml.safe_dump(draft_profile, sort_keys=False), encoding="utf-8")
+    elif supplied_profile is None:
+        raise ProjectError("Explicit profile validation did not produce a profile.")
     plan.manifest_path.write_text(yaml.safe_dump(project.to_dict(), sort_keys=False), encoding="utf-8")
     return project
 
@@ -401,6 +411,39 @@ def _validate_checkout(root: Path) -> None:
     required = root / "isvctl" / "configs" / "providers" / "my-isv"
     if not (root / ".git").exists() or not required.is_dir():
         raise ProjectError(f"Not an ai-cloud-validation checkout: {root}")
+
+
+def _validate_supplied_profile(plan: BootstrapPlan) -> SolutionProfile:
+    assert plan.profile is not None
+    if not plan.profile.is_file():
+        raise ProjectError(f"Solution profile not found: {plan.profile}")
+    try:
+        profile = load_solution_profile(plan.profile)
+    except (OSError, SolutionProfileError) as exc:
+        raise ProjectError(f"Could not load solution profile: {exc}") from exc
+    missing = sorted(domain for domain in plan.domains if profile.resolve(domain) is None)
+    if missing:
+        raise ProjectError(f"Solution profile does not cover selected domains: {', '.join(missing)}")
+    if plan.assessment_mode == "full_validation":
+        if profile.solution.profile_status not in {"reviewed", "confirmed"}:
+            raise ProjectError("Full validation requires a reviewed or confirmed solution profile.")
+        if profile.journey.stage != "validate":
+            raise ProjectError("Full validation requires a profile in the validate journey stage.")
+        nsrg_layers = {layer for component in profile.components for layer in component.nsrg_layers}
+        missing_layers = sorted({1, 2, 3, 4}.difference(nsrg_layers))
+        if missing_layers:
+            raise ProjectError(
+                "Full validation profile does not represent an integrated NSRG layer 1-4 stack; "
+                f"missing layers: {', '.join(str(layer) for layer in missing_layers)}"
+            )
+        summary = profile.qualification_summary()
+        if not summary["full_validation_ready"]:
+            blockers = [*summary["blocking_domains"], *summary["blocking_capabilities"]]
+            raise ProjectError(
+                "Full validation profile is not qualification-ready; blockers: "
+                + (", ".join(blockers) or "unknown")
+            )
+    return profile
 
 
 def _draft_qualification_profile(plan: BootstrapPlan) -> dict[str, Any]:

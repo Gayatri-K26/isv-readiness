@@ -885,3 +885,35 @@ or granting a generation subprocess repository write authority.
 - `uvx ruff check src tests`, Python compilation, all JSON schemas,
   `uv lock --check`, `git diff --check`, and the installed adapter `--help`:
   passed.
+
+## Step 14 - Full-validation Semantic Gate
+
+### Objective
+
+Prevent an explicit but draft, partial, or qualification-stage profile from
+turning a selected-scope run into a nominal full-validation engagement.
+
+### Decisions
+
+1. Validate a supplied profile before cloning or writing workspace state.
+2. Require every selected project domain to resolve in that profile.
+3. For `full_validation`, require `profile_status` to be `reviewed` or
+   `confirmed`, journey stage `validate`, component coverage across NSRG layers
+   1-4, and no declared required-domain or required-capability blockers.
+4. Keep qualification bootstrap unchanged: explicit ISV-owned domains may
+   generate a draft profile, and its output remains labeled qualification.
+
+### Changed Files
+
+- `src/isv_readiness/project.py`
+- `tests/test_project.py`
+- `README.md`
+- `docs/architecture.md`
+- `SLOP.md`
+
+### Verification
+
+- Tests cover missing full-validation profiles and rejection of a supplied
+  draft qualification profile before workspace creation.
+- Full verification remains green: 85 tests, Ruff, compilation, every JSON
+  schema, lockfile, and diff checks passed.
