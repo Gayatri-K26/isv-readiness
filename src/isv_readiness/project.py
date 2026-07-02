@@ -25,7 +25,6 @@ DEFAULT_VALIDATION_URL = "https://github.com/NVIDIA/ai-cloud-validation.git"
 DEFAULT_NSRG_URL = "https://docs.nvidia.com/dsx/ncp/software-reference-guide/introduction"
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
-AssessmentMode = Literal["qualification", "full_validation"]
 ProviderState = Literal["new", "existing"]
 CommandRunner = Callable[[Sequence[str], Path, int], subprocess.CompletedProcess[str]]
 
@@ -51,7 +50,6 @@ class ProviderProject:
 
 @dataclass(frozen=True)
 class Assessment:
-    mode: AssessmentMode
     domains: tuple[str, ...]
     profile: str | None
 
@@ -121,7 +119,6 @@ class BootstrapPlan:
     validation_ref: str
     provider_name: str
     domains: tuple[str, ...]
-    assessment_mode: AssessmentMode
     profile: Path | None
     api_base_url: str | None
     api_base_url_env: str | None
@@ -137,8 +134,8 @@ class BootstrapPlan:
             f"Validation checkout: {self.validation_root} ({action})",
             f"Validation source: {self.validation_url} @ {self.validation_ref}",
             f"Provider: {self.provider_name}",
-            f"Assessment: {self.assessment_mode}",
-            "Selected domains: " + ", ".join(self.domains),
+            "Phase: qualify (assess & scope) — enter validate after SME profile review",
+            "Owned domains: " + ", ".join(self.domains),
             "Live infrastructure runs: disabled until explicitly enabled in the project",
         ]
 
@@ -151,7 +148,6 @@ def build_bootstrap_plan(
     validation_root: Path | None = None,
     validation_url: str = DEFAULT_VALIDATION_URL,
     validation_ref: str = "main",
-    assessment_mode: AssessmentMode = "qualification",
     profile: Path | None = None,
     api_base_url: str | None = None,
     api_base_url_env: str | None = None,
@@ -167,10 +163,6 @@ def build_bootstrap_plan(
     unsupported = sorted(set(normalized_domains).difference(SUPPORTED_DOMAINS))
     if unsupported:
         raise ProjectError(f"Unsupported assessment domains: {', '.join(unsupported)}")
-    if assessment_mode not in {"qualification", "full_validation"}:
-        raise ProjectError(f"Unsupported assessment mode: {assessment_mode}")
-    if assessment_mode == "full_validation" and profile is None:
-        raise ProjectError("Full validation requires an explicit reviewed solution profile.")
     if not validation_url.strip() or not validation_ref.strip():
         raise ProjectError("Validation URL and ref must not be empty.")
     declared_env = [*auth_env, *pass_env, *([api_base_url_env] if api_base_url_env else [])]
@@ -187,7 +179,6 @@ def build_bootstrap_plan(
         validation_ref=validation_ref.strip(),
         provider_name=provider_name,
         domains=normalized_domains,
-        assessment_mode=assessment_mode,
         profile=profile.expanduser().resolve() if profile else None,
         api_base_url=api_base_url.strip() if api_base_url else None,
         api_base_url_env=api_base_url_env,
@@ -310,7 +301,7 @@ def execute_bootstrap(
             resolved_commit=commit,
         ),
         provider=ProviderProject(name=plan.provider_name, path=provider_value, state=state),
-        assessment=Assessment(mode=plan.assessment_mode, domains=plan.domains, profile=profile_value),
+        assessment=Assessment(domains=plan.domains, profile=profile_value),
         apis=apis,
         context_sources=tuple(sources),
         execution=ExecutionPolicy(
@@ -326,7 +317,7 @@ def execute_bootstrap(
     if plan.profile is None:
         if profile_path.exists() and not overwrite:
             raise ProjectError(f"Refusing to overwrite existing generated profile: {profile_path}")
-        draft_profile = _draft_qualification_profile(plan)
+        draft_profile = _draft_scope_profile(plan)
         parse_solution_profile(draft_profile)
         profile_path.write_text(yaml.safe_dump(draft_profile, sort_keys=False), encoding="utf-8")
     elif supplied_profile is None:
@@ -343,7 +334,6 @@ def load_project(path: Path) -> ReadinessProject:
         validation=ValidationCheckout(**raw["validation"]),
         provider=ProviderProject(**raw["provider"]),
         assessment=Assessment(
-            mode=raw["assessment"]["mode"],
             domains=tuple(raw["assessment"]["domains"]),
             profile=raw["assessment"]["profile"],
         ),
@@ -423,30 +413,11 @@ def _validate_supplied_profile(plan: BootstrapPlan) -> SolutionProfile:
         raise ProjectError(f"Could not load solution profile: {exc}") from exc
     missing = sorted(domain for domain in plan.domains if profile.resolve(domain) is None)
     if missing:
-        raise ProjectError(f"Solution profile does not cover selected domains: {', '.join(missing)}")
-    if plan.assessment_mode == "full_validation":
-        if profile.solution.profile_status not in {"reviewed", "confirmed"}:
-            raise ProjectError("Full validation requires a reviewed or confirmed solution profile.")
-        if profile.journey.stage != "validate":
-            raise ProjectError("Full validation requires a profile in the validate journey stage.")
-        nsrg_layers = {layer for component in profile.components for layer in component.nsrg_layers}
-        missing_layers = sorted({1, 2, 3, 4}.difference(nsrg_layers))
-        if missing_layers:
-            raise ProjectError(
-                "Full validation profile does not represent an integrated NSRG layer 1-4 stack; "
-                f"missing layers: {', '.join(str(layer) for layer in missing_layers)}"
-            )
-        summary = profile.qualification_summary()
-        if not summary["full_validation_ready"]:
-            blockers = [*summary["blocking_domains"], *summary["blocking_capabilities"]]
-            raise ProjectError(
-                "Full validation profile is not qualification-ready; blockers: "
-                + (", ".join(blockers) or "unknown")
-            )
+        raise ProjectError(f"Solution profile does not cover owned domains: {', '.join(missing)}")
     return profile
 
 
-def _draft_qualification_profile(plan: BootstrapPlan) -> dict[str, Any]:
+def _draft_scope_profile(plan: BootstrapPlan) -> dict[str, Any]:
     solution_id = re.sub(r"[^a-z0-9_-]", "_", plan.provider_name.lower())
     if not solution_id[0].isalpha():
         solution_id = f"isv_{solution_id}"
@@ -490,14 +461,14 @@ def _draft_qualification_profile(plan: BootstrapPlan) -> dict[str, Any]:
             {
                 "domain": domain,
                 "name": domain.replace("_", " ").title(),
-                "required_for_full_validation": False,
+                "owned": True,
                 "coverage": "covered",
                 "validation_mode": "test",
                 "capability_owner_actor_id": "isv",
                 "provider_adapter_owner_actor_id": "isv",
                 "component_ids": ["provider"],
                 "provider_configs": [],
-                "rationale": "Explicitly selected as ISV-owned qualification scope during bootstrap.",
+                "rationale": "ISV-owned domain declared during the qualify phase at bootstrap.",
                 "required_inputs": [],
                 "evidence_refs": [],
                 "capabilities": [],
@@ -506,7 +477,7 @@ def _draft_qualification_profile(plan: BootstrapPlan) -> dict[str, Any]:
         ],
         "sources": [],
         "assumptions": [
-            "This draft records operator-selected qualification scope only; an SME must review versions and capability ownership."
+            "This draft records operator-declared owned scope only; an SME must review versions and capability ownership before entering the validate phase."
         ],
     }
 

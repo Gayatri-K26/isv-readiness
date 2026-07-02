@@ -4,12 +4,11 @@
   "title": "ISV Readiness Qualification Bundle Manifest",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "provider", "assessment_mode", "outcome", "validation", "domains", "provider_files", "files", "excluded_sensitive"],
+  "required": ["schema_version", "provider", "outcome", "validation", "domains", "provider_files", "files", "excluded_sensitive"],
   "properties": {
     "schema_version": {"const": "0.1.0"},
     "provider": {"type": "string"},
-    "assessment_mode": {"enum": ["qualification", "full_validation"]},
-    "outcome": {"enum": ["qualification_complete", "validation_complete", "incomplete"]},
+    "outcome": {"enum": ["validation_complete", "incomplete"]},
     "validation": {
       "type": "object",
       "additionalProperties": false,

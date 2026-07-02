@@ -917,3 +917,58 @@ turning a selected-scope run into a nominal full-validation engagement.
   draft qualification profile before workspace creation.
 - Full verification remains green: 85 tests, Ruff, compilation, every JSON
   schema, lockfile, and diff checks passed.
+
+## Step 15 - Qualify/Validate Phases, Removing the Full-Stack Mode
+
+### Objective
+
+Align the tool's vocabulary with NVIDIA's AI Cloud Ready program, where an ISV
+is qualified and then validated for the scope it owns. Confirmed against program
+sources (AI Cloud Ready Initiative POR; NCX docs): the initiative runs three
+stages, Qualify -> Validate -> Publish, where Qualify is commercial/technical
+assessment and scoping and Validate is end-to-end testing against the NSRG (NCP
+Software Reference Guide). "Full validation across NSRG layers 1-4" is a property
+of an integrated, multi-owner stack, not something a single ISV performs. The
+prior `qualification` vs `full_validation` *mode* conflated phase (assess vs
+test) with scope breadth (one layer vs all), and the layer-1-4 gate was
+unreachable and misleading for a single-layer ISV.
+
+### Decisions
+
+1. Remove the `AssessmentMode` type, the `--assessment-mode` flag, the
+   `assessment.mode` project field, and the Step 14 full-stack layer-1-4 gate.
+2. Treat qualify and validate as *phases*, tracked by the existing
+   `journey.stage` enum (`qualify` then `validate`). Qualify = bootstrap +
+   profile/SME (assess and scope owned domains, no execution). Validate =
+   plan/onboard/scan/generate/verify/apply/loop/live/bundle over the owned scope.
+2b. The static gap `scan` is deliberately part of Validate (it requires a
+   provider implementation and begins "does the software do what it says").
+3. Replace the domain `required_for_full_validation` field with `owned`. An ISV
+   may own one or many domains; readiness is assessed only over owned domains.
+   Domains owned by other actors are external dependencies and never block the
+   ISV's own validation.
+4. Rename `SolutionProfile.qualification_summary()` -> `scope_summary()`,
+   reporting `owned_domains` and `validation_ready` over the owned scope.
+5. The evidence bundle outcome is `validation_complete` | `incomplete`; the
+   `assessment_mode` field is removed. Publish and integrated multi-owner
+   roll-up remain out of scope.
+6. Reframe CLI help and docs into the two phases; no new umbrella commands.
+
+### Changed Files
+
+- `src/isv_readiness/project.py`, `solution_profile.py`, `bundle.py`,
+  `context.py`, `cli.py`
+- `schemas/project.schema.json`, `solution-profile.schema.json`,
+  `bundle-manifest.schema.json`, `context-pack.schema.json`
+- `examples/profiles/bcm.reference.yaml`,
+  `examples/profiles/nvidia-mission-control.reference.yaml`
+  (each now marks the 4 ISV-owned domains `owned: true` and 6 partner-owned
+  external dependencies `owned: false`)
+- `tests/test_project.py`, `test_solution_profile.py`, `test_bundle.py`,
+  `test_profile_enrichment.py`
+- `README.md`, `docs/architecture.md`, `SLOP.md`
+
+### Verification
+
+- Full verification green: 85 tests, Ruff, compilation, every JSON schema,
+  lockfile, and diff checks passed.

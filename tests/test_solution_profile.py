@@ -22,7 +22,7 @@ class SolutionProfileTests(unittest.TestCase):
         self.bcm_path = PROFILES / "bcm.reference.yaml"
         self.nmc_path = PROFILES / "nvidia-mission-control.reference.yaml"
 
-    def test_reference_profiles_are_valid_draft_qualification_baselines(self) -> None:
+    def test_reference_profiles_scope_summary_covers_owned_domains_only(self) -> None:
         bcm = load_solution_profile(self.bcm_path)
         nmc = load_solution_profile(self.nmc_path)
 
@@ -32,20 +32,27 @@ class SolutionProfileTests(unittest.TestCase):
         self.assertEqual(len(bcm.domains), 10)
         self.assertEqual(len(nmc.domains), 10)
 
-        bcm_summary = bcm.qualification_summary()
-        self.assertEqual(bcm_summary["coverage"]["covered"], 4)
-        self.assertEqual(bcm_summary["coverage"]["unknown"], 5)
-        self.assertEqual(bcm_summary["coverage"]["out_of_scope"], 1)
-        self.assertFalse(bcm_summary["full_validation_ready"])
+        # Readiness assesses only the ISV-owned domains; external-dependency
+        # domains owned by the deployment partner are excluded from the scope.
+        bcm_summary = bcm.scope_summary()
         self.assertEqual(
-            bcm_summary["blocking_domains"],
-            ["control_plane", "iam", "image_registry", "network", "security"],
+            bcm_summary["owned_domains"],
+            ["bare_metal", "kubernetes", "observability", "slurm"],
         )
+        self.assertEqual(bcm_summary["coverage"]["covered"], 4)
+        self.assertEqual(bcm_summary["blocking_domains"], [])
+        # Owned domains are covered, but partner-supplied capabilities inside them
+        # still block until resolved, so the owned scope is not yet validation-ready.
+        self.assertFalse(bcm_summary["validation_ready"])
         self.assertIn("bcm-k8s-storage", bcm_summary["blocking_capabilities"])
         self.assertIn("bcm-k8s-identity", bcm_summary["blocking_capabilities"])
 
-        nmc_summary = nmc.qualification_summary()
-        self.assertFalse(nmc_summary["full_validation_ready"])
+        nmc_summary = nmc.scope_summary()
+        self.assertEqual(
+            nmc_summary["owned_domains"],
+            ["bare_metal", "kubernetes", "observability", "slurm"],
+        )
+        self.assertFalse(nmc_summary["validation_ready"])
         self.assertIn("nmc-attestation-boundary", nmc_summary["blocking_capabilities"])
 
     def test_resolves_domain_defaults_and_capability_overrides(self) -> None:

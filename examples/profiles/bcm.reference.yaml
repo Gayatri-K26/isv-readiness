@@ -81,7 +81,7 @@ components:
 domains:
   - domain: bare_metal
     name: Bare-metal provisioning and host lifecycle
-    required_for_full_validation: true
+    owned: true
     coverage: covered
     validation_mode: test
     capability_owner_actor_id: bcm-isv
@@ -118,7 +118,7 @@ domains:
 
   - domain: kubernetes
     name: Kubernetes provisioning and workload orchestration
-    required_for_full_validation: true
+    owned: true
     coverage: covered
     validation_mode: test
     capability_owner_actor_id: bcm-isv
@@ -180,7 +180,7 @@ domains:
 
   - domain: slurm
     name: Slurm scheduling and AI workloads
-    required_for_full_validation: true
+    owned: true
     coverage: covered
     validation_mode: test
     capability_owner_actor_id: bcm-isv
@@ -194,7 +194,7 @@ domains:
 
   - domain: observability
     name: Infrastructure monitoring and log availability
-    required_for_full_validation: true
+    owned: true
     coverage: covered
     validation_mode: test
     capability_owner_actor_id: bcm-isv
@@ -208,7 +208,7 @@ domains:
 
   - domain: network
     name: Tenant networking, SDN, and fabric lifecycle
-    required_for_full_validation: true
+    owned: false
     coverage: unknown
     validation_mode: deferred
     capability_owner_actor_id: deployment-partner
@@ -223,7 +223,7 @@ domains:
 
   - domain: control_plane
     name: Tenant-facing cloud control plane
-    required_for_full_validation: true
+    owned: false
     coverage: unknown
     validation_mode: deferred
     capability_owner_actor_id: deployment-partner
@@ -238,7 +238,7 @@ domains:
 
   - domain: iam
     name: Tenant identity and credential lifecycle
-    required_for_full_validation: true
+    owned: false
     coverage: unknown
     validation_mode: deferred
     capability_owner_actor_id: deployment-partner
@@ -253,7 +253,7 @@ domains:
 
   - domain: image_registry
     name: Tenant image and install-configuration registry
-    required_for_full_validation: true
+    owned: false
     coverage: unknown
     validation_mode: deferred
     capability_owner_actor_id: deployment-partner
@@ -268,7 +268,7 @@ domains:
 
   - domain: security
     name: Platform security, tenant isolation, and audit controls
-    required_for_full_validation: true
+    owned: false
     coverage: unknown
     validation_mode: deferred
     capability_owner_actor_id: deployment-partner
@@ -283,7 +283,7 @@ domains:
 
   - domain: vm
     name: Virtual-machine service
-    required_for_full_validation: false
+    owned: false
     coverage: out_of_scope
     validation_mode: skip
     capability_owner_actor_id: deployment-partner

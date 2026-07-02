@@ -43,7 +43,6 @@ class FileHash:
 class BundleManifest:
     schema_version: str
     provider: str
-    assessment_mode: str
     outcome: str
     validation: dict[str, str | None]
     domains: tuple[dict[str, str], ...]
@@ -111,16 +110,13 @@ def build_bundle(
     complete = set(project.assessment.domains) == seen_domains and all(
         state.status == "complete" for _, _, state in states
     )
-    outcome = "incomplete"
-    if complete:
-        outcome = "validation_complete" if project.assessment.mode == "full_validation" else "qualification_complete"
+    outcome = "validation_complete" if complete else "incomplete"
     current_commit = (commit_resolver or _resolve_commit)(project.validation_root(project_path))
     if project.validation.resolved_commit and current_commit != project.validation.resolved_commit:
         raise BundleError("Validation checkout no longer matches the pinned project commit.")
     manifest = BundleManifest(
         schema_version=BUNDLE_VERSION,
         provider=project.provider.name,
-        assessment_mode=project.assessment.mode,
         outcome=outcome,
         validation={
             "url": project.validation.url,
@@ -219,11 +215,10 @@ def _bundle_readme(manifest: BundleManifest) -> str:
         "# ISV Readiness Evidence Bundle",
         "",
         f"- Provider: `{manifest.provider}`",
-        f"- Assessment mode: `{manifest.assessment_mode}`",
         f"- Outcome: `{manifest.outcome}`",
         f"- Validation commit: `{manifest.validation['current_commit']}`",
         "",
-        "## Domains",
+        "## Owned domains",
         "",
     ]
     lines.extend(f"- `{item['domain']}`: {item['status']} — {item['reason']}" for item in manifest.domains)

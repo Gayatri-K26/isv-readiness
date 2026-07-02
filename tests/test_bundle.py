@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class BundleTests(unittest.TestCase):
-    def test_completed_qualification_bundle_includes_evidence_but_not_sensitive_context(self) -> None:
+    def test_completed_validation_bundle_includes_evidence_but_not_sensitive_context(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             root = Path(tempdir)
             project_path, _ = _project(root)
@@ -58,7 +58,7 @@ class BundleTests(unittest.TestCase):
                 commit_resolver=lambda root: COMMIT,
             )
 
-            self.assertEqual(manifest.outcome, "qualification_complete")
+            self.assertEqual(manifest.outcome, "validation_complete")
             included = {item.path for item in manifest.files}
             self.assertTrue(any("proposal-" in path and path.endswith(".patch") for path in included))
             self.assertTrue(any("verification-" in path for path in included))

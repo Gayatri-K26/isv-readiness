@@ -76,8 +76,9 @@ class ProfileEnrichmentTests(unittest.TestCase):
             exit_code = main(["profile", "--in", str(profile_path)])
 
         self.assertEqual(exit_code, 0)
-        self.assertIn("Full validation ready: no", stdout.getvalue())
-        self.assertIn("Blocking domains: control_plane", stdout.getvalue())
+        self.assertIn("Validation-ready (owned scope): no", stdout.getvalue())
+        self.assertIn("Owned domains: bare_metal, kubernetes, observability, slurm", stdout.getvalue())
+        self.assertIn("bcm-k8s-identity", stdout.getvalue())
 
         provider = FIXTURES / "ai-cloud-validation" / "isvctl" / "configs" / "providers" / "dsx-air"
         with tempfile.TemporaryDirectory() as tempdir:

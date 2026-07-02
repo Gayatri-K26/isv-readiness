@@ -10,11 +10,10 @@
     "project": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["provider", "assessment_mode", "selected_domains", "validation_commit", "api_interfaces"],
+      "required": ["provider", "owned_domains", "validation_commit", "api_interfaces"],
       "properties": {
         "provider": {"type": "string", "minLength": 1},
-        "assessment_mode": {"enum": ["qualification", "full_validation"]},
-        "selected_domains": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "owned_domains": {"type": "array", "items": {"type": "string"}, "minItems": 1},
         "validation_commit": {"type": ["string", "null"]},
         "api_interfaces": {"type": "array", "items": {"type": "object"}}
       }

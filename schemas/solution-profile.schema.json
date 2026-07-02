@@ -273,7 +273,6 @@
       "required": [
         "domain",
         "name",
-        "required_for_full_validation",
         "coverage",
         "validation_mode",
         "capability_owner_actor_id",
@@ -298,7 +297,7 @@
           "type": "string",
           "minLength": 1
         },
-        "required_for_full_validation": {
+        "owned": {
           "type": "boolean"
         },
         "coverage": {

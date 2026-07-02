@@ -125,7 +125,7 @@ class CapabilityResponsibility:
 class DomainResponsibility:
     domain: str
     name: str
-    required_for_full_validation: bool
+    owned: bool
     coverage: Coverage
     validation_mode: ValidationMode
     capability_owner_actor_id: str
@@ -262,21 +262,25 @@ class SolutionProfile:
             action=action,
         )
 
-    def qualification_summary(self) -> dict[str, Any]:
+    def scope_summary(self) -> dict[str, Any]:
+        """Readiness of the ISV-owned scope to enter/complete the validate phase.
+
+        Only domains the ISV owns are assessed; external-dependency domains owned
+        by other actors are reported but never block the ISV's own validation.
+        """
+        owned_domains = [domain for domain in self.domains if domain.owned]
         coverage_counts = {
-            coverage: sum(domain.coverage == coverage for domain in self.domains)
+            coverage: sum(domain.coverage == coverage for domain in owned_domains)
             for coverage in ("covered", "gap", "out_of_scope", "unknown")
         }
         blocking_domains = sorted(
             domain.domain
-            for domain in self.domains
-            if domain.required_for_full_validation
-            and (domain.coverage != "covered" or domain.validation_mode != "test")
+            for domain in owned_domains
+            if domain.coverage != "covered" or domain.validation_mode != "test"
         )
         blocking_capabilities = sorted(
             capability.id
-            for domain in self.domains
-            if domain.required_for_full_validation
+            for domain in owned_domains
             for capability in domain.capabilities
             if (capability.coverage or domain.coverage) != "covered"
             or (capability.validation_mode or domain.validation_mode) != "test"
@@ -285,10 +289,11 @@ class SolutionProfile:
             "solution_id": self.solution.id,
             "journey_stage": self.journey.stage,
             "journey_status": self.journey.status,
+            "owned_domains": sorted(domain.domain for domain in owned_domains),
             "coverage": coverage_counts,
             "blocking_domains": blocking_domains,
             "blocking_capabilities": blocking_capabilities,
-            "full_validation_ready": not blocking_domains and not blocking_capabilities,
+            "validation_ready": bool(owned_domains) and not blocking_domains and not blocking_capabilities,
         }
 
 
@@ -370,7 +375,7 @@ def _parse_domain(item: Mapping[str, Any]) -> DomainResponsibility:
     return DomainResponsibility(
         domain=canonicalize_domain(item["domain"]),
         name=item["name"],
-        required_for_full_validation=item["required_for_full_validation"],
+        owned=bool(item.get("owned", True)),
         coverage=item["coverage"],
         validation_mode=item["validation_mode"],
         capability_owner_actor_id=item["capability_owner_actor_id"],

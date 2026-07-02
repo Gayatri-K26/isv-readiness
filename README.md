@@ -13,9 +13,11 @@ edits provider-agnostic suites or validation-engine code.
 
 Implemented:
 
-- Pinned `isv-project.yaml` workspace bootstrap with explicit qualification
-  versus full-validation mode, selected domains, API/spec references, and
-  execution policy.
+- Two-phase model: **qualify** (assess and scope the ISV-owned domains) then
+  **validate** (test the owned scope). An ISV validates whatever it owns —
+  one domain or many.
+- Pinned `isv-project.yaml` workspace bootstrap with the ISV-owned domains,
+  API/spec references, and execution policy.
 - Redacted, network-opt-in context synchronization for local files, API specs,
   public documentation, GitHub issues, and host-exported MCP content.
 - Bounded per-gap context packs with source trust, hashes, credential-name-only
@@ -31,9 +33,9 @@ Implemented:
   rollback.
 - Persistent `agent-run` orchestration across scan, context, generation, review,
   apply, targeted live feedback, final full-domain validation, and retry gates.
-- Sanitized, hash-inventoried qualification/validation evidence bundles.
+- Sanitized, hash-inventoried owned-scope validation evidence bundles.
 - Versioned `solution-profile.json` contract for components, dependencies,
-  actors, NSRG layers, domains, capability ownership, and validation mode.
+  actors, NSRG layers, domains, ISV ownership (`owned`), and validation mode.
 - Draft BCM 11 and NVIDIA Mission Control 2.3 reference profiles based on
   current public product documentation.
 - Cross-domain provider onboarding through `isvctl provider scaffold`, plus
@@ -57,8 +59,11 @@ Not implemented yet:
 - Additional model-vendor-native adapters; the command contract and Codex
   reference adapter are implemented.
 - Pull-request submission and publication workflows.
-- Publication workflows. The current boundary ends with a reproducible
-  qualification or validation bundle.
+- Publication workflows (NVIDIA AI Cloud Ready's "publish" stage). The current
+  boundary ends with a reproducible owned-scope validation bundle.
+- Integrated multi-owner full-stack roll-up (an NCP/integrator concern that
+  aggregates several validated single-owner profiles), which is out of scope
+  for a single ISV.
 
 See [docs/architecture.md](docs/architecture.md) for the complete agentic design
 and implementation map.
@@ -74,7 +79,6 @@ gapctl bootstrap \
   --workspace /path/to/acme-readiness \
   --provider-name acme \
   --domains vm,network,k8s \
-  --assessment-mode qualification \
   --api-base-url https://api.acme.example/v1 \
   --api-base-url-env ACME_API_BASE \
   --api-spec /path/to/openapi.yaml \
@@ -90,13 +94,13 @@ never credential values. Live runs are disabled by default.
 Use `--validation-root /existing/ai-cloud-validation` to adopt an existing
 checkout without pulling or changing its branch.
 
-Qualification bootstrap also creates a draft profile from the domains the
-operator explicitly marked ISV-owned. An SME should review product versions and
-capability-level ownership. `--assessment-mode full_validation` requires an
-explicit profile instead of generating this draft. That profile must be
-reviewed or confirmed, be in the `validate` journey stage, represent NSRG
-layers 1-4, cover the selected domains, and have no declared full-validation
-blockers.
+Bootstrap is the start of the **qualify** phase. It also creates a draft
+profile from the domains the operator declared ISV-owned. An SME should review
+product versions and capability-level ownership before the profile advances to
+the `validate` journey stage. A profile supplied with `--profile` must cover
+every owned domain. Qualification decides *what* is owned and in scope;
+validation then *tests* that owned scope — an ISV is never expected to test
+layers it does not own.
 
 ### 1. Qualify the solution
 

@@ -81,11 +81,14 @@ submission, and publication remain optional future integrations.
 5. Separately choose `test`, `evidence`, `skip`, or `deferred` validation mode.
 6. Record both capability ownership and provider-adapter ownership.
 7. Resolve all required unknowns or document a gap-closure path before entering
-   full validation.
+   the validate phase.
 
-Partial stacks can be qualified and documented. They are not labeled fully
-validation-ready until required IaaS, CaaS, and PaaS domains and capability
-slices are covered and testable.
+An ISV owns one or many domains and is qualified and validated only for the
+scope it owns (`owned: true`). Domains owned by other actors (deployment
+partner, NCP) are recorded as external dependencies and never block the ISV's
+own validation. Composing several validated single-owner profiles into an
+integrated IaaS/CaaS/PaaS full-stack claim is a separate NCP/integrator concern
+and is out of scope for a single ISV here.
 
 ### Validate
 
@@ -112,17 +115,18 @@ gap. The controller eventually processes the full selected domain.
 
 - validation repository URL, requested ref, checkout, and resolved commit
 - provider name, path, and new/existing discovery state
-- `qualification` or `full_validation` mode and selected domains
+- the ISV-owned domains for this engagement
 - provider API endpoints, API specification references, and credential
   environment-variable names
 - declared local, web, GitHub issue, and MCP-export context sources
 - live-run, cleanup, and retry policy
 
-Partial-layer work uses `qualification`. A tool may make every selected row
-green without claiming that an integrated metal-to-model stack completed full
-validation. Full-validation bootstrap accepts only a reviewed/confirmed profile
-in the validate stage whose components span NSRG layers 1-4, whose selected
-domains resolve, and whose declared required scopes are qualification-ready.
+Bootstrap begins the qualify phase; the `journey.stage` field in the solution
+profile (`qualify` then `validate`) tracks which phase the engagement is in. A
+profile supplied at bootstrap must cover every owned domain. Validating the
+owned scope green attests only to what the ISV owns — never to an integrated
+metal-to-model stack, which requires composing multiple validated single-owner
+profiles.
 
 ### Context Pack
 

@@ -67,24 +67,26 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="gapctl", description="ISV readiness gap scanner")
+    parser = argparse.ArgumentParser(
+        prog="gapctl",
+        description=(
+            "ISV readiness for ai-cloud-validation, in two phases: "
+            "qualify (assess & scope the ISV-owned domains: bootstrap, profile) and "
+            "validate (test the owned scope: plan, onboard, scan, generate, verify, apply, loop, live, bundle)."
+        ),
+    )
     subparsers = parser.add_subparsers(dest="command")
 
     bootstrap_parser = subparsers.add_parser(
-        "bootstrap", help="Create a pinned, scoped ISV workspace and optionally clone ai-cloud-validation"
+        "bootstrap",
+        help="Qualify phase: create a pinned workspace scoped to the ISV-owned domains and optionally clone ai-cloud-validation",
     )
     bootstrap_parser.add_argument("--workspace", type=Path, required=True, help="Workspace directory")
     bootstrap_parser.add_argument("--provider-name", required=True, help="Provider name, for example acme-cloud")
-    bootstrap_parser.add_argument("--domains", required=True, help="Comma-separated ISV-owned assessment domains")
-    bootstrap_parser.add_argument(
-        "--assessment-mode",
-        choices=["qualification", "full_validation"],
-        default="qualification",
-        help="Partial selected-scope qualification or integrated full-stack validation",
-    )
+    bootstrap_parser.add_argument("--domains", required=True, help="Comma-separated ISV-owned domains (one or many)")
     bootstrap_parser.add_argument("--validation-root", type=Path, default=None, help="Existing checkout to use")
     bootstrap_parser.add_argument("--validation-url", default=DEFAULT_VALIDATION_URL)
-    bootstrap_parser.add_argument("--validation-ref", default="main")
+    bootstrap_parser.add_argument("--validation-ref", default="main") # Default to main branch for validation checkout
     bootstrap_parser.add_argument("--profile", type=Path, default=None)
     bootstrap_parser.add_argument("--api-base-url", default=None, help="Provider API endpoint (never a credential)")
     bootstrap_parser.add_argument(
@@ -204,7 +206,8 @@ def _build_parser() -> argparse.ArgumentParser:
     live_parser.set_defaults(handler=_live_run)
 
     agent_parser = subparsers.add_parser(
-        "agent-run", help="Advance the scoped scan/generate/review/apply/live workflow by one safe turn"
+        "agent-run",
+        help="Validate phase: advance the owned-scope scan/generate/review/apply/live workflow by one safe turn",
     )
     agent_parser.add_argument("--project", type=Path, required=True)
     agent_parser.add_argument("--domain", required=True)
@@ -219,14 +222,16 @@ def _build_parser() -> argparse.ArgumentParser:
     agent_parser.set_defaults(handler=_agent_run)
 
     bundle_parser = subparsers.add_parser(
-        "bundle", help="Assemble a sanitized, hash-inventoried qualification or validation evidence bundle"
+        "bundle", help="Validate phase: assemble a sanitized, hash-inventoried owned-scope validation evidence bundle"
     )
     bundle_parser.add_argument("--project", type=Path, required=True)
     bundle_parser.add_argument("--agent-work-dir", type=Path, action="append", required=True)
     bundle_parser.add_argument("--out-dir", type=Path, required=True)
     bundle_parser.set_defaults(handler=_bundle)
 
-    scan_parser = subparsers.add_parser("scan", help="Build a deterministic static/dynamic gaps.json report")
+    scan_parser = subparsers.add_parser(
+        "scan", help="Validate phase: build a deterministic static/dynamic gaps.json report over owned domains"
+    )
     scan_parser.add_argument("-p", "--provider-repo", type=Path, required=True)
     scan_parser.add_argument("--domains", help="Comma-separated domains; defaults to covered/test domains in --profile")
     scan_parser.add_argument("--profile", type=Path, default=None, help="Solution profile for responsibility routing")
@@ -250,7 +255,9 @@ def _build_parser() -> argparse.ArgumentParser:
     report_parser.add_argument("--format", choices=["scorecard", "tree", "md"], default="scorecard")
     report_parser.set_defaults(handler=_report)
 
-    profile_parser = subparsers.add_parser("profile", help="Validate and summarize a solution profile")
+    profile_parser = subparsers.add_parser(
+        "profile", help="Qualify phase: validate and summarize the solution profile and owned-scope readiness"
+    )
     profile_parser.add_argument("--in", dest="input_path", type=Path, required=True)
     profile_parser.add_argument("--format", choices=["summary", "json"], default="summary")
     profile_parser.set_defaults(handler=_profile)
@@ -291,7 +298,9 @@ def _build_parser() -> argparse.ArgumentParser:
     apply_parser.add_argument("--apply", action="store_true", help="Required explicit authorization to change source")
     apply_parser.set_defaults(handler=_apply)
 
-    loop_parser = subparsers.add_parser("loop", help="Advance deterministic one-gap-at-a-time loop state")
+    loop_parser = subparsers.add_parser(
+        "loop", help="Validate phase: advance deterministic one-gap-at-a-time loop state"
+    )
     loop_parser.add_argument("--in", dest="input_path", type=Path, required=True, help="Latest gaps.json")
     loop_parser.add_argument("--domain", required=True, help="One domain controlled by this loop")
     loop_parser.add_argument("--state", type=Path, required=True, help="Persistent loop state JSON")
@@ -328,7 +337,6 @@ def _bootstrap(args: argparse.Namespace) -> int:
             validation_root=args.validation_root,
             validation_url=args.validation_url,
             validation_ref=args.validation_ref,
-            assessment_mode=args.assessment_mode,
             profile=args.profile,
             api_base_url=args.api_base_url,
             api_base_url_env=args.api_base_url_env,
@@ -908,17 +916,18 @@ def _profile(args: argparse.Namespace) -> int:
         print(json.dumps(profile.to_dict(), indent=2, sort_keys=True))
         return 0
 
-    summary = profile.qualification_summary()
+    summary = profile.scope_summary()
     coverage = summary["coverage"]
     print(f"Solution: {profile.solution.name} ({profile.solution.version})")
     print(f"Profile: {profile.solution.profile_status}")
     print(f"Journey: {summary['journey_stage']} / {summary['journey_status']}")
+    print("Owned domains: " + (", ".join(summary["owned_domains"]) or "none"))
     print(
-        "Coverage: "
+        "Owned coverage: "
         f"covered={coverage['covered']} gap={coverage['gap']} "
         f"out_of_scope={coverage['out_of_scope']} unknown={coverage['unknown']}"
     )
-    print(f"Full validation ready: {'yes' if summary['full_validation_ready'] else 'no'}")
+    print(f"Validation-ready (owned scope): {'yes' if summary['validation_ready'] else 'no'}")
     print("Blocking domains: " + (", ".join(summary["blocking_domains"]) or "none"))
     print("Blocking capabilities: " + (", ".join(summary["blocking_capabilities"]) or "none"))
     return 0

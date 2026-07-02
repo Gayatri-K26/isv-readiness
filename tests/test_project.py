@@ -48,7 +48,6 @@ class ProjectBootstrapTests(unittest.TestCase):
                 provider_name="acme",
                 domains=["vm", "k8s", "vm"],
                 validation_root=checkout,
-                assessment_mode="qualification",
                 api_base_url="https://api.acme.invalid/v1",
                 api_spec="docs/openapi.yaml",
                 auth_env=["ACME_TOKEN"],
@@ -113,37 +112,32 @@ class ProjectBootstrapTests(unittest.TestCase):
             with self.assertRaisesRegex(ProjectError, "Not an ai-cloud-validation checkout"):
                 execute_bootstrap(plan, runner=_git_runner)
 
-    def test_full_validation_requires_an_explicit_reviewed_profile(self) -> None:
+    def test_supplied_profile_must_cover_every_owned_domain(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
-            with self.assertRaisesRegex(ProjectError, "requires an explicit reviewed solution profile"):
-                build_bootstrap_plan(
-                    Path(tempdir),
-                    provider_name="acme",
-                    domains=["vm"],
-                    assessment_mode="full_validation",
-                )
-
             root = Path(tempdir)
             checkout = root / "ai-cloud-validation"
             _make_checkout(checkout)
-            qualification = build_bootstrap_plan(
-                root / "qualification",
+            # Qualify phase for a single owned domain produces a draft profile.
+            single = build_bootstrap_plan(
+                root / "single",
                 provider_name="acme",
                 domains=["vm"],
                 validation_root=checkout,
             )
-            execute_bootstrap(qualification, runner=_git_runner)
-            draft_profile = qualification.manifest_path.parent / "solution-profile.yaml"
-            full = build_bootstrap_plan(
-                root / "full",
+            execute_bootstrap(single, runner=_git_runner)
+            draft_profile = single.manifest_path.parent / "solution-profile.yaml"
+
+            # Reusing that vm-only profile for an ISV that also owns network must fail:
+            # the profile does not cover every owned domain.
+            multi = build_bootstrap_plan(
+                root / "multi",
                 provider_name="acme",
-                domains=["vm"],
+                domains=["vm", "network"],
                 validation_root=checkout,
-                assessment_mode="full_validation",
                 profile=draft_profile,
             )
-            with self.assertRaisesRegex(ProjectError, "reviewed or confirmed"):
-                execute_bootstrap(full, runner=_git_runner)
+            with self.assertRaisesRegex(ProjectError, "does not cover owned domains"):
+                execute_bootstrap(multi, runner=_git_runner)
 
 
 def _make_checkout(root: Path, provider: str | None = None) -> None:
