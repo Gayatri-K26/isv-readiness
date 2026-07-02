@@ -365,7 +365,7 @@ def _parse_component(item: Mapping[str, Any]) -> Component:
         version=item["version"],
         kind=item["kind"],
         supplier_actor_id=item["supplier_actor_id"],
-        nsrg_layers=tuple(item["nsrg_layers"]),
+        nsrg_layers=tuple(item.get("nsrg_layers", ())),
         depends_on=tuple(item.get("depends_on", [])),
         source_refs=tuple(item.get("source_refs", [])),
     )

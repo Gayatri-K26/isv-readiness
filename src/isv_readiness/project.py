@@ -421,18 +421,6 @@ def _draft_scope_profile(plan: BootstrapPlan) -> dict[str, Any]:
     solution_id = re.sub(r"[^a-z0-9_-]", "_", plan.provider_name.lower())
     if not solution_id[0].isalpha():
         solution_id = f"isv_{solution_id}"
-    layer_by_domain = {
-        "network": [1],
-        "bare_metal": [2],
-        "vm": [2],
-        "control_plane": [2],
-        "iam": [2],
-        "image_registry": [2],
-        "observability": [2, 3, 4],
-        "security": [1, 2, 3, 4],
-        "kubernetes": [3],
-        "slurm": [4],
-    }
     return {
         "schema_version": "0.1.0",
         "solution": {
@@ -452,7 +440,6 @@ def _draft_scope_profile(plan: BootstrapPlan) -> dict[str, Any]:
                 "version": "unknown",
                 "kind": "product",
                 "supplier_actor_id": "isv",
-                "nsrg_layers": sorted({layer for domain in plan.domains for layer in layer_by_domain[domain]}),
                 "depends_on": [],
                 "source_refs": [],
             }
@@ -477,7 +464,7 @@ def _draft_scope_profile(plan: BootstrapPlan) -> dict[str, Any]:
         ],
         "sources": [],
         "assumptions": [
-            "This draft records operator-declared owned scope only; an SME must review versions and capability ownership before entering the validate phase."
+            "This draft records operator-declared owned scope only; an SME must review versions, capability ownership, and assign NSRG layers to components before entering the validate phase."
         ],
     }
 

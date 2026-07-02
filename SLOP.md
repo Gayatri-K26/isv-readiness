@@ -972,3 +972,19 @@ unreachable and misleading for a single-layer ISV.
 
 - Full verification green: 85 tests, Ruff, compilation, every JSON schema,
   lockfile, and diff checks passed.
+
+### Follow-up: drop the stale domain->NSRG-layer guess
+
+With the layer-1-4 gate removed, nothing in the code reads `component.nsrg_layers`
+any more; it is now purely descriptive metadata. The bootstrap draft's
+`layer_by_domain` heuristic also predated the confirmed NSRG model
+(bare-metal=1 -> VM=2 -> Kubernetes=3 -> AI Platform=4, with
+network/hardware-lifecycle/attestation cross-cutting) and mis-assigned several
+domains (e.g. `bare_metal: [2]`). Rather than ship a wrong auto-guess, the draft
+no longer emits `nsrg_layers`; assigning NSRG layers is now explicit SME work
+during qualify. `nsrg_layers` is dropped from the component `required` list in
+the schema and parsed with an empty-tuple default; hand-authored reference
+profiles keep their layer assignments. Files: `project.py` (remove
+`layer_by_domain`, update draft + assumption note), `solution_profile.py`
+(`_parse_component` default), `schemas/solution-profile.schema.json`. 85 tests,
+Ruff, schema, lockfile, and diff checks green.

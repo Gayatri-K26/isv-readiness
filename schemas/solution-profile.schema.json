@@ -153,8 +153,7 @@
         "name",
         "version",
         "kind",
-        "supplier_actor_id",
-        "nsrg_layers"
+        "supplier_actor_id"
       ],
       "properties": {
         "id": {
