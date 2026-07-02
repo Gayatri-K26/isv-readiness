@@ -246,6 +246,23 @@ action.
 
 ### Live Verification and Agent Turns
 
+#### Validation environment
+
+Live validation runs against an environment NVIDIA provides, not one the ISV
+stands up. In the AI Cloud Ready program this is **YTL**, a site in NVIDIA's
+Forge Cloud platform giving API-driven access to GB200 reference-architecture
+hardware; ISVs receive time-boxed (roughly four-week) access to this mini-cloud
+through the ISV Lab program. In a solution profile this environment is the
+`validation-lab` actor. The NCP/partner-supplied capabilities an owned domain
+depends on (storage, identity, networking — the `deferred`/`unknown` rows owned
+by a `partner` actor) already exist in that environment; the ISV points its
+tests at them through `required_inputs` (for example a StorageClass name) rather
+than implementing them. A partner-owned capability inside an owned domain
+therefore stays a blocker until lab access resolves it, at which point the fix
+is profile data (fill in the input, set coverage to `covered`), not ISV code.
+DSX Air, by contrast, is a plumbing/workflow simulation and is not evidence of
+provider qualification.
+
 Live execution has two independent gates: reviewed project policy and an
 explicit `--run-live` invocation. The runner verifies the checkout still
 matches the pinned commit, constructs the command from the supported `isvctl`
