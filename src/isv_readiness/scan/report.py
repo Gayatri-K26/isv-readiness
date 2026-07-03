@@ -27,8 +27,19 @@ def render_scorecard(report: dict[str, Any]) -> str:
     for row in rows:
         by_domain[row.get("domain", "<unknown>")][row.get("status", "<unknown>")] += 1
 
+    masked = [row for row in rows if _is_masked_failure(row)]
+    # Only a genuine skip (not on an owned domain, and not a masked failure) is
+    # excluded from the denominator. A skip that hides a failing owned check would
+    # otherwise silently inflate readiness.
+    excluded_skips = sum(
+        1
+        for row in rows
+        if row.get("status") == "skipped"
+        and not _is_owned(row)
+        and not _is_masked_failure(row)
+    )
     total = len(rows)
-    active = total - counts.get("skipped", 0)
+    active = total - excluded_skips
     pass_count = counts.get("pass", 0)
     score = 100.0 if active == 0 else (pass_count / active) * 100.0
     score_label = "Readiness score" if any(row.get("detection") == "dynamic" for row in rows) else "Static score"
@@ -36,11 +47,20 @@ def render_scorecard(report: dict[str, Any]) -> str:
         "Gap Scorecard",
         f"Schema: {report.get('schema_version', '<unknown>')}",
         f"Provider repo: {report.get('provider_repo', '<unknown>')}",
-        f"{score_label}: {score:.1f}% ({pass_count}/{active} non-skipped rows pass)",
+        f"{score_label}: {score:.1f}% ({pass_count}/{active} scored rows pass)",
         "Statuses: " + _counter_text(counts),
-        "",
-        "By domain:",
     ]
+    if masked:
+        lines.append(
+            f"⚠ Masked failures: {len(masked)} owned check(s) marked skip/external "
+            "despite a failing result — needs scope decision:"
+        )
+        for row in masked:
+            lines.append(
+                f"  - [{row.get('status')}] {row.get('domain')}/{row.get('step_name')} "
+                f"({row.get('validation_class') or '<none>'})"
+            )
+    lines += ["", "By domain:"]
     for domain in sorted(by_domain):
         lines.append(f"- {domain}: {_counter_text(by_domain[domain])}")
     return "\n".join(lines)
@@ -101,3 +121,18 @@ def _cell(value: Any) -> str:
     if value is None:
         return ""
     return str(value).replace("|", "\\|")
+
+
+def _profile_enrichment(row: dict[str, Any]) -> dict[str, Any]:
+    enrichment = row.get("enrichment") or {}
+    profile = enrichment.get("solution_profile")
+    return profile if isinstance(profile, dict) else {}
+
+
+def _is_owned(row: dict[str, Any]) -> bool:
+    return bool(_profile_enrichment(row).get("owned"))
+
+
+def _is_masked_failure(row: dict[str, Any]) -> bool:
+    reconciliation = _profile_enrichment(row).get("reconciliation")
+    return bool(isinstance(reconciliation, dict) and reconciliation.get("masked_failure"))

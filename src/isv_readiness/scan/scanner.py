@@ -35,7 +35,6 @@ STUB_PATTERNS = (
 )
 
 K8S_DOMAINS = {"k8s", "kubernetes"}
-K8S_COMMAND_KEYS = {"k8s", "kubernetes"}
 VALIDATION_ONLY_STEP = "<validation>"
 VALIDATION_CONFIG_STEP = "<validation-config>"
 

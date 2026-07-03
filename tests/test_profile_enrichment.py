@@ -67,6 +67,45 @@ class ProfileEnrichmentTests(unittest.TestCase):
             {"skip_with_rationale"},
         )
 
+    def test_masked_failure_on_owned_domain_is_rerouted_to_scope_decision(self) -> None:
+        from dataclasses import replace
+
+        report = scan_provider(
+            ScanOptions(
+                provider_repo=FIXTURES / "provider_repo",
+                domains=["vm"],
+                validation_root=FIXTURES / "ai-cloud-validation",
+            )
+        )
+        profile = load_solution_profile(ROOT / "examples" / "profiles" / "bcm.reference.yaml")
+        # The operator misidentifies vm as partner-owned/out-of-scope when it is
+        # actually the ISV's: flip only the ownership assertion, leave the failing
+        # scan untouched.
+        vm_index = next(i for i, d in enumerate(profile.domains) if d.domain == "vm")
+        owned_vm = replace(profile.domains[vm_index], owned=True)
+        misidentified = replace(
+            profile,
+            domains=profile.domains[:vm_index] + (owned_vm,) + profile.domains[vm_index + 1 :],
+        )
+
+        enriched = enrich_report_with_profile(report, misidentified)
+        failing = [row for row in enriched.rows if row.status in {"fail", "not_implemented", "error"}]
+        self.assertTrue(failing, "expected at least one failing vm row in the fixture")
+        for row in failing:
+            sp = row.enrichment["solution_profile"]
+            self.assertTrue(sp["owned"])
+            self.assertEqual(sp["action"], "request_scope_decision")
+            self.assertTrue(sp["reconciliation"]["masked_failure"])
+            self.assertEqual(sp["reconciliation"]["original_action"], "skip_with_rationale")
+
+        # A genuinely un-owned domain must NOT be reconciled away.
+        unchanged = enrich_report_with_profile(report, profile)
+        for row in unchanged.rows:
+            sp = row.enrichment["solution_profile"]
+            self.assertFalse(sp["owned"])
+            self.assertNotIn("reconciliation", sp)
+            self.assertEqual(sp["action"], "skip_with_rationale")
+
     def test_cli_profile_summary_and_profile_aware_scan(self) -> None:
         from isv_readiness.cli import main
 

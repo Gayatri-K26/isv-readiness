@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from isv_readiness.agent import AgentWorkflowError, run_agent_turn
+from isv_readiness.auto import AutoWorkflowError, run_auto
 from isv_readiness.bundle import BundleError, build_bundle
 from isv_readiness.change_verification import (
     apply_verified_change_set,
@@ -23,7 +24,7 @@ from isv_readiness.context import (
     import_context_source,
     sync_context_sources,
 )
-from isv_readiness.fixes import FixGuardrailError, build_fix_proposal
+from isv_readiness.fixes import FixGuardrailError
 from isv_readiness.generation import run_generator
 from isv_readiness.live import LiveRunError, run_live_domain
 from isv_readiness.loop import LoopStateError, advance_loop, load_loop_state
@@ -49,12 +50,7 @@ from isv_readiness.scan.report import load_report, render_report
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
 from isv_readiness.solution_profile import SolutionProfile, SolutionProfileError, load_solution_profile
 from isv_readiness.validation_adapter import IsvctlAdapter, ValidationAdapterError
-from isv_readiness.verification import (
-    VerificationError,
-    apply_verified_candidate,
-    load_verification_manifest,
-    verify_fix_candidate,
-)
+from isv_readiness.verification import VerificationError
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -207,7 +203,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     agent_parser = subparsers.add_parser(
         "agent-run",
-        help="Validate phase: advance the owned-scope scan/generate/review/apply/live workflow by one safe turn",
+        help="Validate phase (advanced): per-gap-gated scan/generate/review/apply/live turns; prefer 'auto' for the single-review-gate flow",
     )
     agent_parser.add_argument("--project", type=Path, required=True)
     agent_parser.add_argument("--domain", required=True)
@@ -220,6 +216,21 @@ def _build_parser() -> argparse.ArgumentParser:
     agent_parser.add_argument("--run-live", action="store_true", help="Run policy-authorized targeted validation")
     agent_parser.add_argument("--onboard", action="store_true", help="Scaffold a missing provider before scanning")
     agent_parser.set_defaults(handler=_agent_run)
+
+    auto_parser = subparsers.add_parser(
+        "auto",
+        help="Validate phase: autonomously fill/fix every owned auto-fixable gap, then stop at one review gate",
+    )
+    auto_parser.add_argument("--project", type=Path, required=True)
+    auto_parser.add_argument("--domain", required=True)
+    auto_parser.add_argument("--work-dir", type=Path, required=True)
+    auto_parser.add_argument("--generator", required=True, help="Explicit generator adapter executable")
+    auto_parser.add_argument("--generator-arg", action="append", default=[])
+    auto_parser.add_argument("--generator-env", action="append", default=[])
+    auto_parser.add_argument("--max-iterations", type=int, default=50)
+    auto_parser.add_argument("--apply", action="store_true", help="Apply the reviewed combined patch (needs --approve-patch)")
+    auto_parser.add_argument("--approve-patch", default=None, help="Exact combined patch SHA-256 printed at the review gate")
+    auto_parser.set_defaults(handler=_auto)
 
     bundle_parser = subparsers.add_parser(
         "bundle", help="Validate phase: assemble a sanitized, hash-inventoried owned-scope validation evidence bundle"
@@ -269,34 +280,6 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     plan_parser.add_argument("--out", type=Path, default=Path("validation-plan.json"))
     plan_parser.set_defaults(handler=_plan)
-
-    fix_parser = subparsers.add_parser("fix", help="Validate a candidate provider-script edit and emit a patch")
-    fix_parser.add_argument("--in", dest="input_path", type=Path, required=True, help="Profile-enriched gaps.json")
-    fix_parser.add_argument("--gap-id", required=True, help="One deterministic gap ID to propose a fix for")
-    fix_parser.add_argument("--provider-repo", type=Path, required=True, help="Approved provider repository root")
-    fix_parser.add_argument("--candidate", type=Path, required=True, help="Candidate replacement file")
-    fix_parser.add_argument("--out", type=Path, required=True, help="Unified diff output path")
-    fix_parser.set_defaults(handler=_fix)
-
-    verify_parser = subparsers.add_parser("verify", help="Verify one candidate in an isolated static rescan")
-    verify_parser.add_argument("--in", dest="input_path", type=Path, required=True, help="Profile-enriched gaps.json")
-    verify_parser.add_argument("--gap-id", required=True, help="One deterministic static gap ID")
-    verify_parser.add_argument("--provider-repo", type=Path, required=True, help="Approved provider repository root")
-    verify_parser.add_argument("--candidate", type=Path, required=True, help="Candidate replacement file")
-    verify_parser.add_argument("--validation-root", type=Path, default=None, help="ai-cloud-validation checkout root")
-    verify_parser.add_argument("--out", type=Path, required=True, help="Verification manifest JSON")
-    verify_parser.set_defaults(handler=_verify)
-
-    apply_parser = subparsers.add_parser("apply", help="Apply a successfully verified candidate atomically")
-    apply_parser.add_argument("--in", dest="input_path", type=Path, required=True, help="Profile-enriched gaps.json")
-    apply_parser.add_argument("--gap-id", required=True, help="Verified deterministic gap ID")
-    apply_parser.add_argument("--provider-repo", type=Path, required=True, help="Approved provider repository root")
-    apply_parser.add_argument("--candidate", type=Path, required=True, help="Verified candidate replacement file")
-    apply_parser.add_argument("--verification", type=Path, required=True, help="Successful verification manifest")
-    apply_parser.add_argument("--backup-dir", type=Path, required=True, help="Backup directory for an existing target")
-    apply_parser.add_argument("--out", type=Path, required=True, help="Application result JSON")
-    apply_parser.add_argument("--apply", action="store_true", help="Required explicit authorization to change source")
-    apply_parser.set_defaults(handler=_apply)
 
     loop_parser = subparsers.add_parser(
         "loop", help="Validate phase: advance deterministic one-gap-at-a-time loop state"
@@ -587,6 +570,46 @@ def _agent_run(args: argparse.Namespace) -> int:
     return 1 if state.status == "blocked" else 0
 
 
+def _auto(args: argparse.Namespace) -> int:
+    try:
+        review = run_auto(
+            args.project,
+            domain=args.domain,
+            work_dir=args.work_dir,
+            generator_command=[args.generator, *args.generator_arg],
+            generator_pass_env=args.generator_env,
+            max_iterations=args.max_iterations,
+            apply=args.apply,
+            approval_patch_sha256=args.approve_patch,
+        )
+    except (
+        OSError,
+        json.JSONDecodeError,
+        subprocess.SubprocessError,
+        AutoWorkflowError,
+        ContextError,
+        ProjectError,
+        FixGuardrailError,
+        SolutionProfileError,
+    ) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(f"Auto status: {review.status}")
+    print(f"Domain: {review.domain}")
+    print(f"Staged fixes: {len(review.staged)}")
+    for fix in review.staged:
+        print(f"- fixed {fix.target or fix.gap_id} ({fix.validation_class or 'n/a'})")
+    print(f"Parked gaps: {len(review.parked)}")
+    for gap in review.parked:
+        flag = " [MASKED FAILURE]" if gap.masked_failure else ""
+        print(f"- {gap.gap_id} [{gap.status}] route={gap.action}{flag}: {gap.reason}")
+    print(f"Reason: {review.reason}")
+    if review.changed_files:
+        print(f"Combined patch: {args.work_dir.resolve() / 'auto-review.patch'}")
+        print(f"Approve with: --apply --approve-patch {review.patch_sha256}")
+    return 0
+
+
 def _bundle(args: argparse.Namespace) -> int:
     try:
         manifest = build_bundle(
@@ -814,72 +837,6 @@ def _onboard_k8s(args: argparse.Namespace) -> int:
 def _report(args: argparse.Namespace) -> int:
     report = load_report(args.input_path)
     print(render_report(report, args.format))
-    return 0
-
-
-def _fix(args: argparse.Namespace) -> int:
-    try:
-        proposal = build_fix_proposal(
-            load_report(args.input_path),
-            gap_id=args.gap_id,
-            provider_repo=args.provider_repo,
-            candidate_path=args.candidate,
-        )
-        args.out.write_text(proposal.patch, encoding="utf-8")
-    except (OSError, json.JSONDecodeError, FixGuardrailError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-    print(f"Wrote guarded patch proposal: {args.out}")
-    print(f"Gap: {proposal.gap_id}")
-    print(f"Target: {proposal.target}")
-    print(f"Patch SHA-256: {proposal.patch_sha256}")
-    print("Source files were not modified; review and apply the patch separately.")
-    return 0
-
-
-def _verify(args: argparse.Namespace) -> int:
-    try:
-        manifest = verify_fix_candidate(
-            load_report(args.input_path),
-            gap_id=args.gap_id,
-            provider_repo=args.provider_repo,
-            candidate_path=args.candidate,
-            validation_root=args.validation_root,
-        )
-        args.out.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    except (OSError, json.JSONDecodeError, FixGuardrailError, VerificationError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-    print(f"Verification success: {'yes' if manifest.success else 'no'}")
-    print(f"Gap: {manifest.gap_id}")
-    print(f"Target: {manifest.target}")
-    print(f"Selected status: {manifest.selected_status_before} -> {manifest.selected_status_after or 'missing'}")
-    print(f"Regressions: {len(manifest.regressions)}")
-    print(f"Manifest: {args.out}")
-    return 0 if manifest.success else 1
-
-
-def _apply(args: argparse.Namespace) -> int:
-    if not args.apply:
-        print("Refusing to change source without the explicit --apply flag.", file=sys.stderr)
-        return 2
-    try:
-        result = apply_verified_candidate(
-            load_report(args.input_path),
-            gap_id=args.gap_id,
-            provider_repo=args.provider_repo,
-            candidate_path=args.candidate,
-            manifest=load_verification_manifest(args.verification),
-            backup_dir=args.backup_dir,
-        )
-        args.out.write_text(json.dumps(result.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    except (OSError, json.JSONDecodeError, FixGuardrailError, VerificationError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-    print(f"Applied verified candidate: {result.target}")
-    print(f"Backup: {result.backup_path or 'not required (new file)'}")
-    print(f"Result: {args.out}")
-    print("Run a fresh gapctl scan and record the attempt in gapctl loop.")
     return 0
 
 

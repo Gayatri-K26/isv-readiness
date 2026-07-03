@@ -19,7 +19,6 @@ from isv_readiness.fixes import (
 from isv_readiness.onboarding import DOMAIN_CONFIG_FILES
 from isv_readiness.solution_profile import canonicalize_domain
 
-CHANGE_SET_VERSION = "0.1.0"
 CHANGE_PROPOSAL_VERSION = "0.1.0"
 MAX_CHANGE_SET_BYTES = 2_000_000
 ALLOWED_SCRIPT_SUFFIXES = {".json", ".md", ".py", ".sh", ".txt", ".yaml", ".yml"}
