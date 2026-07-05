@@ -79,6 +79,32 @@ class AutoWorkflowTests(unittest.TestCase):
             self.assertTrue(any((work / "backups").iterdir()))
 
 
+class AutoResilienceTests(unittest.TestCase):
+    def test_malformed_generation_counts_as_attempt_and_run_continues(self) -> None:
+        calls = {"n": 0}
+
+        def flaky_runner(command, cwd, request, environment, timeout):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return subprocess.CompletedProcess(command, 0, "prose, not json", "")
+            return _generator_runner(command, cwd, request, environment, timeout)
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            project_path, _provider = _project(Path(tempdir))
+            review = run_auto(
+                project_path,
+                domain="vm",
+                work_dir=Path(tempdir) / "work",
+                generator_command=["fixture-generator"],
+                generator_runner=flaky_runner,
+            )
+
+        # First generation was garbage; the run still staged the fix on retry.
+        self.assertEqual(review.status, "awaiting_review")
+        self.assertTrue(review.staged)
+        self.assertGreaterEqual(calls["n"], 2)
+
+
 def _project(root: Path) -> tuple[Path, Path]:
     workspace = root / "workspace"
     checkout = workspace / "ai-cloud-validation"

@@ -84,6 +84,45 @@ class LiveRunTests(unittest.TestCase):
             schema = json.loads((ROOT / "schemas" / "live-run.schema.json").read_text(encoding="utf-8"))
             jsonschema.validate(result.to_dict(), schema)
 
+    def test_skipped_rows_do_not_veto_success_but_all_skipped_is_not_success(self) -> None:
+        """A skipped row is a declared config exclusion, not a failure (exit 0 runs green)."""
+        cases = [
+            # (junit body, expected success)
+            (
+                '<testsuite tests="2">'
+                '<testcase name="test_vm[InstanceCreatedCheck]" />'
+                '<testcase name="test_vm[GpuCheck]"><skipped message="excluded by label: ssh" /></testcase>'
+                "</testsuite>",
+                True,
+            ),
+            (
+                '<testsuite tests="1">'
+                '<testcase name="test_vm[GpuCheck]"><skipped message="excluded by label: ssh" /></testcase>'
+                "</testsuite>",
+                False,
+            ),
+        ]
+        for junit_body, expected in cases:
+            with tempfile.TemporaryDirectory() as tempdir:
+                project, manifest = _project(Path(tempdir), allow_live=True)
+
+                def runner(command, cwd, environment, timeout, body=junit_body):
+                    junit = Path(command[command.index("--junitxml") + 1])
+                    junit.write_text(body, encoding="utf-8")
+                    return subprocess.CompletedProcess(command, 0, "PASS\n", "")
+
+                result = run_live_domain(
+                    project,
+                    manifest,
+                    domain="vm",
+                    artifacts_dir=Path(tempdir) / "artifacts",
+                    explicit_authorization=True,
+                    runner=runner,
+                    commit_resolver=lambda root: COMMIT,
+                    environment={"PATH": "/bin", "HOME": "/home/test", "ACME_TOKEN": "x", "ACME_REGION": "west"},
+                )
+                self.assertEqual(result.success, expected, f"junit={junit_body[:60]}")
+
     def test_live_run_rejects_checkout_drift_and_missing_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             project, manifest = _project(Path(tempdir), allow_live=True)

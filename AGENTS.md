@@ -58,8 +58,6 @@ python3 -m json.tool schemas/gaps.schema.json >/dev/null
 python3 -m json.tool schemas/validation-plan.schema.json >/dev/null
 python3 -m json.tool schemas/solution-profile.schema.json >/dev/null
 python3 -m json.tool schemas/loop-state.schema.json >/dev/null
-python3 -m json.tool schemas/verification-manifest.schema.json >/dev/null
-python3 -m json.tool schemas/application-result.schema.json >/dev/null
 python3 -m json.tool schemas/project.schema.json >/dev/null
 python3 -m json.tool schemas/context-pack.schema.json >/dev/null
 python3 -m json.tool schemas/change-set.schema.json >/dev/null

@@ -11,6 +11,7 @@ from typing import Any
 
 from isv_readiness.change_verification import apply_verified_change_set, verify_change_set
 from isv_readiness.context import build_context_pack
+from isv_readiness.fixes import FixGuardrailError
 from isv_readiness.generation import GeneratorRunner, run_generator
 from isv_readiness.loop import FIX_ACTION, UNRESOLVED_STATUSES
 from isv_readiness.project import ReadinessProject, load_project
@@ -105,6 +106,21 @@ def run_auto(
     work_dir.mkdir(parents=True, exist_ok=True)
     scratch = work_dir / "scratch-provider"
     scratch_backups = work_dir / "scratch-backups"
+
+    if apply:
+        # Apply is an apply-ONLY action: it consumes the previously staged
+        # scratch exactly as reviewed. It never regenerates — a regenerated
+        # patch could not match the reviewed hash anyway (models are not
+        # byte-deterministic), and silently redoing 10 model calls before
+        # refusing would waste both time and trust.
+        return _apply_reviewed_scratch(
+            provider_root,
+            scratch,
+            work_dir,
+            domain=canonical_domain,
+            approval_patch_sha256=approval_patch_sha256,
+        )
+
     for stale in (scratch, scratch_backups):
         if stale.exists():
             shutil.rmtree(stale)
@@ -120,33 +136,43 @@ def run_auto(
         fixable = _select_fixable(report, canonical_domain)
         # Drop gaps already staged (a re-scan should show them resolved; if it
         # does not, the retry budget below stops an infinite loop).
-        pending = [row for row in fixable if row["id"] not in {fix.gap_id for fix in staged}]
+        staged_ids = {fix.gap_id for fix in staged}
+        pending = [
+            row
+            for row in fixable
+            if row["id"] not in staged_ids
+            and attempts_by_gap.get(row["id"], 0) < max_attempts
+        ]
         if not pending:
             break
         row = pending[0]
         gap_id = row["id"]
-        if attempts_by_gap.get(gap_id, 0) >= max_attempts:
-            break
 
-        change_set = _generate(
-            project,
-            project_path,
-            report,
-            gap_id=gap_id,
-            scratch=scratch,
-            work_dir=work_dir,
-            generator_command=generator_command,
-            generator_pass_env=generator_pass_env,
-            environment=environment,
-            generator_runner=generator_runner,
-            feedback=_feedback_for(attempts_by_gap.get(gap_id, 0)),
-        )
-        manifest = verify_change_set(
-            report,
-            provider_repo=scratch,
-            change_set=change_set,
-            validation_root=project.validation_root(project_path),
-        )
+        try:
+            change_set = _generate(
+                project,
+                project_path,
+                report,
+                gap_id=gap_id,
+                scratch=scratch,
+                work_dir=work_dir,
+                generator_command=generator_command,
+                generator_pass_env=generator_pass_env,
+                environment=environment,
+                generator_runner=generator_runner,
+                feedback=_feedback_for(attempts_by_gap.get(gap_id, 0)),
+            )
+            manifest = verify_change_set(
+                report,
+                provider_repo=scratch,
+                change_set=change_set,
+                validation_root=project.validation_root(project_path),
+            )
+        except FixGuardrailError:
+            # A malformed generation or guard violation is a failed attempt for
+            # this gap, not a reason to abort every other gap in the run.
+            attempts_by_gap[gap_id] = attempts_by_gap.get(gap_id, 0) + 1
+            continue
         attempts_by_gap[gap_id] = attempts_by_gap.get(gap_id, 0) + 1
         if not manifest.success:
             # Leave the gap for the next iteration's retry budget; a fresh scan
@@ -190,32 +216,78 @@ def run_auto(
         _write_review(work_dir, review)
         return review
 
-    status = "awaiting_review"
-    reason = (
-        f"{len(staged)} verified fix(es) staged for one review; {len(parked)} gap(s) parked. "
-        "Review the combined patch and re-run with --apply <patch-sha256>."
-    )
-    if apply:
-        if approval_patch_sha256 != patch_sha256:
-            reason = (
-                "Apply refused: supplied approval hash does not match the current combined patch. "
-                "Review the patch and pass the exact printed --apply hash."
-            )
-        else:
-            _apply_to_provider(provider_root, scratch, changed_files, work_dir / "backups")
-            status = "applied"
-            reason = f"Applied {len(changed_files)} file(s) atomically after hash-bound review approval."
-
     review = AutoReview(
         schema_version=AUTO_REVIEW_VERSION,
         domain=canonical_domain,
-        status=status,
+        status="awaiting_review",
         patch=patch,
         patch_sha256=patch_sha256,
         staged=tuple(staged),
         parked=tuple(parked),
         changed_files=tuple(changed_files),
-        reason=reason,
+        reason=(
+            f"{len(staged)} verified fix(es) staged for one review; {len(parked)} gap(s) parked. "
+            "Review the combined patch and re-run with --apply <patch-sha256>."
+        ),
+    )
+    _write_review(work_dir, review)
+    return review
+
+
+def _apply_reviewed_scratch(
+    provider_root: Path,
+    scratch: Path,
+    work_dir: Path,
+    *,
+    domain: str,
+    approval_patch_sha256: str | None,
+) -> AutoReview:
+    """Apply the previously staged scratch exactly as reviewed — no regeneration."""
+    if not scratch.is_dir():
+        raise AutoWorkflowError(
+            "No staged run to apply; run auto without --apply first to stage and review fixes."
+        )
+    changed_files = _changed_files(provider_root, scratch)
+    patch = _combined_patch(provider_root, scratch, changed_files)
+    patch_sha256 = hashlib.sha256(patch.encode("utf-8")).hexdigest()
+    if not changed_files:
+        return AutoReview(
+            schema_version=AUTO_REVIEW_VERSION,
+            domain=domain,
+            status="no_changes",
+            patch="",
+            patch_sha256=patch_sha256,
+            staged=(),
+            parked=(),
+            changed_files=(),
+            reason="Staged scratch matches the provider; nothing to apply (already applied?).",
+        )
+    if approval_patch_sha256 != patch_sha256:
+        return AutoReview(
+            schema_version=AUTO_REVIEW_VERSION,
+            domain=domain,
+            status="awaiting_review",
+            patch=patch,
+            patch_sha256=patch_sha256,
+            staged=(),
+            parked=(),
+            changed_files=tuple(changed_files),
+            reason=(
+                "Apply refused: supplied approval hash does not match the staged patch "
+                f"({patch_sha256[:12]}…). Review auto-review.patch and pass the exact hash."
+            ),
+        )
+    _apply_to_provider(provider_root, scratch, changed_files, work_dir / "backups")
+    review = AutoReview(
+        schema_version=AUTO_REVIEW_VERSION,
+        domain=domain,
+        status="applied",
+        patch=patch,
+        patch_sha256=patch_sha256,
+        staged=(),
+        parked=(),
+        changed_files=tuple(changed_files),
+        reason=f"Applied {len(changed_files)} file(s) atomically after hash-bound review approval.",
     )
     _write_review(work_dir, review)
     return review
@@ -242,17 +314,27 @@ def _park(report: dict[str, Any], domain: str, staged: Sequence[StagedFix]) -> l
             continue
         if row.get("id") in staged_ids:
             continue
-        if (row.get("remediation") or {}).get("auto_fixable") is True and _action(row) == FIX_ACTION:
+        action = _action(row)
+        auto_fixable = (row.get("remediation") or {}).get("auto_fixable") is True
+        if auto_fixable and action == FIX_ACTION:
             reason = "Auto-fix attempts were exhausted without a verified candidate."
+        elif action == FIX_ACTION:
+            # e.g. an unwired step: the fix is a config/scope decision, and the
+            # deterministic scanner refuses to authorize an automatic edit.
+            reason = (
+                "Scanner did not mark this row safely auto-fixable "
+                f"(evidence: {str((row.get('evidence') or {}).get('message') or '')[:80]}); "
+                "a human config or scope decision is required."
+            )
         else:
-            reason = f"Requires human route '{_action(row)}' before code can be generated."
+            reason = f"Requires human route '{action}' before code can be generated."
         sp = (row.get("enrichment") or {}).get("solution_profile") or {}
         reconciliation = sp.get("reconciliation") or {}
         parked.append(
             ParkedGap(
                 gap_id=str(row.get("id")),
                 status=str(row.get("status")),
-                action=_action(row),
+                action=action,
                 reason=reason,
                 masked_failure=bool(reconciliation.get("masked_failure")),
             )

@@ -988,3 +988,51 @@ profiles keep their layer assignments. Files: `project.py` (remove
 `layer_by_domain`, update draft + assumption note), `solution_profile.py`
 (`_parse_component` default), `schemas/solution-profile.schema.json`. 85 tests,
 Ruff, schema, lockfile, and diff checks green.
+
+## Step 16 - Hardening from the First Real End-to-End Engagement
+
+A full simulated ISV engagement (provider "acme": scaffold -> auto generation
+with a blind Claude-CLI adapter -> review-gated apply -> eight live `isvctl`
+runs against a real GPU host) stress-tested the pipeline and exposed four
+behavioral defects, all fixed here with regression tests.
+
+### Decisions and fixes
+
+- `gapctl auto --apply` is now apply-ONLY (`_apply_reviewed_scratch`): it
+  consumes the previously staged scratch exactly as reviewed and never
+  regenerates. Rationale: model output is not byte-deterministic, so a
+  regenerating apply could never match the reviewed hash - it burned a full
+  generation pass and then refused. Apply with no staged scratch is an explicit
+  error; a hash mismatch is a refusal that reports the staged hash.
+- A malformed generation (or guard violation) inside the `auto` loop counts as
+  a failed attempt for that gap and the loop continues; it no longer aborts the
+  whole run. An exhausted gap parks instead of halting the loop, so one bad gap
+  cannot starve the rest of the domain.
+- Live-run success no longer treats `skipped` rows as failures
+  (`live.py`): a skipped row is a declared config exclusion (label opt-outs);
+  `isvctl` itself exits 0 for such runs. Success now requires exit 0, at least
+  one executed `pass`, and no fail/error/not_implemented among selected rows.
+  Observed live: a fully green 16-pass/20-skip run was reported as failed and
+  re-parked at `awaiting_live` indefinitely.
+- Parked-gap reasons distinguish "retry budget exhausted" from "scanner did not
+  authorize an edit" (e.g. an unwired step needing a config/scope decision),
+  quoting the scanner evidence. The previous wording claimed a human route was
+  required even when the route WAS implement_or_fix_adapter.
+
+### Evidence
+
+- Live engagement ladder (one failure class per run): infra outage; three
+  cross-script contract bugs (container-name convention, missing `vpc_id`,
+  missing Name/CreatedBy tags); empty templated `key_file` silently skipping
+  downstream steps; a 60 s step timeout from per-poll SSH round-trips; a
+  container VM-ism (`/proc/uptime` never resets - use `.State.StartedAt`);
+  and the skipped-as-failure predicate above.
+
+### Follow-up
+
+- `agent-run` prints `awaiting_live` both before a live run and after a failed
+  one; the terminal status is ambiguous without reading history. Consider a
+  distinct `live_failed` surface status.
+- A step that dies without stdout produces no fail row (checks skip as
+  `step_no_output`), so the loop can read a failed orchestration as green;
+  the gap model should represent step-level no-output failures.

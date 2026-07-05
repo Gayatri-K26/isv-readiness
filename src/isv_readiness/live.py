@@ -184,7 +184,16 @@ def run_live_domain(
         if selection is None or _same_validation(selection, row.validation_class)
     ]
     statuses = tuple(sorted(row.status for row in selected_rows))
-    success = result.returncode == 0 and bool(selected_rows) and all(status == "pass" for status in statuses)
+    # A skipped row is a declared exclusion (config label opt-out), not a
+    # failure: isvctl itself exits 0 for such runs. Success requires the engine
+    # to agree (exit 0), at least one check to have actually executed, and no
+    # unresolved outcome among the selected rows.
+    unresolved = {"fail", "error", "not_implemented"}
+    success = (
+        result.returncode == 0
+        and any(status == "pass" for status in statuses)
+        and not any(status in unresolved for status in statuses)
+    )
     live_result = LiveRunResult(
         schema_version=LIVE_RUN_VERSION,
         domain=canonical_domain,

@@ -85,7 +85,7 @@ class ProfileEnrichmentTests(unittest.TestCase):
         owned_vm = replace(profile.domains[vm_index], owned=True)
         misidentified = replace(
             profile,
-            domains=profile.domains[:vm_index] + (owned_vm,) + profile.domains[vm_index + 1 :],
+            domains=(*profile.domains[:vm_index], owned_vm, *profile.domains[vm_index + 1 :]),
         )
 
         enriched = enrich_report_with_profile(report, misidentified)
