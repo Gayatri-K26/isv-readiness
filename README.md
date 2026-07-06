@@ -61,7 +61,7 @@ Not implemented yet:
 
 - Additional model-vendor-native adapters; the command contract and Codex
   reference adapter are implemented.
-- Pull-request submission and publication workflows.
+- Pull-request submission; the change pipeline emits reviewed patches, not PRs.
 - Publication workflows (NVIDIA AI Cloud Ready's "publish" stage). The current
   boundary ends with a reproducible owned-scope validation bundle.
 - Integrated multi-owner full-stack roll-up (an NCP/integrator concern that
@@ -337,6 +337,28 @@ gapctl bundle \
   --agent-work-dir .gapctl/agent/vm \
   --out-dir readiness-bundle
 ```
+
+### 5.6. Run one live selection directly
+
+The gated `agent-run`/`auto` flows are the recommended way to execute live, but
+a single policy-authorized run can also be invoked directly. Like `agent-run`,
+it requires `execution.allow_live_runs: true` in the reviewed project and the
+explicit `--run-live` flag:
+
+```bash
+gapctl live-run \
+  --project isv-project.yaml \
+  --domain vm \
+  --selection <validation-class> \
+  --artifacts-dir .gapctl/live/vm \
+  --out live-run.json \
+  --run-live
+```
+
+`--selection` is passed to upstream `pytest -k`; omit it to run the whole
+domain. Kubernetes runs additionally accept `--scope` for ownership
+classification. Without `--run-live` the command previews the authorized
+command without executing it.
 
 ### 6. Run or ingest one dynamic domain
 
