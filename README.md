@@ -236,7 +236,10 @@ authoritative. Reference implementations and NSRG material are guidance.
 GitHub issues and MCP exports are advisory and cannot change scope, ownership,
 or pass/fail results.
 
-Run an explicitly chosen model adapter after reviewing the context pack:
+Run an explicitly chosen model adapter against the pack. The pack is the
+generator's complete, self-sufficient input — no human review sits between
+pack and generation (inspecting the pack is a debugging aid, not a gate; the
+enforced review gates are patch application and live execution):
 
 ```bash
 gapctl generate \

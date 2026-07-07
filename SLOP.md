@@ -1068,3 +1068,15 @@ behavioral defects, all fixed here with regression tests.
   to behavior or delete it.
 - Full-text reference embedding risked derivative generated code and exceeded
   the recorded "patterns only" trust boundary for reference providers.
+
+## Step 18 - Autonomy Stance After Qualify
+
+### Decision
+
+After the qualify stage, human review concentrates at two enforced gates:
+hash-bound patch application and policy-gated live execution. The context
+pack is the generator's complete, self-sufficient input - inspecting it is a
+debugging aid, never a workflow gate. `auto` is the primary validate-phase
+flow; the decomposed context-pack/generate commands remain for debugging and
+adapter development. (No code change - the gates were already implemented
+this way; README prose updated to match.)
