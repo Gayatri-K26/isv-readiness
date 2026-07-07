@@ -109,9 +109,6 @@ def scan_provider(options: ScanOptions) -> GapReport:
         for step_name in sorted(set(steps) - step_names_with_checks):
             checks.append(CheckRef(step_name=step_name, validation_class="StepOutputSchema"))
 
-        for step_name in sorted(set(aws_steps) - set(steps) - step_names_with_checks):
-            checks.append(CheckRef(step_name=step_name, validation_class="AwsReferenceStep"))
-
         for check in sorted(
             checks,
             key=lambda item: (

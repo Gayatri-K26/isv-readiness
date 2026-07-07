@@ -1036,3 +1036,35 @@ behavioral defects, all fixed here with regression tests.
 - A step that dies without stdout produces no fail row (checks skip as
   `step_no_output`), so the loop can read a failed orchestration as green;
   the gap model should represent step-level no-output failures.
+
+## Step 17 - Dead-Field Pruning and Patterns-Only Reference Boundary
+
+### Decisions
+
+- Removed `gap_type` from the gap model, schema, scanners, K8s classifier,
+  report renderer, and context deserializer. An audit showed no routing,
+  guardrail, loop, or auto logic ever branched on it; decisions come from the
+  profile action, `status`, and `remediation.auto_fixable`. The human-facing
+  "why" survives in `classification_note` enrichment and evidence messages.
+  (It did flow to the generator inside the context pack's embedded row, so its
+  removal marginally changes generator input - accepted for simplicity.)
+- Removed the `isv_context` report envelope. `repo_access`/`creds_scope` were
+  write-only constants; `run_env`/`api_spec` were copied verbatim from
+  `isv-project.yaml`, which remains the authoritative record of engagement
+  context. No code, renderer, or context pack read any of it.
+- Stopped embedding the AWS reference implementation's full text in the
+  context pack. `remediation.aws_reference` remains a path pointer on the
+  embedded gap row, but generated code must derive from the ISV's own API
+  spec and the executable contract - reference providers are patterns only.
+- Removed the `AwsReferenceStep` synthetic coverage checks. Only the suite's
+  own validation contracts define required steps; the AWS provider wiring an
+  extra step no longer produces a gap row for another provider. The per-step
+  AWS pairing that fills the `aws_reference` pointer is unchanged.
+
+### Rationale
+
+- Fields no decision logic consults can silently drift from reality (the
+  `semantic_mismatch` overload) and no test catches it; either wire a field
+  to behavior or delete it.
+- Full-text reference embedding risked derivative generated code and exceeded
+  the recorded "patterns only" trust boundary for reference providers.

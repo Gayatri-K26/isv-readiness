@@ -373,10 +373,9 @@ def _local_gap_items(
             config = Path()
         if config.is_file():
             items.append(_item("provider_config", "provider_config", "authoritative", config, _relevant_excerpt(_read_text(config), terms, 12_000), "config containing selected validation"))
-    if gap.remediation.aws_reference:
-        reference = validation_root / gap.remediation.aws_reference
-        if reference.is_file():
-            items.append(_item("reference_implementation", "provider_reference", "reference", reference, _read_text(reference), "scanner-selected reference implementation"))
+    # remediation.aws_reference stays a pointer on the embedded gap row; the
+    # reference implementation's contents are deliberately not included
+    # (patterns only — generated code must derive from the ISV's own spec).
     return items
 
 

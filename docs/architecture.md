@@ -227,7 +227,9 @@ The generator interface accepts a minimal context pack:
 - matching validation metadata
 - solution responsibility
 - approved API/repository documentation
-- one relevant reference implementation when license and policy permit
+- a path pointer to the matching reference implementation (patterns only; its
+  contents are never embedded, so generated code derives from the ISV's own
+  spec and the executable contract)
 - previous attempt and verifier feedback
 
 The command adapter receives a JSON request on stdin, runs without a shell and
