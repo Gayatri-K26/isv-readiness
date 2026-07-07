@@ -14,7 +14,7 @@ from isv_readiness.context import (
     sync_context_sources,
 )
 from isv_readiness.project import build_bootstrap_plan, execute_bootstrap
-from isv_readiness.scan.models import Evidence, GapReport, GapRow, IsvContext, Remediation
+from isv_readiness.scan.models import Evidence, GapReport, GapRow, Remediation
 
 COMMIT = "b" * 40
 
@@ -188,7 +188,6 @@ def _gap_report(provider: Path) -> GapReport:
         schema_version="0.1.0",
         provider_repo=str(provider),
         domains=["vm"],
-        isv_context=IsvContext(),
         rows=[
             GapRow(
                 id="gap_0123456789ab",

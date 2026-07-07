@@ -17,7 +17,7 @@ from isv_readiness.project import ReadinessProject
 from isv_readiness.scan.dynamic import DynamicArtifacts, scan_dynamic_artifacts
 from isv_readiness.scan.k8s_dynamic import K8sDynamicArtifacts, scan_k8s_artifacts
 from isv_readiness.scan.k8s_scope import load_k8s_scope
-from isv_readiness.scan.models import GapReport, IsvContext
+from isv_readiness.scan.models import GapReport
 from isv_readiness.scan.profile import enrich_report_with_profile
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
 from isv_readiness.solution_profile import canonicalize_domain, load_solution_profile
@@ -163,12 +163,6 @@ def run_live_domain(
         schema_version=static_report.schema_version,
         provider_repo=static_report.provider_repo,
         domains=static_report.domains,
-        isv_context=IsvContext(
-            repo_access="local",
-            api_spec=next((api.spec for api in project.apis if canonical_domain in api.domains and api.spec), None),
-            run_env=project.execution.run_environment,
-            creds_scope="declared environment names only",
-        ),
         rows=sorted(
             [*static_report.rows, *dynamic_rows],
             key=lambda row: (row.domain, row.step_name, row.validation_class or "", row.detection, row.id),

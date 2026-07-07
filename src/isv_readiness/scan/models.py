@@ -50,19 +50,10 @@ class GapRow:
 
 
 @dataclass(frozen=True)
-class IsvContext:
-    repo_access: str = "local"
-    api_spec: str | None = None
-    run_env: str = "not_checked"
-    creds_scope: str | None = None
-
-
-@dataclass(frozen=True)
 class GapReport:
     schema_version: str
     provider_repo: str
     domains: list[str]
-    isv_context: IsvContext
     rows: list[GapRow]
 
     def to_dict(self) -> dict[str, Any]:

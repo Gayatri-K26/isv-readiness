@@ -18,7 +18,6 @@ from isv_readiness.scan.models import (
     Evidence,
     GapReport,
     GapRow,
-    IsvContext,
     Remediation,
     Stage,
     Status,
@@ -141,7 +140,6 @@ def scan_provider(options: ScanOptions) -> GapReport:
         schema_version=SCHEMA_VERSION,
         provider_repo=str(provider_repo),
         domains=options.domains,
-        isv_context=IsvContext(),
         rows=rows,
     )
 

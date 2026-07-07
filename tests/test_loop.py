@@ -53,12 +53,6 @@ def _report(rows: list[dict]) -> dict:
         "schema_version": "0.1.0",
         "provider_repo": "/provider",
         "domains": ["vm"],
-        "isv_context": {
-            "repo_access": "local",
-            "api_spec": None,
-            "run_env": "staging",
-            "creds_scope": None,
-        },
         "rows": rows,
     }
 

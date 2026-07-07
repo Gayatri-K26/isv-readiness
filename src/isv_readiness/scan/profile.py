@@ -22,7 +22,6 @@ def enrich_report_with_profile(report: GapReport, profile: SolutionProfile) -> G
         schema_version=report.schema_version,
         provider_repo=report.provider_repo,
         domains=report.domains,
-        isv_context=report.isv_context,
         rows=rows,
     )
 

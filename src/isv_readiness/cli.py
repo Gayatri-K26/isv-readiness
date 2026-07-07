@@ -695,7 +695,6 @@ def _scan(args: argparse.Namespace) -> int:
             schema_version=report.schema_version,
             provider_repo=report.provider_repo,
             domains=report.domains,
-            isv_context=report.isv_context,
             rows=sorted(
                 [*report.rows, *dynamic_rows],
                 key=lambda row: (

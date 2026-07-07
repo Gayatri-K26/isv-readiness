@@ -2,12 +2,6 @@
   "domains": [
     "vm"
   ],
-  "isv_context": {
-    "api_spec": null,
-    "creds_scope": null,
-    "repo_access": "local",
-    "run_env": "not_checked"
-  },
   "provider_repo": "examples/provider-repo",
   "rows": [
     {

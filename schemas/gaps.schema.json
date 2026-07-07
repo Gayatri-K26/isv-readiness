@@ -4,7 +4,7 @@
   "title": "ISV Readiness Gap Report",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "provider_repo", "domains", "isv_context", "rows"],
+  "required": ["schema_version", "provider_repo", "domains", "rows"],
   "properties": {
     "schema_version": {
       "const": "0.1.0"
@@ -20,29 +20,6 @@
       },
       "minItems": 1,
       "uniqueItems": true
-    },
-    "isv_context": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["repo_access", "api_spec", "run_env", "creds_scope"],
-      "properties": {
-        "repo_access": {
-          "type": "string",
-          "description": "How the scanner can read the provider repo, for example local, remote, or none."
-        },
-        "api_spec": {
-          "type": ["string", "null"],
-          "description": "Available API/spec context for code generation, if any."
-        },
-        "run_env": {
-          "type": "string",
-          "description": "Whether a verification environment is available, for example not_checked, local, staging, or none."
-        },
-        "creds_scope": {
-          "type": ["string", "null"],
-          "description": "Credential scope visible to the scanner/agent, if known."
-        }
-      }
     },
     "rows": {
       "type": "array",

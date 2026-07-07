@@ -80,7 +80,6 @@ class LiveRunTests(unittest.TestCase):
             self.assertEqual(seen["environment"]["ACME_REGION"], "west")
             self.assertNotIn("UNDECLARED_SECRET", seen["environment"])
             self.assertNotIn("super-secret-value", Path(result.log_path).read_text(encoding="utf-8"))
-            self.assertEqual(result.report["isv_context"]["run_env"], "staging")
             schema = json.loads((ROOT / "schemas" / "live-run.schema.json").read_text(encoding="utf-8"))
             jsonschema.validate(result.to_dict(), schema)
 
