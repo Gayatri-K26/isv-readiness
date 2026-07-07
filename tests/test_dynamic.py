@@ -45,13 +45,13 @@ class CrossDomainDynamicScanTests(unittest.TestCase):
 
         listing = by_validation["InstanceListCheck"]
         self.assertEqual(listing.status, "fail")
-        self.assertEqual(listing.gap_type, "provider_script")
+        self.assertFalse(listing.remediation.auto_fixable)
         self.assertIn("InstanceListCheck", listing.evidence.stderr_excerpt or "")
 
         missing_step = by_validation["InstanceCreatedCheck"]
         self.assertEqual(missing_step.status, "skipped")
         self.assertEqual(missing_step.step_name, "launch_instance")
-        self.assertEqual(missing_step.gap_type, "onboarding")
+        self.assertIn("does not declare", missing_step.enrichment["classification_note"])
         self.assertEqual(missing_step.enrichment["junit_reason"], "step_not_configured")
         self.assertTrue(missing_step.remediation.auto_fixable)
 
@@ -75,7 +75,7 @@ class CrossDomainDynamicScanTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].status, "error")
         self.assertEqual(rows[0].validation_class, "JUnitContract")
-        self.assertEqual(rows[0].gap_type, "lab_env")
+        self.assertFalse(rows[0].remediation.auto_fixable)
 
     def test_cli_merges_static_and_dynamic_vm_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:

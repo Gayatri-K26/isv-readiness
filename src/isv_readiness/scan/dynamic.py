@@ -6,7 +6,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 
-from isv_readiness.scan.models import Evidence, GapRow, GapType, Remediation, Status
+from isv_readiness.scan.models import Evidence, GapRow, Remediation, Status
 
 _VALIDATION_RE = re.compile(r"\[([^\]]+)\]")
 _STEP_NOT_CONFIGURED_RE = re.compile(r"step '([^']+)' is not configured")
@@ -57,7 +57,6 @@ def scan_dynamic_artifacts(options: DynamicArtifacts) -> list[GapRow]:
                 validation_class="JUnitContract",
                 validation_category=None,
                 status="error",
-                gap_type="lab_env",
                 message=f"Failed to parse JUnit artifact: {exc}",
                 validation_message=str(exc),
                 reason="invalid_junit",
@@ -76,7 +75,7 @@ def scan_dynamic_artifacts(options: DynamicArtifacts) -> list[GapRow]:
             message,
             options.static_rows,
         )
-        gap_type, auto_fixable, classification_note = _classify(status, message, reason)
+        auto_fixable, classification_note = _classify(status, message, reason)
         rows.append(
             _dynamic_row(
                 options,
@@ -85,7 +84,6 @@ def scan_dynamic_artifacts(options: DynamicArtifacts) -> list[GapRow]:
                 validation_class=validation_class,
                 validation_category=validation_category,
                 status=status,
-                gap_type=gap_type,
                 message=_summary_message(status, validation_class, message),
                 validation_message=message or None,
                 reason=reason,
@@ -171,24 +169,24 @@ def _unique_category(rows: list[GapRow]) -> str | None:
     return next(iter(categories)) if len(categories) == 1 else None
 
 
-def _classify(status: Status, message: str, reason: str | None) -> tuple[GapType, bool, str]:
+def _classify(status: Status, message: str, reason: str | None) -> tuple[bool, str]:
     if status == "pass":
-        return "provider_script", False, "Validation passed; no remediation route is needed."
+        return False, "Validation passed; no remediation route is needed."
     if reason == "step_not_configured":
-        return "onboarding", True, "The provider config does not declare the validation's required step."
+        return True, "The provider config does not declare the validation's required step."
     if reason == "step_no_output":
-        return "provider_script", True, "The configured provider step did not produce JSON output."
+        return True, "The configured provider step did not produce JSON output."
     if reason in {"invalid_config", "template_render_failed"}:
-        return "provider_script", True, "Provider configuration could not be resolved for validation."
+        return True, "Provider configuration could not be resolved for validation."
     if reason in {"test_excluded", "unreleased"}:
-        return "semantic_mismatch", False, "The validation was intentionally excluded from this run."
+        return False, "The validation was intentionally excluded from this run."
     if reason == "phase_not_requested":
-        return "lab_env", False, "The validation phase was not requested in this run."
+        return False, "The validation phase was not requested in this run."
     if reason == "runtime_exception":
-        return "provider_script", False, "Runtime failure requires triage before an edit can be selected."
+        return False, "Runtime failure requires triage before an edit can be selected."
     if status == "skipped" or any(marker in message.lower() for marker in _LAB_ENV_MARKERS):
-        return "lab_env", False, "Runtime prerequisites or environment state prevented validation."
-    return "provider_script", False, "Validation failed; classify against solution ownership before editing."
+        return False, "Runtime prerequisites or environment state prevented validation."
+    return False, "Validation failed; classify against solution ownership before editing."
 
 
 def _summary_message(status: Status, validation_class: str | None, message: str) -> str:
@@ -208,7 +206,6 @@ def _dynamic_row(
     validation_class: str | None,
     validation_category: str | None,
     status: Status,
-    gap_type: GapType,
     message: str,
     validation_message: str | None,
     reason: str | None,
@@ -237,7 +234,6 @@ def _dynamic_row(
         status=status,
         detection="dynamic",
         stage="correctness" if status in {"fail", "error"} else "coverage",
-        gap_type=gap_type,
         evidence=Evidence(
             message=message,
             validation_message=validation_message,

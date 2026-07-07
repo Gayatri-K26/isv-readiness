@@ -34,14 +34,12 @@ class K8sDynamicScanTests(unittest.TestCase):
 
         self.assertEqual(by_validation["StepOutputSchema"].status, "pass")
         self.assertEqual(by_validation["K8sGpuCapacityCheck"].status, "fail")
-        self.assertEqual(by_validation["K8sGpuCapacityCheck"].gap_type, "product_bug")
         self.assertEqual(by_validation["K8sGpuCapacityCheck"].enrichment["k8s_layer"], "gpu_operator")
         self.assertIn("K8sGpuCapacityCheck", by_validation["K8sGpuCapacityCheck"].evidence.stderr_excerpt or "")
 
-        self.assertEqual(by_validation["K8sNetworkPolicyCheck"].gap_type, "semantic_mismatch")
-        self.assertEqual(by_validation["K8sNimHelmWorkload-1b"].gap_type, "lab_env")
+        self.assertEqual(by_validation["K8sNetworkPolicyCheck"].enrichment["k8s_layer"], "network_policy")
+        self.assertEqual(by_validation["K8sNimHelmWorkload-1b"].enrichment["k8s_layer"], "workloads")
         self.assertEqual(by_validation["K8sNodePoolCheck"].step_name, "create_test_node_pool")
-        self.assertEqual(by_validation["K8sNodePoolCheck"].gap_type, "semantic_mismatch")
         self.assertEqual(by_validation["K8sNodePoolCheck"].enrichment["junit_reason"], "step_not_configured")
 
     def test_cli_merges_static_and_dynamic_k8s_rows(self) -> None:

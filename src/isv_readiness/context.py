@@ -593,7 +593,6 @@ def _gap_from_dict(raw: Mapping[str, Any]) -> GapRow:
         status=raw["status"],
         detection=raw["detection"],
         stage=raw["stage"],
-        gap_type=raw["gap_type"],
         evidence=Evidence(**raw["evidence"]),
         remediation=Remediation(**raw["remediation"]),
         enrichment=dict(raw.get("enrichment") or {}),

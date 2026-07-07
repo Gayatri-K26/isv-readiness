@@ -91,20 +91,19 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- Schema: `{report.get('schema_version', '<unknown>')}`",
         f"- Provider repo: `{report.get('provider_repo', '<unknown>')}`",
         "",
-        "| ID | Domain | Step | Validation | Status | Stage | Gap Type | Target |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| ID | Domain | Step | Validation | Status | Stage | Target |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in rows:
         remediation = row.get("remediation") or {}
         lines.append(
-            "| {id} | {domain} | {step} | {validation} | {status} | {stage} | {gap_type} | {target} |".format(
+            "| {id} | {domain} | {step} | {validation} | {status} | {stage} | {target} |".format(
                 id=_cell(row.get("id")),
                 domain=_cell(row.get("domain")),
                 step=_cell(row.get("step_name")),
                 validation=_cell(row.get("validation_class")),
                 status=_cell(row.get("status")),
                 stage=_cell(row.get("stage")),
-                gap_type=_cell(row.get("gap_type")),
                 target=_cell(remediation.get("target")),
             )
         )

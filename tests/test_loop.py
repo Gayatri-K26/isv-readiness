@@ -29,7 +29,6 @@ def _row(
         "status": status,
         "detection": "static",
         "stage": "coverage",
-        "gap_type": "not_implemented",
         "evidence": {
             "message": "test",
             "validation_message": None,

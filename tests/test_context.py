@@ -200,7 +200,6 @@ def _gap_report(provider: Path) -> GapReport:
                 status="not_implemented",
                 detection="static",
                 stage="coverage",
-                gap_type="not_implemented",
                 evidence=Evidence(
                     message="Provider launch script contains TODO",
                     script_path="scripts/vm/launch.py",

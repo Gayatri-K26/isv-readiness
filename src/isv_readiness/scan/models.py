@@ -8,18 +8,10 @@ SCHEMA_VERSION = "0.1.0"
 Status = Literal["pass", "fail", "not_implemented", "skipped", "error"]
 Detection = Literal["static", "dynamic"]
 Stage = Literal["coverage", "correctness"]
-GapType = Literal[
-    "not_implemented",
-    "provider_script",
-    "product_bug",
-    "lab_env",
-    "semantic_mismatch",
-    "lib_adoption",
-    "onboarding",
-]
 
 
 @dataclass(frozen=True)
+# Why a check fired
 class Evidence:
     message: str
     validation_message: str | None = None
@@ -49,7 +41,6 @@ class GapRow:
     status: Status
     detection: Detection
     stage: Stage
-    gap_type: GapType
     evidence: Evidence
     remediation: Remediation
     enrichment: dict[str, Any] = field(default_factory=dict)

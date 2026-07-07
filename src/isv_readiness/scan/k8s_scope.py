@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from isv_readiness.scan.models import GapType, Status
+from isv_readiness.scan.models import Status
 
 K8S_LAYERS = (
     "cluster_lifecycle",
@@ -90,7 +90,6 @@ class K8sScope:
 
 @dataclass(frozen=True)
 class K8sClassification:
-    gap_type: GapType
     auto_fixable: bool
     layer: str | None
     note: str
@@ -138,37 +137,37 @@ def classify_k8s_gap(validation_class: str | None, status: Status, message: str,
     lowered = message.lower()
 
     if status == "pass":
-        return K8sClassification("provider_script", False, layer, "Validation passed; no remediation route needed.")
+        return K8sClassification(False, layer, "Validation passed; no remediation route needed.")
 
     if validation_class in scope.expected_skips:
-        return K8sClassification("semantic_mismatch", False, layer, "Validation is listed as an expected skip by the ISV scope profile.")
+        return K8sClassification(False, layer, "Validation is listed as an expected skip by the ISV scope profile.")
 
     if status == "skipped":
         if owned is False:
-            return K8sClassification("semantic_mismatch", False, layer, "Skipped validation belongs to a layer the ISV marked out of scope.")
+            return K8sClassification(False, layer, "Skipped validation belongs to a layer the ISV marked out of scope.")
         if any(marker in lowered for marker in LAB_ENV_MARKERS):
-            return K8sClassification("lab_env", False, layer, "Skipped validation depends on missing lab/runtime configuration.")
-        return K8sClassification("lab_env", False, layer, "Skipped validation needs operator review before it can be fixed.")
+            return K8sClassification(False, layer, "Skipped validation depends on missing lab/runtime configuration.")
+        return K8sClassification(False, layer, "Skipped validation needs operator review before it can be fixed.")
 
     if any(marker in lowered for marker in GPU_CAPABILITY_MARKERS):
         if owned is False:
-            return K8sClassification("semantic_mismatch", False, layer, "GPU capability validation is outside the declared ISV scope.")
+            return K8sClassification(False, layer, "GPU capability validation is outside the declared ISV scope.")
         if owned is True:
-            return K8sClassification("product_bug", False, layer, "GPU capability is owned by the ISV but not exposed to Kubernetes.")
-        return K8sClassification("lab_env", False, layer, "GPU capability is absent or not exposed in the current run environment.")
+            return K8sClassification(False, layer, "GPU capability is owned by the ISV but not exposed to Kubernetes.")
+        return K8sClassification(False, layer, "GPU capability is absent or not exposed in the current run environment.")
 
     if layer == "network_policy":
         if owned is False:
-            return K8sClassification("semantic_mismatch", False, layer, "NetworkPolicy is outside the declared ISV scope.")
-        return K8sClassification("product_bug", False, layer, "NetworkPolicy validation failed; this is a platform capability gap if in scope.")
+            return K8sClassification(False, layer, "NetworkPolicy is outside the declared ISV scope.")
+        return K8sClassification(False, layer, "NetworkPolicy validation failed; this is a platform capability gap if in scope.")
 
     if "step_not_configured" in lowered or "not configured" in lowered:
         if owned is False:
-            return K8sClassification("semantic_mismatch", False, layer, "Validation step is not configured because the layer is out of scope.")
-        return K8sClassification("onboarding", True, layer, "Validation step is missing from the provider wrapper.")
+            return K8sClassification(False, layer, "Validation step is not configured because the layer is out of scope.")
+        return K8sClassification(True, layer, "Validation step is missing from the provider wrapper.")
 
     if owned is False:
-        return K8sClassification("semantic_mismatch", False, layer, "Gap belongs to a layer the ISV marked out of scope.")
+        return K8sClassification(False, layer, "Gap belongs to a layer the ISV marked out of scope.")
     if owned is True:
-        return K8sClassification("product_bug", False, layer, "Gap belongs to an ISV-owned K8s layer and needs implementation or platform remediation.")
-    return K8sClassification("lab_env", False, layer, "Ownership is unknown; collect ISV scope before attempting a fix.")
+        return K8sClassification(False, layer, "Gap belongs to an ISV-owned K8s layer and needs implementation or platform remediation.")
+    return K8sClassification(False, layer, "Ownership is unknown; collect ISV scope before attempting a fix.")

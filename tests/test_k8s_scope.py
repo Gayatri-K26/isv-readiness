@@ -22,7 +22,7 @@ class K8sScopeTests(unittest.TestCase):
             "No 'nvidia.com/gpu' resources found in node capacity",
             K8sScope(owns={"gpu_operator": True}),
         )
-        self.assertEqual(result.gap_type, "product_bug")
+        self.assertIn("owned by the ISV", result.note)
         self.assertEqual(result.layer, "gpu_operator")
         self.assertFalse(result.auto_fixable)
 
@@ -33,7 +33,7 @@ class K8sScopeTests(unittest.TestCase):
             "NetworkPolicy did not take effect within 30s",
             K8sScope(owns={"network_policy": False}),
         )
-        self.assertEqual(result.gap_type, "semantic_mismatch")
+        self.assertIn("outside the declared ISV scope", result.note)
         self.assertEqual(result.layer, "network_policy")
 
     def test_missing_ngc_key_skip_routes_to_lab_env(self) -> None:
@@ -43,7 +43,7 @@ class K8sScopeTests(unittest.TestCase):
             "NGC_API_KEY not set - NGC credentials required",
             K8sScope(owns={"workloads": True}),
         )
-        self.assertEqual(result.gap_type, "lab_env")
+        self.assertIn("lab/runtime configuration", result.note)
         self.assertEqual(result.layer, "workloads")
 
     def test_expected_skip_routes_to_semantic_mismatch(self) -> None:
@@ -53,7 +53,7 @@ class K8sScopeTests(unittest.TestCase):
             "No GPU nodes found",
             K8sScope(expected_skips=["K8sGpuLabelsCheck"]),
         )
-        self.assertEqual(result.gap_type, "semantic_mismatch")
+        self.assertIn("expected skip", result.note)
 
     def test_load_scope_file(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:

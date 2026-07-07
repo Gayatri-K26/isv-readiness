@@ -49,7 +49,7 @@ class StaticScanTests(unittest.TestCase):
 
         teardown = by_step[("teardown", "StepSuccessCheck")]
         self.assertEqual(teardown.status, "skipped")
-        self.assertEqual(teardown.gap_type, "semantic_mismatch")
+        self.assertFalse(teardown.remediation.auto_fixable)
 
     def test_cli_scan_and_report_rendering(self) -> None:
         from isv_readiness.cli import main
@@ -132,7 +132,6 @@ class StaticScanTests(unittest.TestCase):
         self.assertEqual(len(report.rows), 1)
         row = report.rows[0]
         self.assertEqual(row.status, "not_implemented")
-        self.assertEqual(row.gap_type, "onboarding")
         self.assertTrue(row.remediation.auto_fixable)
         self.assertIn("No Kubernetes provider wrapper", row.evidence.message)
         self.assertTrue((row.remediation.target or "").endswith("new-k8s.yaml"))
@@ -147,9 +146,8 @@ class StaticScanTests(unittest.TestCase):
             )
         )
 
-        row = next(row for row in report.rows if row.gap_type == "onboarding")
+        row = next(row for row in report.rows if "my-isv template" in row.evidence.message)
         self.assertEqual(row.status, "not_implemented")
-        self.assertEqual(row.gap_type, "onboarding")
         self.assertTrue(row.remediation.auto_fixable)
         self.assertIn("my-isv template", row.evidence.message)
 
@@ -176,7 +174,7 @@ class StaticScanTests(unittest.TestCase):
         self.assertEqual(row.step_name, "<validation>")
         self.assertEqual(row.validation_class, "<invalid>")
         self.assertEqual(row.status, "error")
-        self.assertEqual(row.gap_type, "semantic_mismatch")
+        self.assertFalse(row.remediation.auto_fixable)
         self.assertIn("tests.validations", row.evidence.message)
 
     def test_repeated_validation_instances_get_unique_gap_rows(self) -> None:
@@ -238,7 +236,7 @@ tests:
             self.assertEqual(exit_code, 1)
             data = json.loads(output.read_text(encoding="utf-8"))
 
-        self.assertEqual(data["rows"][0]["gap_type"], "onboarding")
+        self.assertTrue(data["rows"][0]["remediation"]["auto_fixable"])
         self.assertIn("No Kubernetes provider wrapper", data["rows"][0]["evidence"]["message"])
 
 

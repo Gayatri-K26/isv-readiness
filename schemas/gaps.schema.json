@@ -65,7 +65,6 @@
         "status",
         "detection",
         "stage",
-        "gap_type",
         "evidence",
         "remediation",
         "enrichment"
@@ -100,17 +99,6 @@
         },
         "stage": {
           "enum": ["coverage", "correctness"]
-        },
-        "gap_type": {
-          "enum": [
-            "not_implemented",
-            "provider_script",
-            "product_bug",
-            "lab_env",
-            "semantic_mismatch",
-            "lib_adoption",
-            "onboarding"
-          ]
         },
         "evidence": {
           "$ref": "#/$defs/evidence"
