@@ -8,6 +8,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -294,7 +295,10 @@ def _sync_source(
         if not allow_network:
             return _deferred(source, "Network access was not authorized.")
         raw = fetcher(source.location, {"User-Agent": "isv-readiness-gapctl/0.1"})
-        return _record(source, source.location, _redact_text(_decode_bytes(raw, source.location)))
+        text = _decode_bytes(raw, source.location)
+        if _looks_like_html(text):
+            text = _html_to_text(text)
+        return _record(source, source.location, _redact_text(text))
 
     paths = _source_paths(project, manifest_path, source)
     if source.kind == "local_tree":
@@ -406,17 +410,22 @@ def _cached_items(records: Sequence[ContextRecord], gap: GapRow, terms: set[str]
             continue
         text = record.content if isinstance(record.content, str) else json.dumps(record.content, indent=2, sort_keys=True)
         excerpt = _relevant_excerpt(text, terms, 12_000)
-        if excerpt:
-            items.append(
-                _item(
-                    record.source_id,
-                    record.kind,
-                    record.trust,
-                    record.origin,
-                    excerpt,
-                    f"source excerpt matched {gap.domain}, requirement, step, or validation terms",
-                )
+        if not excerpt:
+            continue
+        # Guidance earns its budget by matching the gap; authoritative sources
+        # (the API spec) are always included.
+        if record.trust != "authoritative" and not _relevance_score(excerpt, terms):
+            continue
+        items.append(
+            _item(
+                record.source_id,
+                record.kind,
+                record.trust,
+                record.origin,
+                excerpt,
+                f"source excerpt matched {gap.domain}, requirement, step, or validation terms",
             )
+        )
     return items
 
 
@@ -460,6 +469,49 @@ def _decode_bytes(raw: bytes, origin: str) -> str:
     if len(raw) > MAX_SOURCE_BYTES:
         raise ContextError(f"Fetched context exceeds {MAX_SOURCE_BYTES} bytes: {origin}")
     return raw.decode("utf-8")
+
+
+def _looks_like_html(text: str) -> bool:
+    head = text.lstrip()[:256].lower()
+    return head.startswith("<!doctype html") or head.startswith("<html") or "<head" in head
+
+
+def _html_to_text(html: str) -> str:
+    """Extract visible prose from a fetched HTML page.
+
+    Rendered documentation sites are almost entirely markup and script by
+    weight; only the visible text is guidance. Cache that, whole, instead of
+    the page source.
+    """
+    parser = _VisibleTextParser()
+    try:
+        parser.feed(html)
+        parser.close()
+    except Exception:
+        return html
+    text = " ".join(parser.chunks)
+    return re.sub(r"\s+", " ", text).strip() or html
+
+
+class _VisibleTextParser(HTMLParser):
+    _SKIP_TAGS = {"script", "style", "noscript", "template", "svg"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.chunks: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in self._SKIP_TAGS:
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self._SKIP_TAGS and self._skip_depth:
+            self._skip_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if not self._skip_depth and data.strip():
+            self.chunks.append(data.strip())
 
 
 def _redact_text(text: str) -> str:

@@ -156,6 +156,52 @@ class ContextTests(unittest.TestCase):
             self.assertEqual(raw["credentials"]["available_env"], ["ACME_TOKEN"])
             self.assertEqual(raw["items"][0]["trust"], "authoritative")
 
+    def test_html_sources_are_extracted_to_prose_and_zero_signal_guidance_is_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            workspace, project, manifest = _project(Path(tempdir), existing_provider=True)
+            provider = project.provider_root(manifest)
+            (provider / "scripts" / "vm").mkdir(parents=True)
+            (provider / "config").mkdir()
+            (provider / "scripts" / "vm" / "launch.py").write_text("# TODO\n", encoding="utf-8")
+            (provider / "config" / "vm.yaml").write_text("steps: []\n", encoding="utf-8")
+            (workspace / "openapi.yaml").write_text("paths: {}\n", encoding="utf-8")
+            report = _gap_report(provider)
+
+            def fetcher_relevant(url: str, headers: dict[str, str]) -> bytes:
+                del headers
+                if "api.github.com" in url:
+                    return b"[]"
+                return (
+                    b"<!DOCTYPE html><html><head><style>.x{color:red}</style>"
+                    b"<script>let a=1;</script></head><body>"
+                    b"<p>VM launch guidance: an instance must report its identifier.</p>"
+                    b"</body></html>"
+                )
+
+            cache = workspace / ".gapctl" / "cache-relevant"
+            sync_context_sources(project, manifest, cache, allow_network=True, fetcher=fetcher_relevant)
+            nsrg = json.loads((cache / "nsrg.json").read_text(encoding="utf-8"))
+            self.assertNotIn("<", nsrg["content"])
+            self.assertNotIn("color:red", nsrg["content"])
+            self.assertIn("VM launch guidance", nsrg["content"])
+            pack = build_context_pack(
+                project, manifest, report, gap_id="gap_0123456789ab", cache_dir=cache, environment={}
+            )
+            self.assertIn("nsrg", [item.source_id for item in pack.items])
+
+            def fetcher_boilerplate(url: str, headers: dict[str, str]) -> bytes:
+                del headers
+                if "api.github.com" in url:
+                    return b"[]"
+                return b"<!DOCTYPE html><html><body><p>Quantum basket weaving weekly.</p></body></html>"
+
+            cache = workspace / ".gapctl" / "cache-irrelevant"
+            sync_context_sources(project, manifest, cache, allow_network=True, fetcher=fetcher_boilerplate)
+            pack = build_context_pack(
+                project, manifest, report, gap_id="gap_0123456789ab", cache_dir=cache, environment={}
+            )
+            self.assertNotIn("nsrg", [item.source_id for item in pack.items])
+
 
 def _project(root: Path, *, existing_provider: bool = False):
     workspace = root / "workspace"

@@ -1080,3 +1080,19 @@ debugging aid, never a workflow gate. `auto` is the primary validate-phase
 flow; the decomposed context-pack/generate commands remain for debugging and
 adapter development. (No code change - the gates were already implemented
 this way; README prose updated to match.)
+
+## Step 19 - HTML Context Sources Cache Prose, Guidance Must Earn Its Budget
+
+### Decision
+
+- `context-sync` extracts visible text from fetched HTML pages (stdlib
+  HTMLParser; script/style/svg skipped) before redaction and caching. The
+  default NSRG page is a rendered docs app: 471k chars of markup carrying
+  7.6k chars of prose. The whole extracted document now fits in a pack
+  untruncated - "give the model the entire thing" at the information level,
+  not the markup level.
+- `_cached_items` skips non-authoritative excerpts whose relevance score
+  is zero. Previously a zero-signal source contributed its first 12k chars
+  (pure boilerplate for the NSRG page) to every pack - a quarter of the
+  default budget spent on nothing. Authoritative sources (the API spec)
+  are still always included.
