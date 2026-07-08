@@ -12,6 +12,7 @@ dependencies = [
 [project.scripts]
 gapctl = "isv_readiness.cli:main"
 gapctl-codex-generator = "isv_readiness.codex_generator:main"
+gapctl-claude-generator = "isv_readiness.claude_generator:main"
 
 [build-system]
 requires = ["setuptools>=69.0"]

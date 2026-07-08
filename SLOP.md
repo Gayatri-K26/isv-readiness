@@ -1096,3 +1096,23 @@ this way; README prose updated to match.)
   (pure boilerplate for the NSRG page) to every pack - a quarter of the
   default budget spent on nothing. Authoritative sources (the API spec)
   are still always included.
+
+## Step 20 - Claude Code Reference Generator Adapter
+
+### Decision
+
+Added `gapctl-claude-generator`, a second reference adapter for the generator
+command contract, driven by the first real engagement (BCM-as-ISV on a Krusty
+COD cluster) on a machine without the Codex CLI. Differences from the Codex
+adapter, both forced by Claude Code's surface:
+
+- No server-side constrained decoding: the adapter validates the candidate
+  against `request.output_schema` locally (Draft 2020-12) and retries once,
+  feeding the validator errors and the truncated previous response back.
+- No `--sandbox read-only`: isolation is `-p` print mode with
+  `--disallowedTools "*"`, `--max-turns 1`, and an empty temporary cwd - the
+  request on stdin is the model's entire world.
+
+The harness-side guarantees (env allowlist, no shell, one-JSON-object stdout,
+gap-id and context-pack hash binding) are unchanged and vendor-agnostic - the
+adapter stays dumb, generation.py stays the enforcement point.

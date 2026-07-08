@@ -59,8 +59,8 @@ Implemented:
 
 Not implemented yet:
 
-- Additional model-vendor-native adapters; the command contract and Codex
-  reference adapter are implemented.
+- Additional model-vendor-native adapters; the command contract and the Codex
+  and Claude Code reference adapters are implemented.
 - Pull-request submission; the change pipeline emits reviewed patches, not PRs.
 - Publication workflows (NVIDIA AI Cloud Ready's "publish" stage). The current
   boundary ends with a reproducible owned-scope validation bundle.
@@ -269,8 +269,13 @@ the selected domain config, and the exact Kubernetes wrapper.
 
 The Codex reference adapter invokes `codex exec` with `--ephemeral`,
 `--ignore-user-config`, `--sandbox read-only`, `--output-schema`, and an empty
-temporary working directory. Other model hosts can implement the same stdin /
-stdout contract and be selected with `--generator`.
+temporary working directory. The Claude Code reference adapter
+(`gapctl-claude-generator`) invokes `claude -p` with every tool disallowed, a
+single turn, and an empty temporary working directory; because Claude Code has
+no server-side constrained decoding, the adapter validates the change set
+against the request schema locally and retries once with the validator's
+errors. Other model hosts can implement the same stdin / stdout contract and
+be selected with `--generator`.
 
 Apply a successful manifest only after reviewing the patch:
 
