@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -96,6 +97,7 @@ def generate_with_claude(
             if candidate is None:
                 failures = ["Response did not contain one JSON object."]
             else:
+                _fill_content_hashes(candidate)
                 errors = sorted(validator.iter_errors(candidate), key=lambda error: list(error.path))
                 if not errors:
                     return candidate
@@ -111,7 +113,9 @@ def _initial_prompt(request: dict[str, Any]) -> str:
     return (
         "You are a change-set generator adapter for gapctl. Read the JSON request below. "
         "Respond with exactly one JSON object that validates against request.output_schema. "
-        "No markdown fences, no commentary, no explanation - only the JSON object.\n\n"
+        "No markdown fences, no commentary, no explanation - only the JSON object. "
+        "For every change, set content_sha256 to 64 zeros; the adapter computes the real "
+        "hash over your content field.\n\n"
         + json.dumps(request, sort_keys=True, ensure_ascii=False)
     )
 
@@ -125,6 +129,21 @@ def _retry_prompt(request: dict[str, Any], previous: str, failures: Sequence[str
         "object that validates against request.output_schema - nothing else.\n\n"
         + json.dumps(request, sort_keys=True, ensure_ascii=False)
     )
+
+
+def _fill_content_hashes(candidate: dict[str, Any]) -> None:
+    """Compute real per-file content hashes over the model's output.
+
+    A language model cannot compute SHA-256, so the adapter owns the
+    transport-integrity hash: it is a checksum of what the adapter emits,
+    verified again by the harness at propose/apply time.
+    """
+    changes = candidate.get("changes")
+    if not isinstance(changes, list):
+        return
+    for change in changes:
+        if isinstance(change, dict) and isinstance(change.get("content"), str):
+            change["content_sha256"] = hashlib.sha256(change["content"].encode("utf-8")).hexdigest()
 
 
 def _result_text(stdout: str) -> str:

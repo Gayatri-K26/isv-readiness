@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -92,7 +93,23 @@ def generate_with_codex(
             raise CodexGeneratorError("Codex final message was not one JSON object.") from exc
     if not isinstance(result, dict):
         raise CodexGeneratorError("Codex final message must be a JSON object.")
+    _fill_content_hashes(result)
     return result
+
+
+def _fill_content_hashes(candidate: dict[str, Any]) -> None:
+    """Compute real per-file content hashes over the model's output.
+
+    A language model cannot compute SHA-256; the adapter owns the
+    transport-integrity hash, and the harness verifies it again at
+    propose/apply time.
+    """
+    changes = candidate.get("changes")
+    if not isinstance(changes, list):
+        return
+    for change in changes:
+        if isinstance(change, dict) and isinstance(change.get("content"), str):
+            change["content_sha256"] = hashlib.sha256(change["content"].encode("utf-8")).hexdigest()
 
 
 def _default_runner(

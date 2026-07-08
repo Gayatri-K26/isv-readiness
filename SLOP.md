@@ -1116,3 +1116,16 @@ adapter, both forced by Claude Code's surface:
 The harness-side guarantees (env allowlist, no shell, one-JSON-object stdout,
 gap-id and context-pack hash binding) are unchanged and vendor-agnostic - the
 adapter stays dumb, generation.py stays the enforcement point.
+
+### Amendment (first real generation run)
+
+The request rules asked the generator to compute each change's
+content_sha256 - impossible for a language model, which can only invent a
+plausible hash; the harness integrity check correctly rejected the first
+real change set. Both adapters now compute the per-file hash over the
+model's content themselves (the hash is transport integrity from adapter
+to harness, re-verified at propose/apply - not model proof-of-work), and
+the Claude prompt tells the model to emit 64 zeros as a placeholder.
+Also noted: on macOS the Claude CLI's Keychain lookup needs USER/LOGNAME,
+which the harness env allowlist strips - pass
+`--generator-env USER --generator-env LOGNAME`.

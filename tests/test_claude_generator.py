@@ -50,6 +50,27 @@ class ClaudeGeneratorTests(unittest.TestCase):
         self.assertIn("gap_test", seen["prompt"])
         self.assertTrue(seen["cwd_was_empty"])
 
+    def test_adapter_computes_real_content_hashes_over_model_output(self) -> None:
+        import hashlib
+
+        content = "print('hello bcm')\n"
+
+        def runner(command, cwd, prompt, timeout):
+            del cwd, prompt, timeout
+            candidate = {
+                "schema_version": "0.1.0",
+                "changes": [
+                    {"op": "replace", "path": "scripts/x.py", "content": content, "content_sha256": "0" * 64}
+                ],
+            }
+            return subprocess.CompletedProcess(command, 0, json.dumps({"result": json.dumps(candidate)}), "")
+
+        result = generate_with_claude({"output_schema": SCHEMA}, runner=runner)
+        self.assertEqual(
+            result["changes"][0]["content_sha256"],
+            hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        )
+
     def test_markdown_fenced_result_is_unwrapped(self) -> None:
         expected = {"schema_version": "0.1.0", "changes": []}
 
