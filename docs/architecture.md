@@ -17,7 +17,7 @@ flowchart TD
     Docs[Product docs, API specs, repos] --> ProfileBuilder[Solution discovery]
     Issues[ai-cloud-validation GitHub issues] --> ContextCache[Redacted context cache]
     NSRG[NSRG public guidance] --> ContextCache
-    MCP[Authorized MCP exports] --> ContextCache
+    Runs[Recorded run artifacts] --> ContextCache
     ISV[ISV answers and ownership decisions] --> ProfileBuilder
     Project --> ProfileBuilder
     ProfileBuilder --> Profile[solution-profile.yaml]
@@ -90,6 +90,19 @@ own validation. Composing several validated single-owner profiles into an
 integrated IaaS/CaaS/PaaS full-stack claim is a separate NCP/integrator concern
 and is out of scope for a single ISV here.
 
+Steps 4-6 can be agent-drafted instead of hand-authored. `gapctl catalog`
+distills the pinned suites into the per-domain mapping target (checks, test
+ids, steps) through the isvctl plan contract; `gapctl qualify-draft` packs
+that catalog with the API spec, guidance, and latest recorded runs, then runs
+a generator adapter against the solution-profile schema. The draft is
+deterministically hardened — always `profile_status: draft` in the `qualify`
+stage, domain set exactly equal to the declared scope, coverage `covered`
+only with packed evidence — and drafted-covered domains whose latest recorded
+run failed are reported as empirical conflicts. Ratification stays human: the
+SME edits the draft (`gapctl profile --draft` shows the per-domain diff and
+conflicts) and flips `profile_status` past `draft`. The model proposes the
+mapping; it never decides ownership or scope.
+
 ### Validate
 
 1. Scaffold or discover provider configs.
@@ -118,7 +131,7 @@ gap. The controller eventually processes the full selected domain.
 - the ISV-owned domains for this engagement
 - provider API endpoints, API specification references, and credential
   environment-variable names
-- declared local, web, GitHub issue, and MCP-export context sources
+- declared local, web, and GitHub issue context sources
 - live-run, cleanup, and retry policy
 
 Bootstrap begins the qualify phase; the `journey.stage` field in the solution
@@ -130,18 +143,26 @@ profiles.
 
 ### Context Pack
 
-Context collection and candidate generation are separate. Network access is an
-explicit synchronization action; generation consumes a local, redacted cache.
-For one selected gap, the pack contains the current provider target/config,
-scanner evidence, relevant API operations, bounded reference excerpts, and only
-the GitHub issues or MCP-exported passages matching the gap terms.
+Context collection and candidate generation are separate. Synchronization
+always fetches declared network sources (an unreachable optional source
+degrades to `missing`); generation consumes a local, redacted cache. For one
+selected gap, the pack contains the current provider target/config, scanner
+evidence, relevant API operations, bounded reference excerpts, the latest
+recorded run artifacts for the gap's domain, and only the GitHub issues
+matching the gap terms.
 
 Source precedence is explicit:
 
-1. Installed validation contracts and provider-owned API specifications.
-2. Provider source/configuration and approved reference implementations.
-3. Public NSRG architecture guidance.
-4. GitHub issues and MCP/Confluence exports as advisory context.
+1. Recorded run artifacts (`.gapctl/runs/<run-id>/`) as empirical evidence —
+   observed runtime results override every declared source.
+2. Installed validation contracts and provider-owned API specifications.
+3. Provider source/configuration and approved reference implementations.
+4. Public NSRG architecture guidance.
+5. GitHub issues as advisory context.
+
+Authoritative sources are never excerpted — the generator sees the whole
+contract, bounded only by the pack budget. Reference and advisory sources are
+relevance-excerpted and must match the selected scope to earn their budget.
 
 Lower-trust sources cannot override scope, ownership, validation outcomes, or
 allowed paths. Cache records and context items are hashed; common credential
@@ -383,6 +404,5 @@ solution supplies them.
 | Persistent review-gated agent runner | Implemented |
 | Sanitized evidence bundle | Implemented |
 | Additional model-vendor generator adapters | Optional next |
-| MCP enrichment adapters | Later, optional |
 | Pull-request creation | Optional next |
 | Publication workflow | Deferred |

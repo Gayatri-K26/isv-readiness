@@ -18,8 +18,9 @@ Implemented:
   one domain or many.
 - Pinned `isv-project.yaml` workspace bootstrap with the ISV-owned domains,
   API/spec references, and execution policy.
-- Redacted, network-opt-in context synchronization for local files, API specs,
-  public documentation, GitHub issues, and host-exported MCP content.
+- Redacted context synchronization for local files, API specs, public
+  documentation, and GitHub issues; declared network sources are always
+  fetched, and an unreachable optional source degrades to `missing`.
 - Bounded per-gap context packs with source trust, hashes, credential-name-only
   availability, and relevance filtering.
 - Explicit command-based generator adapter with a strict JSON/stdin contract
@@ -118,6 +119,35 @@ Reference profiles are discovery baselines, not product certifications. They
 intentionally leave tenant control-plane, IAM, image-registry, SDN, and security
 ownership unresolved until the integrated stack is confirmed.
 
+### 1.5. Draft the profile from evidence (optional, agent-assisted)
+
+Instead of hand-authoring the profile, distill the pinned suites into the
+per-domain mapping target and let a generator adapter draft an
+evidence-grounded profile for SME ratification:
+
+```bash
+gapctl catalog --project isv-project.yaml
+gapctl qualify-draft \
+  --project isv-project.yaml \
+  --generator gapctl-claude-generator
+```
+
+The catalog records every check, test id, and step each declared domain
+demands. The draft is deterministically hardened: it is always
+`profile_status: draft` in the `qualify` stage, its domains must exactly match
+the declared scope, and coverage may be `covered` only where the packed API
+spec or recorded run evidence supports it — everything else must be `unknown`
+or `gap` (`unknown` blocks `validation_ready` until the SME resolves it).
+Domains drafted `covered` whose latest recorded run failed are reported as
+empirical conflicts and fail the command.
+
+Ratification is manual and human: review the draft, edit it, move it into
+place, and set `profile_status` past `draft`.
+
+```bash
+gapctl profile --in solution-profile.yaml --draft solution-profile.draft.yaml
+```
+
 ### 2. Onboard a provider
 
 For a complete provider scaffold, choose domains directly:
@@ -200,26 +230,17 @@ found; it does not replace a real validation run.
 
 ### 5. Synchronize context and build one minimal context pack
 
-Declared network sources are never fetched implicitly:
+Declared sources — including network sources — are always synchronized; an
+unreachable optional source records as `missing` instead of blocking:
 
 ```bash
 gapctl context-sync \
-  --project isv-project.yaml \
-  --allow-network
+  --project isv-project.yaml
 ```
 
-This can cache relevant public NSRG material and open
+This caches relevant public NSRG material and open
 `NVIDIA/ai-cloud-validation` GitHub issues. `GITHUB_TOKEN`, when present, is
-used only in the request header and is not cached. A host agent with an
-authorized MCP/Confluence connector can export selected material and import it
-through the same redaction boundary:
-
-```bash
-gapctl context-import \
-  --project isv-project.yaml \
-  --source-id nvidia_ai_cloud_ready \
-  --in /path/to/host-export.json
-```
+used only in the request header and is not cached.
 
 Build the bounded input for one selected row:
 
@@ -233,8 +254,11 @@ gapctl context-pack \
 
 Executable validation contracts and provider API specifications are
 authoritative. Reference implementations and NSRG material are guidance.
-GitHub issues and MCP exports are advisory and cannot change scope, ownership,
-or pass/fail results.
+GitHub issues are advisory and cannot change scope, ownership, or pass/fail
+results. Prior-run artifacts recorded under `.gapctl/runs/<run-id>/` are
+empirical evidence: the latest run for the gap's domain enters the context
+pack ahead of every declared source, because an observed runtime result
+overrides what any spec or doc claims.
 
 Run an explicitly chosen model adapter against the pack. The pack is the
 generator's complete, self-sufficient input — no human review sits between
@@ -380,6 +404,11 @@ gapctl scan \
   --run \
   --out vm-gaps.json
 ```
+
+Each `--run` records its artifacts under `.gapctl/runs/<run-id>/` (beside
+`--out`, or under `--artifacts-dir` when given) as `junit.xml`, `isvctl.log`,
+and a `run.json` metadata record. The latest run per domain feeds subsequent
+context packs as empirical evidence.
 
 Or ingest artifacts captured by the ISV:
 

@@ -1129,3 +1129,134 @@ the Claude prompt tells the model to emit 64 zeros as a placeholder.
 Also noted: on macOS the Claude CLI's Keychain lookup needs USER/LOGNAME,
 which the harness env allowlist strips - pass
 `--generator-env USER --generator-env LOGNAME`.
+
+## Step 21 - Simplified Context Sources, Empirical Runs Outrank Declared Claims
+
+### Decision
+
+Trimmed the context-source model to what an ISV can actually reach and made
+runtime evidence first-class, driven by the qualify-drafting design review:
+
+- **Removed `mcp_export` entirely** (default `nvidia_ai_cloud_ready` source,
+  schema kind, `context-import` command, `import_context_source`). The ISV
+  runtime never has NVIDIA MCP access; a source only the builder can populate
+  violated the two-environment boundary and earned its complexity nowhere.
+- **Network sync is no longer opt-in.** `context-sync --allow-network` is
+  gone; declared network sources (API spec URL, NSRG, GitHub issues) are
+  always fetched, and an unreachable optional source degrades to a `missing`
+  record instead of a `deferred` gate. The prior flag mostly produced stale
+  caches in practice.
+- **New `empirical` trust tier above `authoritative`.** `scan --run` now
+  records each execution under `.gapctl/runs/<run-id>/` (`junit.xml`,
+  `isvctl.log`, `run.json`; timestamp-prefixed ids so lexicographic order is
+  chronological). `build_context_pack` injects the latest run for the gap's
+  domain ahead of every declared source. Rationale: an observed runtime
+  result overrides what any spec or doc claims — this is the mechanism that
+  will let an agent-drafted solution profile be empirically demoted
+  (covered → gap) instead of trusted.
+
+The remaining source set: ai-cloud-validation checkout + provider API spec
+(authoritative), reference impls + NSRG (reference), GitHub issues
+(advisory), recorded runs (empirical). Run logs are redacted on write like
+live-run artifacts.
+
+## Step 22 - Agent-Drafted Qualify Profiles, SME-Ratified
+
+### Decision
+
+Implemented the qualify-drafting pipeline on the Step 21 substrate, reusing
+existing contracts instead of new machinery:
+
+- **Catalog (mapping target).** `gapctl catalog` distills the pinned suites
+  into per-domain checks/test-ids/steps via the existing
+  `IsvctlAdapter.plan()` contract (`isvctl catalog list --json` +
+  `test run --dry-run`) — upstream already joins catalog metadata to suite
+  wiring; we only reshape. Suite filenames are an explicit 10-entry map
+  (upstream mixes `bare_metal.yaml` with `control-plane.yaml`).
+- **Qualify pack.** `build_qualify_pack` is profile-scoped (all declared
+  domains at once): catalog entries (authoritative) + cached API spec/NSRG/
+  issues + latest recorded run per domain (empirical, ranked first). Shares
+  the per-gap pack's budget/redaction/trust machinery via extracted helpers
+  (`_fit_budget`, generalized `_cached_items`/`_run_items`).
+- **Draft.** `gapctl qualify-draft` sends the pack to any generator adapter
+  with `solution-profile.schema.json` as `output_schema` (the adapters were
+  already schema-generic; `generation.py` grew a shared `dispatch_generator`
+  so it stays the single enforcement point). The draft is deterministically
+  hardened, never trusted: `profile_status` forced to `draft`, journey forced
+  to `qualify/in_progress`, drafted domain set must exactly equal declared
+  scope (scope invention is an error, not a warning).
+- **Ratify.** Manual and human, by design: `gapctl profile --draft` prints a
+  per-domain diff plus empirical conflicts (drafted `covered` whose latest
+  recorded run failed → exit 1). The SME edits the draft, moves it into
+  place, and flips `profile_status` — the existing `unknown`-blocks-
+  `validation_ready` gate does the rest.
+
+Boundary kept: the model proposes the capability→domain mapping; it never
+decides ownership or scope, and a failing run outranks any drafted claim.
+
+## Step 23 - Authoritative Sources Enter Packs Whole
+
+### Decision
+
+Driven by the BCM dress rehearsal: the 12k per-source relevance excerpt was
+silently trimming the ISV's own API guide — the one document the drafting
+generator must see completely. Two changes:
+
+- `_cached_items` no longer excerpts `authoritative` records; the pack budget
+  (`_fit_budget`, trust-ordered) remains the only bound. Reference/advisory
+  sources keep the 12k excerpt + must-match-scope rule.
+- `qualify-draft`/`build_qualify_pack` default budget raised 48k → 120k: a
+  qualify pack spans every declared domain (catalog alone ~40k for four
+  domains) where the 48k default was sized for single-gap fix packs, which
+  keep it.
+
+Considered and rejected: removing the budget entirely ("assume big-context
+models"). The adapter contract must stay portable to small/internal ISV
+models, scarcity is what makes trust ordering a guarantee, and the validate
+loop builds packs per gap per iteration where unbounded packs multiply cost.
+
+### Amendment (Step 22, found during the BCM dress rehearsal)
+
+`scope_summary` treated every non-`covered`/`test` row as blocking, which made
+`out_of_scope`+`skip` capabilities block `validation_ready` forever — there was
+no way to express "we own this domain, minus the corner this environment can
+never provide." Extracted `_blocks_readiness`: `covered`+`test` passes,
+`out_of_scope`+`skip` passes (a signed scope decision, not a deficiency),
+everything else (gaps, unknowns, half-pairings like `out_of_scope`+`test`)
+still blocks. The qualify-draft prompt teaches the model the same distinction.
+
+### Amendment (Step 22, second dress-rehearsal find): Slurm wrapper onboarding
+
+The first engagement's wrapper solution covered Kubernetes only; Slurm is the
+same unified-suite pattern upstream (suites/slurm.yaml carries its own
+commands, scaffold ships scripts/slurm/ but no config), so onboarding a slurm
+domain left one honest-but-noisy scan error: "No provider config found for
+domain 'slurm'". `execute_provider_onboarding` now writes
+`config/slurm.yaml` (imports the suite, points commands at the provider's own
+scripts — the k3s.yaml pattern) when the domain is selected and the file is
+absent; hand-authored configs are preserved on rerun. No scanner changes:
+config/<domain>.yaml is already a resolution candidate.
+
+### Amendment (Step 22, third dress-rehearsal find): agent may wire missing steps
+
+The scanner marked "Provider config does not wire a command for this required
+step" rows non-auto-fixable, parking them for a human even though (a) the
+wiring lives in the selected domain's own config — already inside the guarded
+fix surface `_authorize_provider_path` permits — and (b) profile routing
+already answers the authority question (implement_or_fix_adapter only fires on
+SME-signed covered+test ISV-owned rows). Product decision (GK): the pipeline
+exists to do the ISV's clerical work; the human gate belongs at patch review,
+not at YAML wiring. `auto_fixable` is now true for unwired-step rows with the
+domain config as the primary target — `_require_primary_target` forces the
+generated change set to actually wire the step. All other parking (masked
+failures, scope decisions, external adapters) is unchanged.
+
+Also found live: seven bare_metal steps (governance/health/IB/sanitization)
+are demanded by the suite but wired in NO provider — not even the azure
+reference. Filed as upstream feedback; locally the profile routes the
+IB/GPU-sanitization ones out_of_scope and the agent now wires the rest.
+
+Plus an honesty fix in auto's review gate: parked auto-fixable gaps now
+distinguish "not attempted within this run's iteration budget" and "N failed
+attempts, retry budget remains" from the previously blanket (and usually
+false) "attempts exhausted".
