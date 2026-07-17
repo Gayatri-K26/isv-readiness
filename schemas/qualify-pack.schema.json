@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "gapctl qualify pack",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "purpose", "project", "constraints", "items", "budget"],
+  "properties": {
+    "schema_version": {"const": "0.1.0"},
+    "purpose": {"const": "qualify_draft"},
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "declared_domains", "validation_commit", "api_interfaces"],
+      "properties": {
+        "provider": {"type": "string", "minLength": 1},
+        "declared_domains": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1},
+        "validation_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "api_interfaces": {"type": "array", "items": {"type": "object"}}
+      }
+    },
+    "constraints": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1},
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_id", "kind", "trust", "origin", "sha256", "content", "truncated", "relevance"],
+        "properties": {
+          "source_id": {"type": "string", "minLength": 1},
+          "kind": {"type": "string", "minLength": 1},
+          "trust": {"enum": ["empirical", "authoritative", "reference", "advisory"]},
+          "origin": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "content": {"type": "string"},
+          "truncated": {"type": "boolean"},
+          "relevance": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_chars", "used_chars", "omitted_items"],
+      "properties": {
+        "max_chars": {"type": "integer", "minimum": 4000},
+        "used_chars": {"type": "integer", "minimum": 0},
+        "omitted_items": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}
