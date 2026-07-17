@@ -75,6 +75,7 @@ def scan_dynamic_artifacts(options: DynamicArtifacts) -> list[GapRow]:
             message,
             options.static_rows,
         )
+        source_row = _metadata_row(validation_class, step_name, options.static_rows)
         auto_fixable, classification_note = _classify(status, message, reason)
         rows.append(
             _dynamic_row(
@@ -90,6 +91,8 @@ def scan_dynamic_artifacts(options: DynamicArtifacts) -> list[GapRow]:
                 auto_fixable=auto_fixable,
                 stderr_excerpt=_log_excerpt(log_text, validation_class),
                 classification_note=classification_note,
+                requirement_id=source_row.requirement_id if source_row else None,
+                labels=source_row.labels if source_row else (),
             )
         )
     return sorted(
@@ -169,6 +172,21 @@ def _unique_category(rows: list[GapRow]) -> str | None:
     return next(iter(categories)) if len(categories) == 1 else None
 
 
+def _metadata_row(
+    validation_class: str | None,
+    step_name: str,
+    static_rows: tuple[GapRow, ...],
+) -> GapRow | None:
+    candidates = [
+        row
+        for row in static_rows
+        if _same_validation(validation_class, row.validation_class)
+    ]
+    exact = [row for row in candidates if row.step_name == step_name]
+    matches = exact or candidates
+    return matches[0] if len(matches) == 1 else None
+
+
 def _classify(status: Status, message: str, reason: str | None) -> tuple[bool, str]:
     if status == "pass":
         return False, "Validation passed; no remediation route is needed."
@@ -212,6 +230,8 @@ def _dynamic_row(
     auto_fixable: bool,
     stderr_excerpt: str | None,
     classification_note: str = "JUnit artifact could not be consumed.",
+    requirement_id: str | None = None,
+    labels: tuple[str, ...] = (),
 ) -> GapRow:
     spine = "|".join(
         [options.domain, step_name, validation_class or "", "", "dynamic", testcase_name]
@@ -229,11 +249,11 @@ def _dynamic_row(
         domain=options.domain,
         step_name=step_name,
         validation_class=validation_class,
-        requirement_id=None,
+        requirement_id=requirement_id,
         milestone=None,
         status=status,
         detection="dynamic",
-        stage="correctness" if status in {"fail", "error"} else "coverage",
+        stage="coverage" if status in {"skipped", "not_implemented"} else "correctness",
         evidence=Evidence(
             message=message,
             validation_message=validation_message,
@@ -250,6 +270,7 @@ def _dynamic_row(
             aws_reference=None,
         ),
         enrichment=enrichment,
+        labels=labels,
     )
 
 

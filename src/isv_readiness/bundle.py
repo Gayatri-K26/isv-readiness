@@ -12,8 +12,10 @@ from typing import Any
 import jsonschema
 
 from isv_readiness.agent import load_agent_state, project_identity
+from isv_readiness.decision import validation_profile_issues
 from isv_readiness.project import load_project
 from isv_readiness.schema import load_schema
+from isv_readiness.solution_profile import load_solution_profile
 
 BUNDLE_VERSION = "0.1.0"
 ARTIFACT_PREFIXES = {
@@ -82,6 +84,14 @@ def build_bundle(
 ) -> BundleManifest:
     project_path = project_path.expanduser().resolve()
     project = load_project(project_path)
+    profile = (
+        load_solution_profile(project.resolve_path(project_path, project.assessment.profile))
+        if project.assessment.profile
+        else None
+    )
+    profile_issues = validation_profile_issues(profile, project.assessment.domains)
+    if profile_issues:
+        raise BundleError("Validation profile is not ready: " + "; ".join(profile_issues))
     output_dir = output_dir.expanduser().resolve()
     if output_dir.exists():
         raise BundleError(f"Refusing to overwrite existing bundle directory: {output_dir}")

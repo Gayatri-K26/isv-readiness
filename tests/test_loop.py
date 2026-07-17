@@ -19,6 +19,7 @@ def _row(
     status: str = "not_implemented",
     action: str = "implement_or_fix_adapter",
     auto_fixable: bool = True,
+    labels: list[str] | None = None,
 ) -> dict:
     return {
         "id": gap_id,
@@ -27,6 +28,7 @@ def _row(
         "validation_class": "InstanceCreatedCheck",
         "requirement_id": None,
         "milestone": None,
+        "labels": labels or [],
         "status": status,
         "detection": "static",
         "stage": "coverage",
@@ -45,7 +47,14 @@ def _row(
             "rerun_command": "isvctl test run -f config/vm.yaml",
             "aws_reference": None,
         },
-        "enrichment": {"solution_profile": {"action": action}},
+        "enrichment": {
+            "solution_profile": {
+                "action": action,
+                "owned": True,
+                "profile_status": "reviewed",
+                "journey_stage": "validate",
+            }
+        },
     }
 
 
@@ -89,6 +98,20 @@ class LoopControllerTests(unittest.TestCase):
         self.assertEqual(state.route, "request_scope_decision")
         self.assertEqual(state.unresolved_count, 2)
 
+    def test_minimum_requirement_breaks_ties_between_fixable_rows(self) -> None:
+        state = advance_loop(
+            _report(
+                [
+                    _row("gap_aaa_optional"),
+                    _row("gap_zzz_minimum", labels=["vm", "min_req"]),
+                ]
+            ),
+            domain="vm",
+        )
+
+        self.assertEqual(state.status, "ready")
+        self.assertEqual(state.selected_gap_id, "gap_zzz_minimum")
+
     def test_retry_budget_requires_explicit_attempt_records(self) -> None:
         report = _report([_row("gap_retry000001")])
         initial = advance_loop(report, domain="vm", max_attempts=2)
@@ -123,6 +146,7 @@ class LoopControllerTests(unittest.TestCase):
                     _row("gap_pass0000001", status="pass"),
                     _row(
                         "gap_skip0000001",
+                        status="skipped",
                         action="skip_with_rationale",
                         auto_fixable=False,
                     ),

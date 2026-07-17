@@ -6,7 +6,9 @@ tests:
     instance_created:
       step: launch_instance
       checks:
-        InstanceCreatedCheck: {}
+        InstanceCreatedCheck:
+          test_id: VM01-01
+          labels: [vm, min_req]
 
     list_instances:
       step: list_instances

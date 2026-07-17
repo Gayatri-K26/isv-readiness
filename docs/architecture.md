@@ -104,8 +104,9 @@ stage, domain set exactly equal to the declared scope, coverage `covered`
 only with packed evidence — and drafted-covered domains whose latest recorded
 run failed are reported as empirical conflicts. Ratification stays human: the
 SME edits the draft (`gapctl profile --draft` shows the per-domain diff and
-conflicts) and flips `profile_status` past `draft`. The model proposes the
-mapping; it never decides ownership or scope.
+conflicts), sets `profile_status` to `reviewed` or `confirmed`, and advances
+`journey.stage` to `validate`. The model proposes the mapping; it never decides
+ownership or scope.
 
 ### Validate
 
@@ -114,8 +115,8 @@ mapping; it never decides ownership or scope.
 3. Run static coverage scanning.
 4. Select one domain and execute or ingest its dynamic artifacts.
 5. Resolve every row against the solution profile.
-6. Route adapter work, external handoffs, evidence requests, product gaps,
-   skips, and unresolved scope separately.
+6. Apply one deterministic decision to each raw result: whether it blocks,
+   whether a candidate edit is allowed, and which profile action owns it.
 7. Fix and rerun one selected gap at a time until all required rows are green or
    have approved dispositions.
 8. Freeze versions, configuration, hardware inventory, plan fingerprints,
@@ -216,15 +217,28 @@ This design tolerates suite iteration without importing private parser classes.
 
 `gaps.json` is flat deterministic truth plus optional enrichment. A row carries:
 
-- domain, provider step, validation class, requirement, and milestone spine
+- domain, provider step, validation class, upstream test ID, and labels
 - static or dynamic detection
 - coverage or correctness stage
 - status and evidence
 - remediation target and exact rerun command
 - optional profile responsibility and action
 
-The profile cannot change a validation result. It can remove automatic edit
-permission when ownership or scope does not allow the agent to patch.
+The profile cannot change a validation result. One shared policy combines the
+raw status with the reviewed action:
+
+- `pass` is non-blocking;
+- `fail`, `error`, and `not_implemented` block unless an unowned capability has
+  an explicit skip disposition;
+- `skipped` blocks unless the profile explicitly says `skip_with_rationale`;
+- generation additionally requires ISV ownership, a reviewed/confirmed profile
+  in the validate stage, `implement_or_fix_adapter`, and a scanner-authorized
+  target.
+
+The legacy nullable `milestone` field remains in schema version `0.1.0` for
+report compatibility, but does not participate in decisions because upstream
+does not provide a milestone contract. It should be removed only with a schema
+version migration, not replaced with inferred data.
 
 ## Agent Actions
 
@@ -290,8 +304,9 @@ is profile data (fill in the input, set coverage to `covered`), not ISV code.
 DSX Air, by contrast, is a plumbing/workflow simulation and is not evidence of
 provider qualification.
 
-Live execution has two independent gates: reviewed project policy and an
-explicit `--run-live` invocation. The runner verifies the checkout still
+Live execution has three independent gates: a reviewed/confirmed solution
+profile in the validate stage, reviewed project policy, and an explicit
+`--run-live` invocation. The runner verifies the checkout still
 matches the pinned commit, constructs the command from the supported `isvctl`
 interface, passes only declared environment inputs, disables result upload,
 redacts the captured log, and ingests JUnit back into the gap model.
@@ -311,11 +326,13 @@ selected scope is green and a final full-domain live run passes.
 ## Deterministic Loop
 
 The implemented controller consumes successive `gaps.json` reports and records
-explicit attempts in `loop-state.json`. It selects one row, blocks before unsafe
-routes, enforces a per-gap retry budget, and reports `ready`, `blocked`, or
-`complete`. It deliberately does not execute remediation strings or apply
-patches. `agent-run` orchestrates these existing decisions while preserving
-separate patch-review, application, and live-execution gates.
+explicit attempts in `loop-state.json`. It uses the same gap decision function
+as auto, live success, status, and bundle authorization; selects scope blockers
+before edit routes; prefers editable and `min_req` rows within a route; enforces
+a per-gap retry budget; and reports `ready`, `blocked`, or `complete`. It
+deliberately does not execute remediation strings or apply patches. `agent-run`
+orchestrates these existing decisions while preserving separate patch-review,
+application, and live-execution gates.
 
 The complete target state machine is:
 

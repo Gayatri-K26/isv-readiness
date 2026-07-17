@@ -9,9 +9,8 @@ from typing import Any
 
 import jsonschema
 
+from isv_readiness.decision import decide_gap
 from isv_readiness.fixes import (
-    ALLOWED_ACTION,
-    FIXABLE_STATUSES,
     FixGuardrailError,
     select_gap,
     validate_candidate_content,
@@ -214,17 +213,9 @@ def canonical_sha256(value: Any) -> str:
 
 
 def _authorize_selected_gap(row: dict[str, Any], gap_id: str) -> None:
-    remediation = row.get("remediation") or {}
-    routing = (row.get("enrichment") or {}).get("solution_profile") or {}
-    if row.get("status") not in FIXABLE_STATUSES:
-        raise FixGuardrailError(f"Gap {gap_id} has non-fixable status '{row.get('status')}'.")
-    if routing.get("action") != ALLOWED_ACTION:
-        action = routing.get("action", "<missing>")
-        raise FixGuardrailError(f"Gap {gap_id} routes to '{action}', not '{ALLOWED_ACTION}'.")
-    if remediation.get("auto_fixable") is not True:
-        raise FixGuardrailError(f"Gap {gap_id} is not marked auto_fixable by the scanner.")
-    if not isinstance(remediation.get("target"), str) or not remediation["target"]:
-        raise FixGuardrailError(f"Gap {gap_id} has no remediation target.")
+    decision = decide_gap(row)
+    if not decision.edit_eligible:
+        raise FixGuardrailError(f"Gap {gap_id} is not eligible for generation: {decision.reason}")
 
 
 def _authorize_provider_path(path: Path, domain: str) -> None:

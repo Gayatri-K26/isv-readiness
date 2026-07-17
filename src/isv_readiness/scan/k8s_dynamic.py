@@ -22,6 +22,7 @@ class K8sDynamicArtifacts:
     setup_json_path: Path | None = None
     config_path: Path | None = None
     scope: K8sScope = field(default_factory=K8sScope)
+    static_rows: tuple[GapRow, ...] = ()
 
 
 def scan_k8s_artifacts(options: K8sDynamicArtifacts) -> list[GapRow]:
@@ -110,6 +111,7 @@ def _scan_junit(options: K8sDynamicArtifacts, log_text: str | None) -> list[GapR
             continue
         seen.add(key)
         classification = classify_k8s_gap(validation_class, status, message, options.scope)
+        source_row = _metadata_row(validation_class, step_name, options.static_rows)
         rows.append(
             _dynamic_row(
                 options,
@@ -124,6 +126,8 @@ def _scan_junit(options: K8sDynamicArtifacts, log_text: str | None) -> list[GapR
                 classification_note=classification.note,
                 stderr_excerpt=_log_excerpt(log_text, validation_class),
                 junit_reason=junit_reason,
+                requirement_id=source_row.requirement_id if source_row else None,
+                labels=source_row.labels if source_row else (),
             )
         )
     return rows
@@ -204,6 +208,23 @@ def _target_for_classification(options: K8sDynamicArtifacts, auto_fixable: bool)
     return None
 
 
+def _metadata_row(
+    validation_class: str | None,
+    step_name: str,
+    static_rows: tuple[GapRow, ...],
+) -> GapRow | None:
+    candidates = [row for row in static_rows if _same_validation(validation_class, row.validation_class)]
+    exact = [row for row in candidates if row.step_name == step_name]
+    matches = exact or candidates
+    return matches[0] if len(matches) == 1 else None
+
+
+def _same_validation(left: str | None, right: str | None) -> bool:
+    if not left or not right:
+        return left == right
+    return left == right or left.startswith(f"{right}-") or right.startswith(f"{left}-")
+
+
 def _dynamic_row(
     options: K8sDynamicArtifacts,
     *,
@@ -218,6 +239,8 @@ def _dynamic_row(
     classification_note: str,
     stderr_excerpt: str | None = None,
     junit_reason: str | None = None,
+    requirement_id: str | None = None,
+    labels: tuple[str, ...] = (),
 ) -> GapRow:
     spine = "|".join(["k8s", step_name, validation_class or "", "", "dynamic"])
     return GapRow(
@@ -225,11 +248,11 @@ def _dynamic_row(
         domain="k8s",
         step_name=step_name,
         validation_class=validation_class,
-        requirement_id=None,
+        requirement_id=requirement_id,
         milestone=None,
         status=status,
         detection="dynamic",
-        stage="correctness" if status in {"fail", "error"} else "coverage",
+        stage="coverage" if status in {"skipped", "not_implemented"} else "correctness",
         evidence=Evidence(
             message=message,
             validation_message=validation_message,
@@ -249,6 +272,7 @@ def _dynamic_row(
             **options.scope.to_enrichment(layer, classification_note),
             "junit_reason": junit_reason,
         },
+        labels=labels,
     )
 
 

@@ -133,6 +133,7 @@ def _project(root: Path) -> tuple[Path, Path]:
         auth_env=["ACME_TOKEN"],
     )
     execute_bootstrap(plan, runner=_git_runner)
+    _ratify_profile(workspace / "solution-profile.yaml")
     raw = yaml.safe_load(plan.manifest_path.read_text(encoding="utf-8"))
     raw["provider"]["path"] = "provider"
     raw["provider"]["state"] = "existing"
@@ -140,6 +141,23 @@ def _project(root: Path) -> tuple[Path, Path]:
     raw["execution"]["run_environment"] = "staging"
     plan.manifest_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     return plan.manifest_path, provider
+
+
+def _ratify_profile(path: Path) -> None:
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["solution"]["profile_status"] = "reviewed"
+    raw["journey"] = {"stage": "validate", "status": "ready"}
+    raw["domains"][0]["capabilities"] = [
+        {
+            "id": "teardown-excluded",
+            "name": "Teardown excluded in this fixture",
+            "selectors": {"steps": ["teardown"]},
+            "coverage": "out_of_scope",
+            "validation_mode": "skip",
+            "rationale": "The fixture does not create cloud resources during validation.",
+        }
+    ]
+    path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
 
 
 def _git_runner(command, cwd: Path, timeout: int) -> subprocess.CompletedProcess[str]:

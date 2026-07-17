@@ -8,8 +8,10 @@ from typing import Any
 
 import yaml
 
-FIXABLE_STATUSES = {"fail", "not_implemented", "error"}
-ALLOWED_ACTION = "implement_or_fix_adapter"
+from isv_readiness.decision import FAILURE_STATUSES, FIX_ACTION
+
+FIXABLE_STATUSES = set(FAILURE_STATUSES)
+ALLOWED_ACTION = FIX_ACTION
 
 SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("private key", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")),

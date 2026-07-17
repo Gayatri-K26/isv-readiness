@@ -11,6 +11,7 @@ from typing import Any
 import jsonschema
 
 from isv_readiness.context import redact_text
+from isv_readiness.decision import decide_gap, validation_profile_issues
 from isv_readiness.onboarding import DOMAIN_CONFIG_FILES
 from isv_readiness.project import ReadinessProject
 from isv_readiness.scan.dynamic import DynamicArtifacts, scan_dynamic_artifacts
@@ -75,6 +76,14 @@ def run_live_domain(
         raise LiveRunError("Project policy disables live runs; review and set execution.allow_live_runs first.")
     if canonical_domain not in project.assessment.domains:
         raise LiveRunError(f"Domain '{canonical_domain}' is outside the selected project scope.")
+    profile = (
+        load_solution_profile(project.resolve_path(manifest_path, project.assessment.profile))
+        if project.assessment.profile
+        else None
+    )
+    profile_issues = validation_profile_issues(profile, [canonical_domain])
+    if profile_issues:
+        raise LiveRunError("Validation profile is not ready: " + "; ".join(profile_issues))
     if selection and not SELECTION_RE.fullmatch(selection):
         raise LiveRunError(f"Unsafe validation selection: {selection}")
     if timeout_seconds < 1 or timeout_seconds > 14_400:
@@ -145,6 +154,7 @@ def run_live_domain(
                     log_path=log,
                     config_path=config,
                     scope=load_k8s_scope(effective_scope if effective_scope.is_file() else None),
+                    static_rows=tuple(static_report.rows),
                 )
             )
             dynamic_rows = [replace(row, domain="kubernetes") for row in dynamic_rows]
@@ -168,25 +178,22 @@ def run_live_domain(
             key=lambda row: (row.domain, row.step_name, row.validation_class or "", row.detection, row.id),
         ),
     )
-    if project.assessment.profile:
-        profile_path = project.resolve_path(manifest_path, project.assessment.profile)
-        report = enrich_report_with_profile(report, load_solution_profile(profile_path))
+    if profile is not None:
+        report = enrich_report_with_profile(report, profile)
 
     selected_rows = [
         row
-        for row in dynamic_rows
+        for row in report.rows
+        if row.detection == "dynamic"
         if selection is None or _same_validation(selection, row.validation_class)
     ]
     statuses = tuple(sorted(row.status for row in selected_rows))
-    # A skipped row is a declared exclusion (config label opt-out), not a
-    # failure: isvctl itself exits 0 for such runs. Success requires the engine
-    # to agree (exit 0), at least one check to have actually executed, and no
-    # unresolved outcome among the selected rows.
-    unresolved = {"fail", "error", "not_implemented"}
+    # Success requires both an actual execution and the same reviewed
+    # status/profile decision used by fill, status, and bundle.
     success = (
         result.returncode == 0
         and any(status == "pass" for status in statuses)
-        and not any(status in unresolved for status in statuses)
+        and not any(decide_gap(row.to_dict()).blocking for row in selected_rows)
     )
     live_result = LiveRunResult(
         schema_version=LIVE_RUN_VERSION,

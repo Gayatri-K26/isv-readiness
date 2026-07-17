@@ -659,6 +659,7 @@ def _gap_terms(gap: GapRow) -> set[str]:
             gap.step_name,
             gap.validation_class,
             gap.requirement_id,
+            *gap.labels,
             gap.evidence.message,
         )
         if value
@@ -752,4 +753,5 @@ def _gap_from_dict(raw: Mapping[str, Any]) -> GapRow:
         evidence=Evidence(**raw["evidence"]),
         remediation=Remediation(**raw["remediation"]),
         enrichment=dict(raw.get("enrichment") or {}),
+        labels=tuple(label for label in raw.get("labels", []) if isinstance(label, str)),
     )

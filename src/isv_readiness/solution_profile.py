@@ -278,13 +278,13 @@ class SolutionProfile:
         blocking_domains = sorted(
             domain.domain
             for domain in owned_domains
-            if _blocks_readiness(domain.coverage, domain.validation_mode)
+            if blocks_readiness(domain.coverage, domain.validation_mode)
         )
         blocking_capabilities = sorted(
             capability.id
             for domain in owned_domains
             for capability in domain.capabilities
-            if _blocks_readiness(
+            if blocks_readiness(
                 capability.coverage or domain.coverage,
                 capability.validation_mode or domain.validation_mode,
             )
@@ -301,7 +301,7 @@ class SolutionProfile:
         }
 
 
-def _blocks_readiness(coverage: str, validation_mode: str) -> bool:
+def blocks_readiness(coverage: str, validation_mode: str) -> bool:
     """A row blocks owned-scope readiness unless it is proven or deliberately excluded.
 
     ``covered``+``test`` is the proven path; ``out_of_scope``+``skip`` is a
@@ -313,6 +313,15 @@ def _blocks_readiness(coverage: str, validation_mode: str) -> bool:
     if coverage == "out_of_scope" and validation_mode == "skip":
         return False
     return True
+
+
+def profile_is_ratified(profile: SolutionProfile) -> bool:
+    """Whether a human-reviewed profile has entered the validate phase."""
+
+    return (
+        profile.solution.profile_status in {"reviewed", "confirmed"}
+        and profile.journey.stage == "validate"
+    )
 
 
 def load_solution_profile(path: Path, *, schema_path: Path | None = None) -> SolutionProfile:

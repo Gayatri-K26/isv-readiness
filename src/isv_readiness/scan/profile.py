@@ -4,7 +4,11 @@ from dataclasses import replace
 from typing import Any
 
 from isv_readiness.scan.models import GapReport, GapRow
-from isv_readiness.solution_profile import SolutionProfile, canonicalize_domain
+from isv_readiness.solution_profile import (
+    SolutionProfile,
+    canonicalize_domain,
+    profile_is_ratified,
+)
 
 # A deterministic test result outranks an operator's ownership claim. When the
 # scan says a required check on an ISV-owned domain is broken, the profile is not
@@ -37,10 +41,15 @@ def _enrich_row(row: GapRow, profile: SolutionProfile) -> GapRow:
         validation_class=row.validation_class,
     )
     owned = _domain_owned(profile, row.domain)
+    profile_state = {
+        "profile_status": profile.solution.profile_status,
+        "journey_stage": profile.journey.stage,
+    }
 
     if responsibility is None:
         profile_enrichment: dict[str, Any] = {
             "profile_id": profile.solution.id,
+            **profile_state,
             "matched": False,
             "owned": owned,
             "action": "request_scope_decision",
@@ -50,6 +59,7 @@ def _enrich_row(row: GapRow, profile: SolutionProfile) -> GapRow:
     else:
         profile_enrichment = {
             "profile_id": profile.solution.id,
+            **profile_state,
             "matched": True,
             "owned": owned,
             "capability_id": responsibility.capability_id,
@@ -63,7 +73,11 @@ def _enrich_row(row: GapRow, profile: SolutionProfile) -> GapRow:
             "required_inputs": list(responsibility.required_inputs),
             "evidence_refs": list(responsibility.evidence_refs),
         }
-        allow_auto_fix = responsibility.action == "implement_or_fix_adapter"
+        allow_auto_fix = (
+            owned
+            and profile_is_ratified(profile)
+            and responsibility.action == "implement_or_fix_adapter"
+        )
 
     _reconcile_masked_failure(row, profile_enrichment, owned=owned)
 

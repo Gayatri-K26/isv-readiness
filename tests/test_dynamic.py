@@ -55,6 +55,8 @@ class CrossDomainDynamicScanTests(unittest.TestCase):
         self.assertIn("does not declare", missing_step.enrichment["classification_note"])
         self.assertEqual(missing_step.enrichment["junit_reason"], "step_not_configured")
         self.assertTrue(missing_step.remediation.auto_fixable)
+        self.assertEqual(missing_step.requirement_id, "VM01-01")
+        self.assertEqual(missing_step.labels, ("vm", "min_req"))
 
         render_error = by_validation["StepSuccessCheck"]
         self.assertEqual(render_error.status, "error")

@@ -52,6 +52,9 @@ Implemented:
 - Dynamic JUnit ingestion for any single domain, with specialized K8s ownership
   classification and setup-inventory parsing.
 - Profile-aware action routing that can suppress unsafe automatic edits.
+- One shared gap decision policy for loop selection, live success, status, and
+  bundle readiness: raw results stay unchanged; reviewed scope decides whether
+  an outcome blocks and whether guarded generation is allowed.
 - Masked-failure reconciliation: a failing scan result on an ISV-owned domain
   outranks an ownership claim that would skip it, and is surfaced (in the
   scorecard and `auto` review) for a scope decision instead of being hidden.
@@ -159,7 +162,8 @@ Domains drafted `covered` whose latest recorded run failed are reported as
 empirical conflicts and fail the command.
 
 Ratification is manual and human: review the draft, edit it, move it into
-place, and set `profile_status` past `draft`.
+place, set `profile_status` to `reviewed` or `confirmed`, and set
+`journey.stage` to `validate`.
 
 ```bash
 gapctl profile --in solution-profile.yaml --draft solution-profile.draft.yaml
@@ -241,9 +245,10 @@ gapctl scan \
 ```
 
 Static scanning detects missing configs and commands, missing scripts,
-TODO/Not-implemented markers, skipped steps, simple literal JSON output schema
-failures, and contract drift. A static `pass` means only that no static gap was
-found; it does not replace a real validation run.
+executable not-implemented stubs, invalid Python syntax, skipped steps, simple
+literal JSON output schema failures, and contract drift. Comments such as
+`TODO` are not treated as runtime behavior. A static `pass` means only that no
+static gap was found; it does not replace a real validation run.
 
 ### 5. Synchronize context and build one minimal context pack
 
@@ -479,9 +484,17 @@ with a deterministic action:
 - `skip_with_rationale`
 - `request_scope_decision`
 
+Rows also preserve the upstream `test_id` as `requirement_id` and the suite
+labels (including `min_req`) when those values exist. `status` is always the
+observed static or dynamic result. A `skipped` result blocks readiness unless
+the reviewed profile explicitly routes that capability to
+`skip_with_rationale`.
+
 ### 8. Autonomously fill and fix, then stop at one review gate
 
-`gapctl auto` is the simplified end-to-end flow. It scans one owned domain,
+`gapctl auto` is the simplified end-to-end flow. It requires
+`profile_status: reviewed` (or `confirmed`) and `journey.stage: validate`, then
+scans one owned domain,
 then for every ISV-owned, scanner-`auto_fixable` gap it builds a context pack,
 runs the generator, and verifies the candidate in an isolated copy of the
 provider. Verified fixes are staged into a private scratch copy — the real
@@ -517,8 +530,9 @@ gapctl auto \
 ```
 
 Only ISV-owned domains and gaps routed to `implement_or_fix_adapter` are
-eligible; the owned-domain scope filter and the same guardrails as the manual
-change pipeline still apply. `auto` covers static gaps; dynamic gaps still
+eligible. The scanner must also provide a safe target; `auto_fixable` means
+“candidate generation permitted,” not “the issue is already fixed.” The same
+guardrails as the manual change pipeline still apply. `auto` covers static gaps; dynamic gaps still
 require a reviewed live `isvctl` rerun via `agent-run --run-live`. For per-gap
 review checkpoints instead of one end gate, the advanced `agent-run` workflow
 remains available.
@@ -617,6 +631,8 @@ package.
 - Provider and product changes remain human-gated.
 - A profile may disable `auto_fixable`; it can never enable an edit that the
   deterministic scanner marked unsafe.
+- Draft/qualify profiles may be scanned, but cannot authorize fill, live
+  validation, agent changes, or a completed evidence bundle.
 - Future generation is limited to provider scripts and explicitly approved
   integration manifests, with patch/PR output rather than auto-merge.
 - Credentials and private source remain in the ISV environment. Only reports

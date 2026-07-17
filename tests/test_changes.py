@@ -117,6 +117,23 @@ class ChangeProposalTests(unittest.TestCase):
         with self.assertRaisesRegex(FixGuardrailError, "duplicate"):
             change_set_from_dict(raw)
 
+    def test_draft_profile_cannot_authorize_a_change(self) -> None:
+        report = _report()
+        report["rows"][0]["enrichment"]["solution_profile"]["profile_status"] = "draft"
+        with tempfile.TemporaryDirectory() as tempdir:
+            provider = Path(tempdir) / "acme"
+            script = provider / "scripts" / "vm" / "launch.py"
+            script.parent.mkdir(parents=True)
+            script.write_text("raise NotImplementedError()\n", encoding="utf-8")
+            with self.assertRaisesRegex(FixGuardrailError, "not eligible for generation"):
+                build_change_proposal(
+                    report,
+                    provider_repo=provider,
+                    change_set=_change_set(
+                        [("provider", "scripts/vm/launch.py", "replace", "print('safe')\n")]
+                    ),
+                )
+
 
 def _change_set(values: list[tuple[str, str, str, str]]) -> ChangeSet:
     changes = tuple(
@@ -149,7 +166,14 @@ def _report(*, domain: str = "vm", target: str = "scripts/vm/launch.py") -> dict
                 "status": "not_implemented",
                 "detection": "static",
                 "remediation": {"auto_fixable": True, "target": target},
-                "enrichment": {"solution_profile": {"action": "implement_or_fix_adapter"}},
+                "enrichment": {
+                    "solution_profile": {
+                        "action": "implement_or_fix_adapter",
+                        "owned": True,
+                        "profile_status": "reviewed",
+                        "journey_stage": "validate",
+                    }
+                },
             }
         ]
     }

@@ -100,6 +100,13 @@ class LiveRunTests(unittest.TestCase):
                 "</testsuite>",
                 False,
             ),
+            (
+                '<testsuite tests="2">'
+                '<testcase name="test_vm[GpuCheck]" />'
+                '<testcase name="test_vm[InstanceCreatedCheck]"><skipped message="runtime prerequisite" /></testcase>'
+                "</testsuite>",
+                False,
+            ),
         ]
         for junit_body, expected in cases:
             with tempfile.TemporaryDirectory() as tempdir:
@@ -166,6 +173,7 @@ def _project(root: Path, *, allow_live: bool):
         pass_env=["ACME_REGION"],
     )
     execute_bootstrap(plan, runner=_git_runner)
+    _ratify_profile(workspace / "solution-profile.yaml")
     raw = yaml.safe_load(plan.manifest_path.read_text(encoding="utf-8"))
     raw["provider"]["path"] = "provider"
     raw["provider"]["state"] = "existing"
@@ -173,6 +181,23 @@ def _project(root: Path, *, allow_live: bool):
     raw["execution"]["run_environment"] = "staging"
     plan.manifest_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     return load_project(plan.manifest_path), plan.manifest_path
+
+
+def _ratify_profile(path: Path) -> None:
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["solution"]["profile_status"] = "reviewed"
+    raw["journey"] = {"stage": "validate", "status": "ready"}
+    raw["domains"][0]["capabilities"] = [
+        {
+            "id": "gpu-excluded",
+            "name": "GPU validation excluded in this fixture",
+            "selectors": {"validation_classes": ["GpuCheck"]},
+            "coverage": "out_of_scope",
+            "validation_mode": "skip",
+            "rationale": "The fixture explicitly excludes this optional check.",
+        }
+    ]
+    path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
 
 
 def _git_runner(command, cwd: Path, timeout: int) -> subprocess.CompletedProcess[str]:

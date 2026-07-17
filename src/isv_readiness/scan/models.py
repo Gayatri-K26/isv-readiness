@@ -24,8 +24,8 @@ class Evidence:
 
 @dataclass(frozen=True)
 class Remediation:
-    # How to fix the gap
-    auto_fixable: bool # profile can flip it off but never on
+    # Whether policy permits a generator to propose a guarded candidate edit.
+    auto_fixable: bool  # profile can flip it off but never on
     target: str | None
     rerun_command: str
     aws_reference: str | None = None
@@ -45,9 +45,12 @@ class GapRow:
     evidence: Evidence
     remediation: Remediation
     enrichment: dict[str, Any] = field(default_factory=dict)
+    labels: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        data["labels"] = list(self.labels)
+        return data
 
 
 @dataclass(frozen=True)

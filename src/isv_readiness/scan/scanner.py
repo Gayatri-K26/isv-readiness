@@ -4,7 +4,6 @@ import ast
 import copy
 import hashlib
 import json
-import re
 import shlex
 from collections import Counter
 from dataclasses import dataclass, replace
@@ -24,13 +23,6 @@ from isv_readiness.scan.models import (
 )
 from isv_readiness.scan.schema_registry import SchemaRegistry
 from isv_readiness.validation_adapter import normalize_catalog, normalize_validation_plan
-
-STUB_PATTERNS = (
-    re.compile(r"\bnot implemented\b", re.IGNORECASE),
-    re.compile(r"\bnot_implemented\b", re.IGNORECASE),
-    re.compile(r"\bnotimplementederror\b", re.IGNORECASE),
-    re.compile(r"\btodo\b", re.IGNORECASE),
-)
 
 K8S_DOMAINS = {"k8s", "kubernetes"}
 VALIDATION_ONLY_STEP = "<validation>"
@@ -314,7 +306,29 @@ def _scan_check(
         )
 
     text = step.script_path.read_text(encoding="utf-8")
-    stub_hit = _stub_marker(text)
+    syntax_error = _python_syntax_error(step.script_path, text)
+    if syntax_error is not None:
+        return _row(
+            provider_repo=provider_repo,
+            domain=domain,
+            step_name=check.step_name,
+            validation_class=check.validation_class,
+            requirement_id=check.requirement_id,
+            milestone=check.milestone,
+            status="error",
+            stage="coverage",
+            message=f"Provider script has invalid Python syntax: {syntax_error}",
+            config_path=step.config_path,
+            script_path=step.script_path,
+            target=_relative_or_str(step.script_path, provider_repo),
+            aws_reference=aws_reference,
+            schema_errors=[],
+            missing_json_fields=[],
+            auto_fixable=_is_script_target(provider_repo, step.script_path),
+            rerun_config=rerun_config,
+            enrichment=check.enrichment,
+        )
+    stub_hit = _stub_marker(step.script_path, text)
     if stub_hit is not None:
         return _row(
             provider_repo=provider_repo,
@@ -468,6 +482,11 @@ def _row(
             aws_reference=aws_reference,
         ),
         enrichment=enrichment or {},
+        labels=tuple(
+            label
+            for label in (enrichment or {}).get("upstream_labels", [])
+            if isinstance(label, str)
+        ),
     )
 
 
@@ -605,10 +624,25 @@ def _checks_for_domain(suite_docs: list[dict[str, Any]], provider_config: dict[s
     checks: list[CheckRef] = []
     for validation in plan.validations:
         requires_step = validation.step is not None
+        params = validation.params if isinstance(validation.params, dict) else {}
+        raw_test_id = params.get("test_id")
+        requirement_id = None
+        if isinstance(raw_test_id, str):
+            normalized_test_id = raw_test_id.strip()
+            if normalized_test_id and normalized_test_id != "N/A":
+                requirement_id = normalized_test_id
+        raw_labels = params.get("labels")
+        candidate_labels = (
+            tuple(label for label in raw_labels if isinstance(label, str))
+            if isinstance(raw_labels, (list, tuple))
+            else validation.labels
+        )
+        labels = tuple(dict.fromkeys(candidate_labels))
         enrichment: dict[str, Any] = {
             "validation_category": validation.category,
             "validation_phase": validation.phase,
             "requires_provider_step": requires_step,
+            "upstream_labels": list(labels),
         }
         if validation.execution_adapter is not None:
             enrichment["execution_adapter"] = validation.execution_adapter
@@ -616,6 +650,7 @@ def _checks_for_domain(suite_docs: list[dict[str, Any]], provider_config: dict[s
             CheckRef(
                 step_name=validation.step or VALIDATION_ONLY_STEP,
                 validation_class=validation.name,
+                requirement_id=requirement_id,
                 requires_step=requires_step,
                 valid=validation.valid,
                 error=validation.error,
@@ -718,12 +753,56 @@ def _resolve_script_path(config_path: Path, command: str) -> Path | None:
     return (config_path.parent / script).resolve()
 
 
-def _stub_marker(text: str) -> str | None:
-    for pattern in STUB_PATTERNS:
-        match = pattern.search(text)
-        if match:
-            return match.group(0)
+def _python_syntax_error(path: Path, text: str) -> str | None:
+    if path.suffix != ".py":
+        return None
+    try:
+        ast.parse(text)
+    except SyntaxError as exc:
+        location = f"line {exc.lineno}" if exc.lineno else "unknown line"
+        return f"{exc.msg} ({location})"
     return None
+
+
+def _stub_marker(path: Path, text: str) -> str | None:
+    """Detect executable scaffolding without treating comments as behavior."""
+
+    if path.suffix != ".py":
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            lowered = stripped.lower()
+            if "gapctl_stub" in lowered or "not implemented" in lowered or "not_implemented" in lowered:
+                return stripped[:120]
+        return None
+
+    tree = ast.parse(text)
+    docstrings = {
+        id(node.body[0].value)
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.body
+        and isinstance(node.body[0], ast.Expr)
+        and isinstance(node.body[0].value, ast.Constant)
+        and isinstance(node.body[0].value.value, str)
+    }
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Raise) and _is_not_implemented_error(node.exc):
+            return "raise NotImplementedError"
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if id(node) in docstrings:
+                continue
+            lowered = node.value.lower()
+            if "gapctl_stub" in lowered or "not implemented" in lowered or "not_implemented" in lowered:
+                return node.value.strip()[:120]
+    return None
+
+
+def _is_not_implemented_error(node: ast.AST | None) -> bool:
+    if isinstance(node, ast.Call):
+        node = node.func
+    return isinstance(node, ast.Name) and node.id == "NotImplementedError"
 
 
 def _static_json_outputs(path: Path, text: str) -> list[dict[str, Any]]:

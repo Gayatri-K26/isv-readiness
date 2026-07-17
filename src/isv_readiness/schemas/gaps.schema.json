@@ -68,6 +68,13 @@
         "milestone": {
           "type": ["string", "null"]
         },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
         "status": {
           "enum": ["pass", "fail", "not_implemented", "skipped", "error"]
         },

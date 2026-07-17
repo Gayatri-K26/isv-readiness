@@ -18,6 +18,7 @@ from isv_readiness.change_verification import (
 )
 from isv_readiness.changes import build_change_proposal, canonical_sha256, load_change_set
 from isv_readiness.context import build_context_pack
+from isv_readiness.decision import decide_gap, validation_profile_issues
 from isv_readiness.fixes import select_gap
 from isv_readiness.generation import GeneratorRunner, run_generator
 from isv_readiness.live import CommitResolver, LiveRunner, run_live_domain
@@ -88,17 +89,20 @@ def run_agent_turn(
     canonical_domain = canonicalize_domain(domain)
     if canonical_domain not in project.assessment.domains:
         raise AgentWorkflowError(f"Domain '{canonical_domain}' is outside the selected project scope.")
+    profile = (
+        load_solution_profile(project.resolve_path(project_path, project.assessment.profile))
+        if project.assessment.profile
+        else None
+    )
+    profile_issues = validation_profile_issues(profile, [canonical_domain])
+    if profile_issues:
+        raise AgentWorkflowError("Validation profile is not ready: " + "; ".join(profile_issues))
     provider_root = project.provider_root(project_path)
     if not provider_root.is_dir():
         if not onboard_if_missing:
             raise AgentWorkflowError(
                 "Provider is not scaffolded; rerun with --onboard or run gapctl onboard --write first."
             )
-        profile = (
-            load_solution_profile(project.resolve_path(project_path, project.assessment.profile))
-            if project.assessment.profile
-            else None
-        )
         plan = build_provider_onboarding_plan(
             project.validation_root(project_path),
             project.provider.name,
@@ -440,7 +444,7 @@ def _run_live_and_advance(
     unresolved = [
         row
         for row in live.report.get("rows", [])
-        if row.get("detection") == "dynamic" and row.get("status") in {"fail", "error", "not_implemented"}
+        if row.get("detection") == "dynamic" and decide_gap(row).blocking
     ]
     feedback = (
         f"Live verification failed with exit code {live.exit_code}; statuses: {', '.join(live.selected_statuses) or 'none'}.",

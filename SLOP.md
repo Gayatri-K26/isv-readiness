@@ -1295,3 +1295,37 @@ every runtime schema even though the product is installed as a standalone
 wheel. These are boundary and evidence-integrity failures, not presentation
 issues, so the fixes keep one authoritative implementation per operation and
 add command-level coverage.
+
+## Step 25 - Simplify Gap Decisions and Qualification Gates
+
+### Decisions
+
+- Added one deterministic gap decision with only four outputs: `blocking`,
+  `edit_eligible`, `action`, and `reason`. Loop selection, auto parking, change
+  authorization, live success, status, and bundle readiness now consume that
+  policy instead of maintaining subtly different status lists.
+- Kept raw scan/JUnit status unchanged. A skip resolves only through an
+  explicit `skip_with_rationale`; `step_not_configured` remains a raw JUnit
+  skip but is eligible for a guarded config candidate when ownership and
+  profile gates allow it.
+- Required a `reviewed` or `confirmed` profile in the `validate` journey stage
+  before generation, live execution, agent turns, or evidence bundling. Draft
+  profiles remain useful for scanning and qualification review, but carry no
+  edit authority.
+- Preserved upstream `test_id` and labels in gap rows and dynamic matches.
+  `min_req` is a deterministic tie-breaker within the same route. The unused
+  nullable `milestone` stays only for schema `0.1.0` compatibility and has no
+  decision role.
+- Replaced substring stub detection with syntax-aware Python inspection and
+  executable-line shell inspection. TODO comments no longer create false
+  gaps, while invalid Python becomes an explicit fixable coverage error.
+
+### Rationale
+
+The previous behavior answered “is this open?”, “may a model edit it?”, and
+“is validation complete?” differently in different commands. That allowed a
+draft profile to authorize edits, treated all skips as resolved in some paths,
+and stranded a fixable dynamic missing-step row. The simpler contract is: keep
+the observed result, require an explicit reviewed route, and use one function
+for every downstream decision. No new profile fields or inferred milestones
+were introduced.

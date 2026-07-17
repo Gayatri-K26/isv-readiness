@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -37,6 +38,8 @@ class StaticScanTests(unittest.TestCase):
         self.assertEqual(launch.stage, "coverage")
         self.assertTrue(launch.remediation.auto_fixable)
         self.assertEqual(launch.remediation.target, "scripts/vm/launch_instance.py")
+        self.assertEqual(launch.requirement_id, "VM01-01")
+        self.assertEqual(launch.labels, ("vm", "min_req"))
 
         listing = by_step[("list_instances", "InstanceListCheck")]
         self.assertEqual(listing.status, "fail")
@@ -84,7 +87,41 @@ class StaticScanTests(unittest.TestCase):
             self.assertIn("Gap Scorecard", scorecard)
             self.assertIn("not_implemented=2", scorecard)
             self.assertIn("describe_instance", tree)
-            self.assertIn("| ID | Domain | Step |", markdown)
+        self.assertIn("| ID | Requirement | Labels | Domain | Step |", markdown)
+
+    def test_python_comments_are_not_stubs_and_syntax_errors_are_explicit(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            provider = Path(tempdir) / "provider"
+            shutil.copytree(FIXTURES / "provider_repo", provider)
+            script = provider / "scripts" / "vm" / "launch_instance.py"
+            script.write_text(
+                "import json\n\n"
+                "# TODO: improve retries\n"
+                'print(json.dumps({"success": True, "platform": "fixture", "instance_id": "vm-1"}))\n',
+                encoding="utf-8",
+            )
+            report = scan_provider(
+                ScanOptions(
+                    provider_repo=provider,
+                    domains=["vm"],
+                    validation_root=FIXTURES / "ai-cloud-validation",
+                )
+            )
+            row = next(item for item in report.rows if item.step_name == "launch_instance")
+            self.assertEqual(row.status, "pass")
+
+            script.write_text("def broken(:\n", encoding="utf-8")
+            report = scan_provider(
+                ScanOptions(
+                    provider_repo=provider,
+                    domains=["vm"],
+                    validation_root=FIXTURES / "ai-cloud-validation",
+                )
+            )
+            row = next(item for item in report.rows if item.step_name == "launch_instance")
+            self.assertEqual(row.status, "error")
+            self.assertIn("invalid Python syntax", row.evidence.message)
+            self.assertTrue(row.remediation.auto_fixable)
 
     def test_k8s_scan_finds_top_level_provider_wrapper(self) -> None:
         provider = FIXTURES / "ai-cloud-validation" / "isvctl" / "configs" / "providers" / "dsx-air"

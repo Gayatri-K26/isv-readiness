@@ -6,10 +6,10 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from isv_readiness.decision import FAILURE_STATUSES, FIX_ACTION, decide_gap
+
 LOOP_STATE_VERSION = "0.1.0"
-UNRESOLVED_STATUSES = {"fail", "not_implemented", "error"}
-FIX_ACTION = "implement_or_fix_adapter"
-RESOLVED_DISPOSITION = "skip_with_rationale"
+UNRESOLVED_STATUSES = set(FAILURE_STATUSES)  # compatibility for external callers
 ACTION_PRIORITY = {
     "request_scope_decision": 0,
     "collect_evidence": 1,
@@ -104,8 +104,7 @@ def advance_loop(
         row
         for row in report.get("rows", [])
         if row.get("domain") == domain
-        and row.get("status") in UNRESOLVED_STATUSES
-        and _action(row) != RESOLVED_DISPOSITION
+        and decide_gap(row).blocking
     ]
     unresolved.sort(key=_selection_key)
 
@@ -115,7 +114,7 @@ def advance_loop(
             status="complete",
             selected_gap_id=None,
             route=None,
-            reason="No unresolved fail, error, or not-implemented rows remain for the selected domain.",
+            reason="No blocking validation outcomes remain for the selected domain.",
             report_fingerprint=report_fingerprint,
             unresolved_count=0,
             attempts=attempts,
@@ -124,28 +123,15 @@ def advance_loop(
 
     selected = unresolved[0]
     gap_id = str(selected.get("id"))
-    action = _action(selected)
-    if action != FIX_ACTION:
+    gap_decision = decide_gap(selected)
+    action = gap_decision.action
+    if not gap_decision.edit_eligible:
         return _state(
             domain=domain,
             status="blocked",
             selected_gap_id=gap_id,
             route=action,
-            reason=f"Selected gap requires route '{action}' before code generation can continue.",
-            report_fingerprint=report_fingerprint,
-            unresolved_count=len(unresolved),
-            attempts=attempts,
-            previous=previous,
-        )
-
-    remediation = selected.get("remediation") or {}
-    if remediation.get("auto_fixable") is not True or not remediation.get("target"):
-        return _state(
-            domain=domain,
-            status="blocked",
-            selected_gap_id=gap_id,
-            route=action,
-            reason="Profile permits adapter work, but the deterministic scanner did not authorize a target edit.",
+            reason=gap_decision.reason,
             report_fingerprint=report_fingerprint,
             unresolved_count=len(unresolved),
             attempts=attempts,
@@ -213,24 +199,15 @@ def _state(
     )
 
 
-def _action(row: dict[str, Any]) -> str:
-    profile = (row.get("enrichment") or {}).get("solution_profile") or {}
-    action = profile.get("action")
-    return str(action) if action else "request_scope_decision"
-
-
-def _selection_key(row: dict[str, Any]) -> tuple[int, int, int, str, str, str]:
-    action = _action(row)
-    remediation = row.get("remediation") or {}
-    fixability_priority = (
-        0
-        if action == FIX_ACTION and remediation.get("auto_fixable") is True and remediation.get("target")
-        else 1
-    )
+def _selection_key(row: dict[str, Any]) -> tuple[int, int, int, int, str, str, str]:
+    decision = decide_gap(row)
+    fixability_priority = 0 if decision.edit_eligible else 1
+    minimum_priority = 0 if "min_req" in row.get("labels", []) else 1
     stage_priority = 0 if row.get("stage") == "coverage" else 1
     return (
-        ACTION_PRIORITY.get(action, 0),
+        ACTION_PRIORITY.get(decision.action, 0),
         fixability_priority,
+        minimum_priority,
         stage_priority,
         str(row.get("step_name", "")),
         str(row.get("validation_class", "")),

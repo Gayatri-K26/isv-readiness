@@ -11,9 +11,9 @@ from typing import Any
 
 from isv_readiness.change_verification import apply_verified_change_set, verify_change_set
 from isv_readiness.context import build_context_pack
+from isv_readiness.decision import decide_gap, validation_profile_issues
 from isv_readiness.fixes import FixGuardrailError
 from isv_readiness.generation import GeneratorRunner, run_generator
-from isv_readiness.loop import FIX_ACTION, UNRESOLVED_STATUSES
 from isv_readiness.project import ReadinessProject, load_project
 from isv_readiness.scan.profile import enrich_report_with_profile
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
@@ -102,6 +102,11 @@ def run_auto(
     if not generator_command:
         raise AutoWorkflowError("An explicit generator adapter is required (--generator).")
 
+    profile = _load_profile(project, project_path)
+    profile_issues = validation_profile_issues(profile, [canonical_domain])
+    if profile_issues:
+        raise AutoWorkflowError("Validation profile is not ready: " + "; ".join(profile_issues))
+
     work_dir = work_dir.expanduser().resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
     scratch = work_dir / "scratch-provider"
@@ -126,7 +131,6 @@ def run_auto(
             shutil.rmtree(stale)
     shutil.copytree(provider_root, scratch)
 
-    profile = _load_profile(project, project_path)
     staged: list[StagedFix] = []
     attempts_by_gap: dict[str, int] = {}
     max_attempts = project.execution.max_attempts
@@ -298,9 +302,7 @@ def _select_fixable(report: dict[str, Any], domain: str) -> list[dict[str, Any]]
         row
         for row in report.get("rows", [])
         if row.get("domain") == domain
-        and row.get("status") in UNRESOLVED_STATUSES
-        and (row.get("remediation") or {}).get("auto_fixable") is True
-        and _action(row) == FIX_ACTION
+        and decide_gap(row).edit_eligible
     ]
     rows.sort(key=lambda row: (str(row.get("step_name")), str(row.get("validation_class") or ""), str(row.get("id"))))
     return rows
@@ -317,13 +319,13 @@ def _park(
     attempts_by_gap = attempts_by_gap or {}
     parked: list[ParkedGap] = []
     for row in report.get("rows", []):
-        if row.get("domain") != domain or row.get("status") not in UNRESOLVED_STATUSES:
+        decision = decide_gap(row)
+        if row.get("domain") != domain or not decision.blocking:
             continue
         if row.get("id") in staged_ids:
             continue
-        action = _action(row)
-        auto_fixable = (row.get("remediation") or {}).get("auto_fixable") is True
-        if auto_fixable and action == FIX_ACTION:
+        action = decision.action
+        if decision.edit_eligible:
             attempts = attempts_by_gap.get(str(row.get("id")), 0)
             if attempts == 0:
                 reason = "Not attempted within this run's iteration budget; apply the staged patch and re-run auto to continue."
@@ -331,7 +333,7 @@ def _park(
                 reason = f"{attempts} failed attempt(s); retry budget remains — re-run auto after applying."
             else:
                 reason = "Auto-fix attempts were exhausted without a verified candidate."
-        elif action == FIX_ACTION:
+        elif action == "implement_or_fix_adapter":
             # e.g. an unwired step: the fix is a config/scope decision, and the
             # deterministic scanner refuses to authorize an automatic edit.
             reason = (
@@ -354,14 +356,6 @@ def _park(
         )
     parked.sort(key=lambda item: item.gap_id)
     return parked
-
-
-def _action(row: Mapping[str, Any]) -> str:
-    sp = (row.get("enrichment") or {}).get("solution_profile") or {}
-    action = sp.get("action")
-    # Without a profile there is no routing; an auto-fixable row is treated as
-    # implement_or_fix so the owned-domain scope filter still governs it.
-    return str(action) if action else FIX_ACTION
 
 
 def _generate(

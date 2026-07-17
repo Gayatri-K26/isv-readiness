@@ -5,6 +5,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+from isv_readiness.decision import decide_gap
+
 
 def load_report(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -28,18 +30,15 @@ def render_scorecard(report: dict[str, Any]) -> str:
         by_domain[row.get("domain", "<unknown>")][row.get("status", "<unknown>")] += 1
 
     masked = [row for row in rows if _is_masked_failure(row)]
-    # Only a genuine skip (not on an owned domain, and not a masked failure) is
-    # excluded from the denominator. A skip that hides a failing owned check would
-    # otherwise silently inflate readiness.
-    excluded_skips = sum(
+    # Explicitly accepted out-of-scope outcomes are not scored. Unapproved
+    # skips remain blockers and therefore stay in the denominator.
+    excluded = sum(
         1
         for row in rows
-        if row.get("status") == "skipped"
-        and not _is_owned(row)
-        and not _is_masked_failure(row)
+        if row.get("status") != "pass" and not decide_gap(row).blocking
     )
     total = len(rows)
-    active = total - excluded_skips
+    active = total - excluded
     pass_count = counts.get("pass", 0)
     score = 100.0 if active == 0 else (pass_count / active) * 100.0
     score_label = "Readiness score" if any(row.get("detection") == "dynamic" for row in rows) else "Static score"
@@ -91,14 +90,16 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- Schema: `{report.get('schema_version', '<unknown>')}`",
         f"- Provider repo: `{report.get('provider_repo', '<unknown>')}`",
         "",
-        "| ID | Domain | Step | Validation | Status | Stage | Target |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| ID | Requirement | Labels | Domain | Step | Validation | Status | Stage | Target |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in rows:
         remediation = row.get("remediation") or {}
         lines.append(
-            "| {id} | {domain} | {step} | {validation} | {status} | {stage} | {target} |".format(
+            "| {id} | {requirement} | {labels} | {domain} | {step} | {validation} | {status} | {stage} | {target} |".format(
                 id=_cell(row.get("id")),
+                requirement=_cell(row.get("requirement_id")),
+                labels=_cell(", ".join(row.get("labels") or [])),
                 domain=_cell(row.get("domain")),
                 step=_cell(row.get("step_name")),
                 validation=_cell(row.get("validation_class")),
@@ -126,10 +127,6 @@ def _profile_enrichment(row: dict[str, Any]) -> dict[str, Any]:
     enrichment = row.get("enrichment") or {}
     profile = enrichment.get("solution_profile")
     return profile if isinstance(profile, dict) else {}
-
-
-def _is_owned(row: dict[str, Any]) -> bool:
-    return bool(_profile_enrichment(row).get("owned"))
 
 
 def _is_masked_failure(row: dict[str, Any]) -> bool:

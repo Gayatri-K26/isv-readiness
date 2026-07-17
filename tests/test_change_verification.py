@@ -142,7 +142,12 @@ def _fixture_report(provider: Path) -> tuple[dict, str]:
         for row in report["rows"]
         if row["step_name"] == "launch_instance" and row["validation_class"] == "InstanceCreatedCheck"
     )
-    selected["enrichment"]["solution_profile"] = {"action": "implement_or_fix_adapter"}
+    selected["enrichment"]["solution_profile"] = {
+        "action": "implement_or_fix_adapter",
+        "owned": True,
+        "profile_status": "reviewed",
+        "journey_stage": "validate",
+    }
     return report, selected["id"]
 
 

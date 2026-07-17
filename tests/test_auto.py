@@ -10,7 +10,7 @@ from pathlib import Path
 
 import yaml
 
-from isv_readiness.auto import run_auto
+from isv_readiness.auto import AutoWorkflowError, run_auto
 from isv_readiness.project import build_bootstrap_plan, execute_bootstrap
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +19,24 @@ COMMIT = "e" * 40
 
 
 class AutoWorkflowTests(unittest.TestCase):
+    def test_auto_rejects_a_draft_qualification_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            project_path, _provider = _project(Path(tempdir))
+            profile_path = project_path.parent / "solution-profile.yaml"
+            raw = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
+            raw["solution"]["profile_status"] = "draft"
+            raw["journey"] = {"stage": "qualify", "status": "in_progress"}
+            profile_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+            with self.assertRaisesRegex(AutoWorkflowError, "profile_status.*journey stage"):
+                run_auto(
+                    project_path,
+                    domain="vm",
+                    work_dir=Path(tempdir) / "work",
+                    generator_command=["fixture-generator"],
+                    generator_runner=_generator_runner,
+                )
+
     def test_auto_stages_all_fixes_and_stops_at_one_review_gate(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             project_path, provider = _project(Path(tempdir))
@@ -126,11 +144,19 @@ def _project(root: Path) -> tuple[Path, Path]:
         auth_env=["ACME_TOKEN"],
     )
     execute_bootstrap(plan, runner=_git_runner)
+    _ratify_profile(workspace / "solution-profile.yaml")
     raw = yaml.safe_load(plan.manifest_path.read_text(encoding="utf-8"))
     raw["provider"]["path"] = "provider"
     raw["provider"]["state"] = "existing"
     plan.manifest_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     return plan.manifest_path, provider
+
+
+def _ratify_profile(path: Path) -> None:
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["solution"]["profile_status"] = "reviewed"
+    raw["journey"] = {"stage": "validate", "status": "ready"}
+    path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
 
 
 def _git_runner(command, cwd: Path, timeout: int) -> subprocess.CompletedProcess[str]:

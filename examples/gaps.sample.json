@@ -18,6 +18,7 @@
         "validation_message": null
       },
       "id": "gap_5e4bf68a7ab4",
+      "labels": ["vm", "min_req"],
       "milestone": "M0",
       "remediation": {
         "auto_fixable": true,
@@ -49,6 +50,7 @@
         "validation_message": null
       },
       "id": "gap_5d413a9b22f1",
+      "labels": ["vm", "min_req"],
       "milestone": "M1",
       "remediation": {
         "auto_fixable": true,
@@ -76,6 +78,7 @@
         "validation_message": null
       },
       "id": "gap_1fd99b3e7adc",
+      "labels": ["vm"],
       "milestone": null,
       "remediation": {
         "auto_fixable": false,
