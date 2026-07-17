@@ -34,9 +34,8 @@ Implemented:
   rollback.
 - Persistent `agent-run` orchestration across scan, context, generation, review,
   apply, targeted live feedback, final full-domain validation, and retry gates.
-- Sanitized, hash-inventoried owned-scope validation evidence bundles.
-- Explicit publication of completed, schema-valid bundles to the ISV Lab
-  Service, with exact platform mapping and optional JUnit upload.
+- Direct publication of canonical, successful `.gapctl/runs/` evidence to the
+  ISV Lab Service, with exact per-domain platform mapping and JUnit upload.
 - Package-owned JSON schemas so the CLI works from a wheel installed by
   `uv tool`, without an `isv-readiness` source checkout.
 - Versioned `solution-profile.json` contract for components, dependencies,
@@ -53,8 +52,8 @@ Implemented:
   classification and setup-inventory parsing.
 - Profile-aware action routing that can suppress unsafe automatic edits.
 - One shared gap decision policy for loop selection, live success, status, and
-  bundle readiness: raw results stay unchanged; reviewed scope decides whether
-  an outcome blocks and whether guarded generation is allowed.
+  publication readiness: raw results stay unchanged; reviewed scope decides
+  whether an outcome blocks and whether guarded generation is allowed.
 - Masked-failure reconciliation: a failing scan result on an ISV-owned domain
   outranks an ownership claim that would skip it, and is surfaced (in the
   scorecard and `auto` review) for a scope decision instead of being hidden.
@@ -91,6 +90,20 @@ cd acme-readiness
 `ai-cloud-validation` checkout, builds the check catalog, and scaffolds the
 provider. The generated profile remains a qualification draft. An SME must
 ratify ownership and scope before `fill` or live validation.
+
+After ratification, the normal installed journey is:
+
+```bash
+gapctl fill vm --generator codex
+gapctl fill vm --generator codex --approve <reviewed-patch-sha256>
+gapctl test vm
+gapctl status
+gapctl publish --lab-id 35 --isv-software-version 1.2.3
+```
+
+Repeat `fill` and `test` for every owned domain until `status` reports that the
+project is ready. Publication discovers the latest canonical run itself; the
+operator does not select a JUnit file or construct an intermediate archive.
 
 ## Workflow
 
@@ -380,32 +393,24 @@ project. Only declared credential/runtime environment names are passed to
 targeted selection uses the installed validation class with upstream `pytest
 -k`, while `isvctl` still owns setup, test, and teardown. After all static gaps
 are resolved, one final `agent-run --run-live` executes the entire domain before
-the state becomes `complete`.
+the advanced agent state becomes `complete`. The installed ISV journey records
+final publication evidence with `gapctl test`.
 
-Assemble completed domain states without copying raw context, API specs,
-credentials, model payloads, backups, or logs:
-
-```bash
-gapctl bundle \
-  --project isv-project.yaml \
-  --agent-work-dir .gapctl/agent/vm \
-  --out-dir readiness-bundle
-```
-
-Publish only a completed bundle. Credentials are supplied at runtime through
-`ISV_SERVICE_ENDPOINT`, `ISV_SSA_ISSUER`, `ISV_CLIENT_ID`, and
-`ISV_CLIENT_SECRET`; their values are never written to the bundle or project:
+Publish only after `gapctl status` reports readiness. Credentials are supplied
+at runtime through `ISV_SERVICE_ENDPOINT`, `ISV_SSA_ISSUER`, `ISV_CLIENT_ID`,
+and `ISV_CLIENT_SECRET`; their values are never written to the project or run
+artifacts:
 
 ```bash
-gapctl publish \
-  --bundle-dir readiness-bundle \
-  --lab-id 35 \
-  --junit .gapctl/runs/<run-id>/junit.xml
+gapctl test vm
+gapctl status
+gapctl publish --lab-id 35 --isv-software-version 1.2.3
 ```
 
-For a bundle spanning more than one platform type, pass the intended portal
-target explicitly with `--platform` rather than allowing an arbitrary domain
-to label the whole run.
+`publish` validates the reviewed profile, full-scope `gaps.json`, latest
+successful JUnit record, and pinned validation checkout before authentication
+or remote mutation. It creates one correctly typed Lab Service test run per
+owned domain, so multi-domain projects do not need a guessed aggregate platform.
 
 ### 5.6. Run one live selection directly
 
@@ -587,8 +592,6 @@ retry budgets stop the controller rather than falling through to code changes.
   command, artifacts, selected outcomes, and normalized report.
 - [src/isv_readiness/schemas/agent-state.schema.json](src/isv_readiness/schemas/agent-state.schema.json): persistent
   review/live/retry state for one selected domain.
-- [src/isv_readiness/schemas/bundle-manifest.schema.json](src/isv_readiness/schemas/bundle-manifest.schema.json):
-  sanitized artifact and provider-file hash inventory.
 - [src/isv_readiness/schemas/gaps.schema.json](src/isv_readiness/schemas/gaps.schema.json): deterministic flat scan
   and dynamic-result rows.
 - [src/isv_readiness/schemas/validation-plan.schema.json](src/isv_readiness/schemas/validation-plan.schema.json):
@@ -633,7 +636,7 @@ package.
 - A profile may disable `auto_fixable`; it can never enable an edit that the
   deterministic scanner marked unsafe.
 - Draft/qualify profiles may be scanned, but cannot authorize fill, live
-  validation, agent changes, or a completed evidence bundle.
+  validation, agent changes, or publication.
 - Future generation is limited to provider scripts and explicitly approved
   integration manifests, with patch/PR output rather than auto-merge.
 - Credentials and private source remain in the ISV environment. Only reports

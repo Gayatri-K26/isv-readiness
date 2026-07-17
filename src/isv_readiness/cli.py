@@ -11,7 +11,6 @@ import yaml
 
 from isv_readiness.agent import AgentWorkflowError, run_agent_turn
 from isv_readiness.auto import AutoWorkflowError, run_auto
-from isv_readiness.bundle import BundleError, build_bundle
 from isv_readiness.change_verification import (
     apply_verified_change_set,
     load_change_application,
@@ -43,7 +42,7 @@ from isv_readiness.project import (
     execute_bootstrap,
     load_project,
 )
-from isv_readiness.publish import PublishError, check_publish_credentials, publish_bundle
+from isv_readiness.publish import PublishError, publish_project
 from isv_readiness.qualify import (
     QualifyError,
     build_qualify_catalog,
@@ -60,7 +59,7 @@ from isv_readiness.scan.models import GapReport
 from isv_readiness.scan.profile import enrich_report_with_profile
 from isv_readiness.scan.report import load_report, render_report
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
-from isv_readiness.simple import cmd_fill, cmd_init, cmd_status, cmd_test
+from isv_readiness.simple import SimpleError, cmd_fill, cmd_init, cmd_status, cmd_test, find_project
 from isv_readiness.solution_profile import SolutionProfile, SolutionProfileError, load_solution_profile
 from isv_readiness.validation_adapter import IsvctlAdapter, ValidationAdapterError
 from isv_readiness.verification import VerificationError
@@ -81,7 +80,7 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "ISV readiness for ai-cloud-validation, in two phases: "
             "qualify (assess & scope the ISV-owned domains: bootstrap, profile) and "
-            "validate (test the owned scope: plan, onboard, scan, generate, verify, apply, loop, live, bundle)."
+            "validate (test and publish the owned scope: plan, onboard, scan, generate, verify, apply, loop, live)."
         ),
     )
     subparsers = parser.add_subparsers(dest="command")
@@ -124,26 +123,13 @@ def _build_parser() -> argparse.ArgumentParser:
     status_parser = subparsers.add_parser("status", help="Show a gap scorecard across all domains")
     status_parser.set_defaults(handler=_status)
 
-    publish_parser = subparsers.add_parser("publish", help="Publish a completed validation bundle to ISV Lab Service")
-    publish_parser.add_argument("--bundle-dir", type=Path, required=True, help="Directory produced by `gapctl bundle`")
-    publish_parser.add_argument("--lab-id", type=int, required=True, help="NVIDIA-assigned lab ID")
-    publish_parser.add_argument("--junit", type=Path, default=None, help="Optional JUnit XML to upload")
-    publish_parser.add_argument(
-        "--platform",
-        default=None,
-        choices=[
-            "BARE_METAL",
-            "CONTROL_PLANE",
-            "IAM",
-            "IMAGE_REGISTRY",
-            "KUBERNETES",
-            "NETWORK",
-            "OBSERVABILITY",
-            "SECURITY",
-            "SLURM",
-            "VM",
-        ],
+    publish_parser = subparsers.add_parser(
+        "publish", help="Publish the latest successful recorded run for every owned domain"
     )
+    publish_parser.add_argument(
+        "--project", type=Path, default=None, help="Project manifest; defaults to isv-project.yaml above the current directory"
+    )
+    publish_parser.add_argument("--lab-id", type=int, required=True, help="NVIDIA-assigned lab ID")
     publish_parser.add_argument("--isv-software-version", default=None)
     publish_parser.add_argument("--tag", action="append", default=[])
     publish_parser.set_defaults(handler=_publish)
@@ -296,14 +282,6 @@ def _build_parser() -> argparse.ArgumentParser:
     auto_parser.add_argument("--approve-patch", default=None, help="Exact combined patch SHA-256 printed at the review gate")
     auto_parser.set_defaults(handler=_auto)
 
-    bundle_parser = subparsers.add_parser(
-        "bundle", help="Validate phase: assemble a sanitized, hash-inventoried owned-scope validation evidence bundle"
-    )
-    bundle_parser.add_argument("--project", type=Path, required=True)
-    bundle_parser.add_argument("--agent-work-dir", type=Path, action="append", required=True)
-    bundle_parser.add_argument("--out-dir", type=Path, required=True)
-    bundle_parser.set_defaults(handler=_bundle)
-
     scan_parser = subparsers.add_parser(
         "scan", help="Validate phase: build a deterministic static/dynamic gaps.json report over owned domains"
     )
@@ -442,22 +420,15 @@ def _status(args: argparse.Namespace) -> int:
 
 
 def _publish(args: argparse.Namespace) -> int:
-    missing = check_publish_credentials()
-    if missing:
-        print("Missing required environment variables:", file=sys.stderr)
-        for name in missing:
-            print(f"  {name}", file=sys.stderr)
-        return 2
     try:
-        publish_bundle(
-            args.bundle_dir,
+        project_path = args.project or find_project()
+        publish_project(
+            project_path,
             lab_id=args.lab_id,
-            junit_xml_path=args.junit,
-            platform=args.platform,
             isv_software_version=args.isv_software_version,
             tags=args.tag or [],
         )
-    except (OSError, PublishError) as exc:
+    except (OSError, PublishError, SimpleError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
     return 0
@@ -744,23 +715,6 @@ def _auto(args: argparse.Namespace) -> int:
         print(f"Combined patch: {args.work_dir.resolve() / 'auto-review.patch'}")
         print(f"Approve with: --apply --approve-patch {review.patch_sha256}")
     return 0
-
-
-def _bundle(args: argparse.Namespace) -> int:
-    try:
-        manifest = build_bundle(
-            args.project,
-            agent_work_dirs=args.agent_work_dir,
-            output_dir=args.out_dir,
-        )
-    except (OSError, json.JSONDecodeError, ProjectError, AgentWorkflowError, BundleError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-    print(f"Bundle outcome: {manifest.outcome}")
-    print(f"Domains: {len(manifest.domains)}")
-    print(f"Included artifacts: {len(manifest.files)}")
-    print(f"Bundle: {args.out_dir.resolve()}")
-    return 0 if manifest.outcome != "incomplete" else 1
 
 
 def _scan(args: argparse.Namespace) -> int:

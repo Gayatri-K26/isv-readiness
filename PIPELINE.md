@@ -64,13 +64,16 @@ VALIDATE  (test the owned scope)
     isvctl targeted validation ─► artifacts
                     │
                     ▼
-  bundle ──► sanitized, hash-inventoried evidence bundle
+  test ──► canonical .gapctl/runs/<run-id>/ evidence
+    │
+    ├──► status ──► local readiness
+    └──► publish ──► one Lab Service run per owned domain
 ```
 
 ## Linear stage list
 
 ```
-bootstrap → profile → scan → context-pack → generate → verify → review → apply → live-run → bundle
+bootstrap → profile → scan → context-pack → generate → verify → review → apply → test → status → publish
 ```
 
 ## Notes

@@ -69,7 +69,6 @@ python3 -m json.tool src/isv_readiness/schemas/change-application.schema.json >/
 python3 -m json.tool src/isv_readiness/schemas/change-rollback.schema.json >/dev/null
 python3 -m json.tool src/isv_readiness/schemas/live-run.schema.json >/dev/null
 python3 -m json.tool src/isv_readiness/schemas/agent-state.schema.json >/dev/null
-python3 -m json.tool src/isv_readiness/schemas/bundle-manifest.schema.json >/dev/null
 uv lock --check
 git diff --check
 ```

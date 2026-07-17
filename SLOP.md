@@ -8,8 +8,8 @@ decision log, not a transcript of private model reasoning.
 
 - The user confirmed that "BMC" in the implementation request means NVIDIA
   Base Command Manager (BCM), not Baseboard Management Controller.
-- Publication remains deferred. The current boundary ends with a reproducible
-  technical qualification or validation bundle.
+- Publication is explicit and consumes only canonical successful run evidence;
+  no separate bundle or archive is required by the Lab Service.
 - Kubernetes remains the first executable vertical slice, but shared contracts
   and orchestration must support all `ai-cloud-validation` platforms.
 - `ai-cloud-validation` is the source of truth for configuration validity and
@@ -1350,3 +1350,34 @@ milestone. Keeping a permanently null field or inventing a value adds a false
 concept and makes downstream consumers guess what it means. A narrow,
 versioned gap-schema change is simpler and more accurate than a compatibility
 shim for data that never existed.
+
+## Step 27 - Publish Canonical Runs Directly
+
+### Decisions
+
+- Removed the `bundle` command, implementation module, manifest schema, and
+  agent-state requirement. The Lab Service never received the bundle; publish
+  read a small manifest and uploaded JUnit separately, so the extra artifact
+  was a local gate with a second, incompatible notion of completion.
+- Added one readiness assessment over the reviewed profile, complete current
+  `gaps.json`, and latest canonical `.gapctl/runs/` record for every owned
+  domain. Both `status` and `publish` consume it. JUnit must exist and be
+  well-formed, the latest run must exit zero and contain a dynamic pass, and no
+  shared-policy blocker may remain.
+- `publish` now discovers `isv-project.yaml` like the other high-level
+  commands, verifies the validation checkout still matches its pinned commit,
+  and creates one correctly typed Lab Service test run per owned domain. JUnit,
+  platform, tags, and run identity come from the canonical local record instead
+  of operator-supplied duplicate flags.
+- `agent-run` remains an advanced per-gap orchestration option, but it is no
+  longer a submission prerequisite. The installed journey is now `init` ->
+  profile review -> `fill` -> `test` -> `status` -> `publish`.
+
+### Rationale
+
+The evidence already existed in the canonical run directory, and the portal
+API consumes JUnit rather than an archive. Requiring a second command forced
+new ISVs to understand agent work directories, duplicated readiness logic, and
+made the simple wrappers dead-end before publication. Direct publication keeps
+the safety checks while deleting the unused transport format and the mixed-
+platform ambiguity.

@@ -6,9 +6,9 @@ The full system helps an ISV qualify a versioned metal-to-model solution,
 prepare its `ai-cloud-validation` provider implementation, execute validation,
 and close actionable gaps with human-reviewed changes.
 
-The project produces a reproducible technical qualification or validation
-bundle. A separate explicit command may publish a completed bundle's result to
-the ISV Lab Service; publication never changes qualification scope or evidence.
+The project records reproducible validation evidence under `.gapctl/runs/`.
+An explicit command publishes only locally complete, successful evidence to the
+ISV Lab Service; publication never changes qualification scope or test outcomes.
 
 ## System View
 
@@ -61,15 +61,16 @@ flowchart TD
     Actions --> Ticket[Product-gap ticket draft]
     Actions --> Evidence[Evidence request]
     Actions --> Skip[Documented skip or scope decision]
-    Run --> Bundle[Sanitized evidence bundle]
-    Bundle --> Publish[Explicit ISV Lab Service publication]
+    Run --> Recorded[Canonical recorded JUnit evidence]
+    Recorded --> Status[Shared readiness check]
+    Status --> Publish[Explicit per-domain ISV Lab Service publication]
 ```
 
 Solid contracts through context collection, an explicit generator adapter,
 guarded multi-file patch proposal, isolated static verification, transactional
 hash-bound application/rollback, targeted and full-domain live verification,
-persistent agent orchestration, evidence bundling, and explicit completed-result
-publication are implemented. Built-in model-vendor adapters beyond the included
+persistent agent orchestration, canonical run recording, and explicit
+completed-result publication are implemented. Built-in model-vendor adapters beyond the included
 Codex and Claude Code reference adapters and PR submission remain optional
 future integrations.
 
@@ -119,8 +120,9 @@ ownership or scope.
    whether a candidate edit is allowed, and which profile action owns it.
 7. Fix and rerun one selected gap at a time until all required rows are green or
    have approved dispositions.
-8. Freeze versions, configuration, hardware inventory, plan fingerprints,
-   reports, logs, and exceptions into the validation bundle.
+8. Record the final JUnit result under `.gapctl/runs/` and publish only when the
+   reviewed profile, complete gap report, and latest run for every owned domain
+   are ready.
 
 "One gap at a time" means serial, reviewable changes, not stopping after one
 gap. The controller eventually processes the full selected domain.
@@ -326,8 +328,8 @@ selected scope is green and a final full-domain live run passes.
 
 The implemented controller consumes successive `gaps.json` reports and records
 explicit attempts in `loop-state.json`. It uses the same gap decision function
-as auto, live success, status, and bundle authorization; selects scope blockers
-before edit routes; prefers editable and `min_req` rows within a route; enforces
+as auto, live success, status, and publication authorization; selects scope
+blockers before edit routes; prefers editable and `min_req` rows within a route; enforces
 a per-gap retry budget; and reports `ready`, `blocked`, or `complete`. It
 deliberately does not execute remediation strings or apply patches. `agent-run`
 orchestrates these existing decisions while preserving separate patch-review,
@@ -422,8 +424,8 @@ solution supplies them.
 | Persistent deterministic loop-state controller | Implemented |
 | Explicit rollback and policy-gated live verifier | Implemented |
 | Persistent review-gated agent runner | Implemented |
-| Sanitized evidence bundle | Implemented |
-| Completed-bundle publication to ISV Lab Service | Implemented |
+| Canonical recorded run evidence | Implemented |
+| Direct per-domain publication to ISV Lab Service | Implemented |
 | Wheel-packaged runtime schemas | Implemented |
 | Additional model-vendor generator adapters | Optional next |
 | Pull-request creation | Optional next |

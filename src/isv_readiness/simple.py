@@ -8,13 +8,14 @@ from pathlib import Path
 
 from isv_readiness.auto import AutoWorkflowError, run_auto
 from isv_readiness.context import ContextError
-from isv_readiness.decision import blocking_rows, validation_profile_issues
+from isv_readiness.decision import blocking_rows
 from isv_readiness.fixes import FixGuardrailError
 from isv_readiness.live import LiveRunError, run_live_domain
 from isv_readiness.onboarding import OnboardingError, build_provider_onboarding_plan, execute_provider_onboarding
 from isv_readiness.project import ProjectError, ReadinessProject, build_bootstrap_plan, execute_bootstrap, load_project
 from isv_readiness.qualify import QualifyError, build_qualify_catalog
-from isv_readiness.runs import JUNIT_FILENAME, LOG_FILENAME, RunRecordError, latest_run, new_run_dir, write_run_record
+from isv_readiness.readiness import assess_readiness
+from isv_readiness.runs import JUNIT_FILENAME, LOG_FILENAME, RunRecordError, new_run_dir, write_run_record
 from isv_readiness.scan.models import SCHEMA_VERSION
 from isv_readiness.scan.profile import enrich_report_with_profile
 from isv_readiness.scan.report import load_report, render_report
@@ -284,46 +285,25 @@ def cmd_status() -> int:
         print(str(exc), file=sys.stderr)
         return 2
 
+    print(render_report(report, "scorecard"))
     try:
-        profile = (
-            load_solution_profile(project.resolve_path(project_path, project.assessment.profile))
-            if project.assessment.profile
-            else None
-        )
+        readiness = assess_readiness(project, project_path, report)
     except (OSError, SolutionProfileError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
-
-    print(render_report(report, "scorecard"))
-    open_gaps = len(blocking_rows(report))
-    profile_issues = validation_profile_issues(profile, project.assessment.domains)
-    passing_dynamic_domains = {
-        row.get("domain")
-        for row in rows
-        if row.get("detection") == "dynamic" and row.get("status") == "pass"
-    }
-    unvalidated = [
-        domain
-        for domain in project.assessment.domains
-        if domain not in passing_dynamic_domains
-        or (record := latest_run(_artifacts_dir(project_path), domain)) is None
-        or record.exit_code != 0
-    ]
-    if open_gaps == 0 and not unvalidated and not profile_issues:
+    if readiness.ready:
         print("\nAll gaps are closed and every owned domain has a passing recorded live run.")
-        print("Build the bundle from each completed agent-run work directory:")
-        print(
-            "  gapctl bundle --project isv-project.yaml "
-            "--agent-work-dir <completed-agent-work-dir> --out-dir validation-bundle/"
-        )
+        print("Ready to publish: gapctl publish --lab-id <nvidia-assigned-lab-id>")
     else:
-        if open_gaps:
-            print(f"\n{open_gaps} gap(s) remaining.")
-        if unvalidated:
-            print("Live validation still required for: " + ", ".join(unvalidated))
-        if profile_issues:
-            print("Profile qualification still required: " + "; ".join(profile_issues))
-    return 0 if open_gaps == 0 and not unvalidated and not profile_issues else 1
+        if readiness.blocking_count:
+            print(f"\n{readiness.blocking_count} gap(s) remaining.")
+        if readiness.unvalidated_domains:
+            print("Live validation still required for: " + ", ".join(readiness.unvalidated_domains))
+        if readiness.profile_issues:
+            print("Profile qualification still required: " + "; ".join(readiness.profile_issues))
+        for issue in (*readiness.report_issues, *readiness.evidence_issues):
+            print(f"Evidence issue: {issue}")
+    return 0 if readiness.ready else 1
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

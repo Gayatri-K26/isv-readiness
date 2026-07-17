@@ -189,7 +189,7 @@ def run_live_domain(
     ]
     statuses = tuple(sorted(row.status for row in selected_rows))
     # Success requires both an actual execution and the same reviewed
-    # status/profile decision used by fill, status, and bundle.
+    # status/profile decision used by fill, status, and publication.
     success = (
         result.returncode == 0
         and any(status == "pass" for status in statuses)

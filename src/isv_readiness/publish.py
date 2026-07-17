@@ -1,17 +1,22 @@
-"""Publish a validation bundle to ISV Lab Service using stdlib only."""
+"""Publish canonical recorded validation evidence to ISV Lab Service."""
 
 from __future__ import annotations
 
 import base64
 import json
 import os
+import re
+import subprocess
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from xml.etree import ElementTree
 
-from isv_readiness.bundle import BundleError, load_bundle_manifest
+from isv_readiness.project import ProjectError, load_project
+from isv_readiness.readiness import assess_readiness
+from isv_readiness.scan.report import load_report
+from isv_readiness.solution_profile import SolutionProfileError
 
 
 class PublishError(ValueError):
@@ -31,20 +36,14 @@ _DOMAIN_TO_PLATFORM = {
     "observability": "OBSERVABILITY",
     "security": "SECURITY",
 }
-_PLATFORMS = frozenset(_DOMAIN_TO_PLATFORM.values())
+CommitResolver = Callable[[Path], str]
 
 
-def _detect_platform(domains: list[str]) -> str:
-    unknown = sorted(set(domains).difference(_DOMAIN_TO_PLATFORM))
-    if unknown:
-        raise PublishError(f"Cannot infer a publish platform for domains: {', '.join(unknown)}")
-    platforms = {_DOMAIN_TO_PLATFORM[domain] for domain in domains}
-    if len(platforms) != 1:
-        raise PublishError(
-            "The bundle spans multiple platform types; pass --platform explicitly "
-            f"({', '.join(sorted(platforms))})."
-        )
-    return platforms.pop()
+def _platform_for_domain(domain: str) -> str:
+    try:
+        return _DOMAIN_TO_PLATFORM[domain]
+    except KeyError as exc:
+        raise PublishError(f"Cannot infer a publish platform for domain: {domain}") from exc
 
 
 def _require_env(name: str) -> str:
@@ -106,113 +105,122 @@ def _get_jwt_token(ssa_issuer: str, client_id: str, client_secret: str) -> str:
         raise PublishError("JWT endpoint returned an invalid JSON response.") from exc
 
 
-def publish_bundle(
-    bundle_dir: Path,
+def publish_project(
+    project_path: Path,
     *,
     lab_id: int,
-    junit_xml_path: Path | None = None,
-    platform: str | None = None,
     isv_software_version: str | None = None,
     tags: list[str] | None = None,
-) -> str:
-    """Publish a gapctl validation bundle to ISV Lab Service.
+    commit_resolver: CommitResolver | None = None,
+) -> tuple[str, ...]:
+    """Publish the latest successful recorded run for every owned domain.
 
     Raises:
-        PublishError: If the bundle or credentials are missing/invalid
+        PublishError: If local evidence or publication credentials are invalid.
     """
-    bundle_dir = bundle_dir.expanduser().resolve()
+    project_path = project_path.expanduser().resolve()
     if lab_id < 1:
         raise PublishError("Lab ID must be a positive integer.")
     try:
-        manifest = load_bundle_manifest(bundle_dir)
-    except BundleError as exc:
-        raise PublishError(str(exc)) from exc
+        project = load_project(project_path)
+        report_path = project_path.parent / "gaps.json"
+        if not report_path.is_file():
+            raise PublishError("gaps.json not found; run gapctl test and gapctl status before publishing.")
+        report = load_report(report_path)
+        readiness = assess_readiness(project, project_path, report)
+    except PublishError:
+        raise
+    except (OSError, json.JSONDecodeError, ProjectError, SolutionProfileError) as exc:
+        raise PublishError(f"Could not validate local publication evidence: {exc}") from exc
 
-    provider = manifest["provider"]
-    outcome = manifest["outcome"]
-    domains = [domain["domain"] for domain in manifest["domains"]]
-    if outcome != "validation_complete" or any(domain["status"] != "complete" for domain in manifest["domains"]):
+    if not readiness.ready:
+        issues = list(readiness.profile_issues)
+        if readiness.blocking_count:
+            issues.append(f"{readiness.blocking_count} blocking gap(s) remain")
+        issues.extend(readiness.report_issues)
+        issues.extend(f"live validation required for {domain}" for domain in readiness.unvalidated_domains)
+        issues.extend(readiness.evidence_issues)
+        raise PublishError("Project is not ready to publish: " + "; ".join(issues))
+
+    expected_commit = project.validation.resolved_commit
+    if expected_commit is None:
+        raise PublishError("Project does not pin an ai-cloud-validation commit.")
+    current_commit = (commit_resolver or _resolve_commit)(project.validation_root(project_path))
+    if current_commit != expected_commit:
         raise PublishError(
-            "Refusing to publish an incomplete evidence bundle; complete every owned domain and rebuild the bundle."
+            f"Validation checkout drifted from pinned commit {expected_commit} to {current_commit}; rerun qualification."
         )
-    if platform is not None and platform not in _PLATFORMS:
-        raise PublishError(f"Unsupported publish platform: {platform}")
-
-    resolved_platform = platform or _detect_platform(domains)
-    resolved_tags = list(dict.fromkeys([*list(tags or []), provider, *domains]))
-
-    junit_xml: str | None = None
-    if junit_xml_path is not None:
-        junit_path = junit_xml_path.expanduser().resolve()
-        if not junit_path.is_file():
-            raise PublishError(f"JUnit XML not found: {junit_path}")
-        junit_xml = junit_path.read_text(encoding="utf-8")
-        try:
-            ElementTree.fromstring(junit_xml)
-        except ElementTree.ParseError as exc:
-            raise PublishError(f"JUnit XML is not well formed: {junit_path}") from exc
 
     endpoint = _require_env("ISV_SERVICE_ENDPOINT").rstrip("/")
     ssa_issuer = _require_env("ISV_SSA_ISSUER").rstrip("/")
     client_id = _require_env("ISV_CLIENT_ID")
     client_secret = _require_env("ISV_CLIENT_SECRET")
 
-    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00")
-
-    print(f"Provider:  {provider}")
-    print(f"Domains:   {', '.join(domains)}")
-    print(f"Outcome:   {outcome}")
-    print(f"Platform:  {resolved_platform}")
-    print(f"Lab ID:    {lab_id}")
-    print()
-
     jwt_token = _get_jwt_token(ssa_issuer, client_id, client_secret)
+    provider = project.provider.name
+    urls: list[str] = []
+    for evidence in readiness.evidence:
+        platform = _platform_for_domain(evidence.domain)
+        resolved_tags = list(dict.fromkeys([*list(tags or []), provider, evidence.domain]))
+        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+        payload: dict = {
+            "executedBy": "gapctl",
+            "ciReference": f"gapctl test {evidence.domain} ({evidence.run.run_id})",
+            "tags": resolved_tags,
+            "testTargetType": platform,
+            "testRunStartAt": now,
+        }
+        if isv_software_version:
+            payload["isvSoftwareVersion"] = isv_software_version
 
-    payload: dict = {
-        "executedBy": "gapctl",
-        "ciReference": f"gapctl bundle {bundle_dir.name}",
-        "tags": resolved_tags,
-        "testTargetType": resolved_platform,
-        "testRunStartAt": now,
-    }
-    if isv_software_version:
-        payload["isvSoftwareVersion"] = isv_software_version
+        print(f"Provider:  {provider}")
+        print(f"Domain:    {evidence.domain}")
+        print(f"Run:       {evidence.run.run_id}")
+        print(f"Platform:  {platform}")
+        print(f"Lab ID:    {lab_id}")
+        print()
 
-    result = _post(f"{endpoint}/v1/labs/{lab_id}/test-runs", payload, token=jwt_token)
-    try:
-        test_run_id = str(result["data"]["testRunId"])
-    except (KeyError, TypeError) as exc:
-        raise PublishError("ISV Lab Service create response did not contain data.testRunId.") from exc
-    print(f"Test run created: {test_run_id}")
-
-    if junit_xml is not None:
-        print(f"Uploading JUnit XML: {junit_xml_path.expanduser().resolve()}")
+        result = _post(f"{endpoint}/v1/labs/{lab_id}/test-runs", payload, token=jwt_token)
+        try:
+            test_run_id = str(result["data"]["testRunId"])
+        except (KeyError, TypeError) as exc:
+            raise PublishError("ISV Lab Service create response did not contain data.testRunId.") from exc
+        print(f"Test run created: {test_run_id}")
+        print(f"Uploading JUnit XML: {evidence.run.junit_path}")
         _post(
             f"{endpoint}/v1/labs/{lab_id}/test-runs/{test_run_id}/test-results",
-            {"junitXml": junit_xml},
+            {"junitXml": evidence.junit_xml},
             token=jwt_token,
         )
+        complete_time = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+        update_payload: dict = {"testRunStatus": "SUCCESS", "testRunCompleteAt": complete_time}
+        if isv_software_version:
+            update_payload["isvSoftwareVersion"] = isv_software_version
+        _post(
+            f"{endpoint}/v1/labs/{lab_id}/test-runs/{test_run_id}",
+            update_payload,
+            token=jwt_token,
+            method="PUT",
+        )
+        print("Status:    SUCCESS")
 
-    complete_time = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00")
-    status = "SUCCESS" if outcome == "validation_complete" else "FAILED"
-    update_payload: dict = {"testRunStatus": status, "testRunCompleteAt": complete_time}
-    if isv_software_version:
-        update_payload["isvSoftwareVersion"] = isv_software_version
-    _post(
-        f"{endpoint}/v1/labs/{lab_id}/test-runs/{test_run_id}",
-        update_payload,
-        token=jwt_token,
-        method="PUT",
+        url = f"{endpoint}/v1/labs/{lab_id}/test-runs/{test_run_id}"
+        urls.append(url)
+        print()
+        print(f"Results published: {url}")
+    return tuple(urls)
+
+
+def _resolve_commit(root: Path) -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
     )
-    print(f"Status:    {status}")
-
-    url = f"{endpoint}/v1/labs/{lab_id}/test-runs/{test_run_id}"
-    print()
-    print(f"Results published: {url}")
-    return url
-
-
-def check_publish_credentials() -> list[str]:
-    """Return a list of missing credential env var names."""
-    required = ["ISV_SERVICE_ENDPOINT", "ISV_SSA_ISSUER", "ISV_CLIENT_ID", "ISV_CLIENT_SECRET"]
-    return [name for name in required if not os.environ.get(name)]
+    commit = (result.stdout or "").strip()
+    if result.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise PublishError(f"Could not resolve validation commit: {(result.stderr or '').strip()}")
+    return commit
