@@ -272,7 +272,7 @@ def _git_runner(command, cwd: Path, timeout: int) -> subprocess.CompletedProcess
 
 def _gap_report(provider: Path) -> GapReport:
     return GapReport(
-        schema_version="0.1.0",
+        schema_version="0.2.0",
         provider_repo=str(provider),
         domains=["vm"],
         rows=[
@@ -282,7 +282,6 @@ def _gap_report(provider: Path) -> GapReport:
                 step_name="launch",
                 validation_class="VmLaunchCheck",
                 requirement_id="VM01",
-                milestone="M1",
                 status="not_implemented",
                 detection="static",
                 stage="coverage",

@@ -17,9 +17,8 @@
         "stderr_excerpt": null,
         "validation_message": null
       },
-      "id": "gap_5e4bf68a7ab4",
+      "id": "gap_fed2a2965b2d",
       "labels": ["vm", "min_req"],
-      "milestone": "M0",
       "remediation": {
         "auto_fixable": true,
         "aws_reference": "../ai-cloud-validation/isvctl/configs/providers/aws/scripts/vm/launch_instance.py",
@@ -49,9 +48,8 @@
         "stderr_excerpt": null,
         "validation_message": null
       },
-      "id": "gap_5d413a9b22f1",
+      "id": "gap_8e7ba125ba95",
       "labels": ["vm", "min_req"],
-      "milestone": "M1",
       "remediation": {
         "auto_fixable": true,
         "aws_reference": "../ai-cloud-validation/isvctl/configs/providers/aws/scripts/vm/list_instances.py",
@@ -77,9 +75,8 @@
         "stderr_excerpt": null,
         "validation_message": null
       },
-      "id": "gap_1fd99b3e7adc",
+      "id": "gap_d44865036532",
       "labels": ["vm"],
-      "milestone": null,
       "remediation": {
         "auto_fixable": false,
         "aws_reference": "../ai-cloud-validation/isvctl/configs/providers/aws/scripts/vm/teardown.py",
@@ -93,5 +90,5 @@
       "validation_class": "StepSuccessCheck"
     }
   ],
-  "schema_version": "0.1.0"
+  "schema_version": "0.2.0"
 }

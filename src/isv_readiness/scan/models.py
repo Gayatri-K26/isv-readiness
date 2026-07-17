@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-SCHEMA_VERSION = "0.1.0"
+SCHEMA_VERSION = "0.2.0"
 
 Status = Literal["pass", "fail", "not_implemented", "skipped", "error"]
 Detection = Literal["static", "dynamic"]
@@ -38,7 +38,6 @@ class GapRow:
     step_name: str
     validation_class: str | None
     requirement_id: str | None
-    milestone: str | None
     status: Status
     detection: Detection
     stage: Stage

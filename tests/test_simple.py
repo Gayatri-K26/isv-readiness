@@ -48,11 +48,24 @@ class SimpleCommandTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tempdir:
             _, manifest = _project(Path(tempdir), allow_live=False)
             with patch("isv_readiness.simple.find_project", return_value=manifest):
-                for _ in range(2):
-                    with redirect_stdout(io.StringIO()) as output:
-                        self.assertEqual(cmd_status(), 1)
-                    self.assertIn("Gap Scorecard", output.getvalue())
-                    self.assertIn("Live validation still required for: vm", output.getvalue())
+                with redirect_stdout(io.StringIO()) as output:
+                    self.assertEqual(cmd_status(), 1)
+                self.assertIn("Gap Scorecard", output.getvalue())
+                self.assertIn("Live validation still required for: vm", output.getvalue())
+
+                gaps_path = manifest.parent / "gaps.json"
+                legacy = json.loads(gaps_path.read_text(encoding="utf-8"))
+                legacy["schema_version"] = "0.1.0"
+                for row in legacy["rows"]:
+                    row["milestone"] = None
+                gaps_path.write_text(json.dumps(legacy), encoding="utf-8")
+
+                with redirect_stdout(io.StringIO()) as output:
+                    self.assertEqual(cmd_status(), 1)
+                self.assertIn("current schema is '0.2.0'", output.getvalue())
+                refreshed = json.loads(gaps_path.read_text(encoding="utf-8"))
+                self.assertEqual(refreshed["schema_version"], "0.2.0")
+                self.assertTrue(all("milestone" not in row for row in refreshed["rows"]))
 
     def test_test_records_empirical_run_and_keeps_full_project_scope(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:

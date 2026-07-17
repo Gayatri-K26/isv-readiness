@@ -27,7 +27,6 @@ def _row(
         "step_name": gap_id,
         "validation_class": "InstanceCreatedCheck",
         "requirement_id": None,
-        "milestone": None,
         "labels": labels or [],
         "status": status,
         "detection": "static",
@@ -60,7 +59,7 @@ def _row(
 
 def _report(rows: list[dict]) -> dict:
     return {
-        "schema_version": "0.1.0",
+        "schema_version": "0.2.0",
         "provider_repo": "/provider",
         "domains": ["vm"],
         "rows": rows,

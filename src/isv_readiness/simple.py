@@ -15,6 +15,7 @@ from isv_readiness.onboarding import OnboardingError, build_provider_onboarding_
 from isv_readiness.project import ProjectError, ReadinessProject, build_bootstrap_plan, execute_bootstrap, load_project
 from isv_readiness.qualify import QualifyError, build_qualify_catalog
 from isv_readiness.runs import JUNIT_FILENAME, LOG_FILENAME, RunRecordError, latest_run, new_run_dir, write_run_record
+from isv_readiness.scan.models import SCHEMA_VERSION
 from isv_readiness.scan.profile import enrich_report_with_profile
 from isv_readiness.scan.report import load_report, render_report
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
@@ -265,8 +266,14 @@ def cmd_status() -> int:
         report = load_report(gaps_out) if gaps_out.exists() else None
         expected_domains = set(project.assessment.domains)
         reported_domains = set(report.get("domains", [])) if isinstance(report, dict) else set()
-        if report is None or reported_domains != expected_domains:
-            reason = "No gaps.json found" if report is None else "gaps.json does not cover the full project scope"
+        reported_schema = report.get("schema_version") if isinstance(report, dict) else None
+        if report is None or reported_domains != expected_domains or reported_schema != SCHEMA_VERSION:
+            if report is None:
+                reason = "No gaps.json found"
+            elif reported_domains != expected_domains:
+                reason = "gaps.json does not cover the full project scope"
+            else:
+                reason = f"gaps.json uses schema {reported_schema!r}; current schema is {SCHEMA_VERSION!r}"
             print(f"{reason} — running a full static scan...")
             report = _scan_project_report(project, project_path)
             gaps_out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")

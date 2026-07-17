@@ -250,7 +250,6 @@ def _dynamic_row(
         step_name=step_name,
         validation_class=validation_class,
         requirement_id=requirement_id,
-        milestone=None,
         status=status,
         detection="dynamic",
         stage="coverage" if status in {"skipped", "not_implemented"} else "correctness",

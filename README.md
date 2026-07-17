@@ -488,7 +488,8 @@ Rows also preserve the upstream `test_id` as `requirement_id` and the suite
 labels (including `min_req`) when those values exist. `status` is always the
 observed static or dynamic result. A `skipped` result blocks readiness unless
 the reviewed profile explicitly routes that capability to
-`skip_with_rationale`.
+`skip_with_rationale`. Gap reports use schema `0.2.0`; regenerate older
+`gaps.json` files with the current `gapctl scan` or `gapctl status` command.
 
 ### 8. Autonomously fill and fix, then stop at one review gate
 

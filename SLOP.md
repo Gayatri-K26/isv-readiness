@@ -1313,9 +1313,9 @@ add command-level coverage.
   profiles remain useful for scanning and qualification review, but carry no
   edit authority.
 - Preserved upstream `test_id` and labels in gap rows and dynamic matches.
-  `min_req` is a deterministic tie-breaker within the same route. The unused
-  nullable `milestone` stays only for schema `0.1.0` compatibility and has no
-  decision role.
+  `min_req` is a deterministic tie-breaker within the same route. At this step,
+  the unused nullable milestone remained only for schema `0.1.0` compatibility
+  and had no decision role.
 - Replaced substring stub detection with syntax-aware Python inspection and
   executable-line shell inspection. TODO comments no longer create false
   gaps, while invalid Python becomes an explicit fixable coverage error.
@@ -1329,3 +1329,24 @@ and stranded a fixable dynamic missing-step row. The simpler contract is: keep
 the observed result, require an explicit reviewed route, and use one function
 for every downstream decision. No new profile fields or inferred milestones
 were introduced.
+
+## Step 26 - Remove the Unsupported Gap Milestone
+
+### Decisions
+
+- Removed the milestone field from `GapRow`, static and dynamic construction,
+  context deserialization, the sample report, and all tests.
+- Bumped only the gap-report contract to schema `0.2.0` and made the already
+  emitted upstream-label list required. Other artifact schemas remain at their
+  existing versions because their shapes did not change.
+- Removed the unused milestone slot from the deterministic gap-ID spine.
+  Existing workspaces must regenerate `gaps.json`, which is already the normal
+  static-scan/status behavior.
+
+### Rationale
+
+The pinned upstream validation contract provides test IDs and labels but no
+milestone. Keeping a permanently null field or inventing a value adds a false
+concept and makes downstream consumers guess what it means. A narrow,
+versioned gap-schema change is simpler and more accurate than a compatibility
+shim for data that never existed.

@@ -235,10 +235,9 @@ raw status with the reviewed action:
   in the validate stage, `implement_or_fix_adapter`, and a scanner-authorized
   target.
 
-The legacy nullable `milestone` field remains in schema version `0.1.0` for
-report compatibility, but does not participate in decisions because upstream
-does not provide a milestone contract. It should be removed only with a schema
-version migration, not replaced with inferred data.
+Gap schema `0.2.0` removed the old nullable milestone field because upstream
+does not provide that contract. Existing workspaces regenerate `gaps.json`;
+other project, profile, context, and workflow artifact versions are unchanged.
 
 ## Agent Actions
 

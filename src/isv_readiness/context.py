@@ -746,7 +746,6 @@ def _gap_from_dict(raw: Mapping[str, Any]) -> GapRow:
         step_name=str(raw["step_name"]),
         validation_class=raw.get("validation_class"),
         requirement_id=raw.get("requirement_id"),
-        milestone=raw.get("milestone"),
         status=raw["status"],
         detection=raw["detection"],
         stage=raw["stage"],

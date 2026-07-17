@@ -51,7 +51,6 @@ class CheckRef:
     step_name: str
     validation_class: str
     requirement_id: str | None = None
-    milestone: str | None = None
     requires_step: bool = True
     valid: bool = True
     error: str | None = None
@@ -75,7 +74,6 @@ def scan_provider(options: ScanOptions) -> GapReport:
                     step_name="<config>",
                     validation_class=None,
                     requirement_id=None,
-                    milestone=None,
                     status="not_implemented" if is_k8s else "error",
                     stage="coverage",
                     message=_missing_config_message(provider_repo, domain),
@@ -151,7 +149,6 @@ def _scan_check(
             step_name=check.step_name,
             validation_class=check.validation_class,
             requirement_id=check.requirement_id,
-            milestone=check.milestone,
             status="error",
             stage="coverage",
             message=f"Validation configuration is invalid: {check.error or 'unknown contract error'}",
@@ -174,7 +171,6 @@ def _scan_check(
             step_name=check.step_name,
             validation_class=check.validation_class,
             requirement_id=check.requirement_id,
-            milestone=check.milestone,
             status="pass",
             stage="coverage",
             message=(
@@ -202,7 +198,6 @@ def _scan_check(
             step_name=check.step_name,
             validation_class=check.validation_class,
             requirement_id=check.requirement_id,
-            milestone=check.milestone,
             status="not_implemented",
             stage="coverage",
             message="Provider config does not wire a command for this required step.",
@@ -224,7 +219,6 @@ def _scan_check(
             step_name=check.step_name,
             validation_class=check.validation_class,
             requirement_id=check.requirement_id,
-            milestone=check.milestone,
             status="skipped",
             stage="coverage",
             message="Provider config marks this step as skipped.",
@@ -246,7 +240,6 @@ def _scan_check(
             step_name=check.step_name,
             validation_class=check.validation_class,
             requirement_id=check.requirement_id,
-            milestone=check.milestone,
             status="not_implemented",
             stage="coverage",
             message="Kubernetes command still points at the my-isv template scripts instead of this provider.",
@@ -268,7 +261,6 @@ def _scan_check(
             step_name=check.step_name,
             validation_class=check.validation_class,
             requirement_id=check.requirement_id,
-            milestone=check.milestone,
             status="error",
             stage="coverage",
             message="Command does not reference a .py or .sh provider script.",
@@ -290,7 +282,6 @@ def _scan_check(
             step_name=check.step_name,
             validation_class=check.validation_class,
             requirement_id=check.requirement_id,
-            milestone=check.milestone,
             status="not_implemented",
             stage="coverage",
             message="Provider script referenced by config is missing.",
@@ -314,7 +305,6 @@ def _scan_check(
             step_name=check.step_name,
             validation_class=check.validation_class,
             requirement_id=check.requirement_id,
-            milestone=check.milestone,
             status="error",
             stage="coverage",
             message=f"Provider script has invalid Python syntax: {syntax_error}",
@@ -336,7 +326,6 @@ def _scan_check(
             step_name=check.step_name,
             validation_class=check.validation_class,
             requirement_id=check.requirement_id,
-            milestone=check.milestone,
             status="not_implemented",
             stage="coverage",
             message=f"Provider script still contains stub marker: {stub_hit}",
@@ -367,7 +356,6 @@ def _scan_check(
                 step_name=check.step_name,
                 validation_class=check.validation_class,
                 requirement_id=check.requirement_id,
-                milestone=check.milestone,
                 status="fail",
                 stage="correctness",
                 message=f"Static JSON sample does not match expected '{schema_name}' output schema.",
@@ -388,7 +376,6 @@ def _scan_check(
             step_name=check.step_name,
             validation_class=check.validation_class,
             requirement_id=check.requirement_id,
-            milestone=check.milestone,
             status="pass",
             stage="coverage",
             message=f"Static JSON sample matches expected '{schema_name}' output schema.",
@@ -409,7 +396,6 @@ def _scan_check(
         step_name=check.step_name,
         validation_class=check.validation_class,
         requirement_id=check.requirement_id,
-        milestone=check.milestone,
         status="pass",
         stage="coverage",
         message="No static stub markers found; output-schema validation is deferred to dynamic ai-cloud-validation runs.",
@@ -432,7 +418,6 @@ def _row(
     step_name: str,
     validation_class: str | None,
     requirement_id: str | None,
-    milestone: str | None,
     status: Status,
     stage: Stage,
     message: str,
@@ -447,7 +432,7 @@ def _row(
     enrichment: dict[str, Any] | None = None,
 ) -> GapRow:
     validation_instance = str((enrichment or {}).get("validation_instance", ""))
-    spine = "|".join([domain, step_name, validation_class or "", requirement_id or "", milestone or ""])
+    spine = "|".join([domain, step_name, validation_class or "", requirement_id or ""])
     if validation_instance:
         spine = f"{spine}|{validation_instance}"
     gap_id = "gap_" + hashlib.sha1(spine.encode("utf-8")).hexdigest()[:12]
@@ -462,7 +447,6 @@ def _row(
         step_name=step_name,
         validation_class=validation_class,
         requirement_id=requirement_id,
-        milestone=milestone,
         status=status,
         detection="static",
         stage=stage,

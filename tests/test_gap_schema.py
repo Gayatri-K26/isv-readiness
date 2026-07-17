@@ -17,6 +17,11 @@ class GapSchemaTests(unittest.TestCase):
         sample = json.loads((ROOT / "examples" / "gaps.sample.json").read_text(encoding="utf-8"))
 
         jsonschema.Draft202012Validator(schema).validate(sample)
+        self.assertEqual(sample["schema_version"], "0.2.0")
+
+        sample["rows"][0]["milestone"] = "M0"
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.Draft202012Validator(schema).validate(sample)
 
 
 if __name__ == "__main__":
