@@ -10,17 +10,17 @@ import jsonschema
 
 from isv_readiness.context import (
     build_context_pack,
-    import_context_source,
     sync_context_sources,
 )
 from isv_readiness.project import build_bootstrap_plan, execute_bootstrap
+from isv_readiness.runs import latest_run, new_run_dir, write_run_record
 from isv_readiness.scan.models import Evidence, GapReport, GapRow, Remediation
 
 COMMIT = "b" * 40
 
 
 class ContextTests(unittest.TestCase):
-    def test_sync_is_network_opt_in_and_redacts_local_api_spec(self) -> None:
+    def test_sync_degrades_offline_and_redacts_local_api_spec(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             workspace, project, manifest = _project(Path(tempdir))
             (workspace / "openapi.yaml").write_text(
@@ -29,14 +29,17 @@ class ContextTests(unittest.TestCase):
             )
             cache = workspace / ".gapctl" / "cache"
 
-            records = sync_context_sources(project, manifest, cache, allow_network=False)
+            def offline_fetcher(url: str, headers: dict[str, str]) -> bytes:
+                del headers
+                raise OSError(f"network unreachable: {url}")
+
+            records = sync_context_sources(project, manifest, cache, fetcher=offline_fetcher)
             by_id = {record.source_id: record for record in records}
 
-            self.assertEqual(by_id["validation_issues"].status, "deferred")
-            self.assertEqual(by_id["nsrg"].status, "deferred")
+            self.assertEqual(by_id["validation_issues"].status, "missing")
+            self.assertEqual(by_id["nsrg"].status, "missing")
             self.assertEqual(by_id["primary_api_spec"].status, "synced")
             self.assertNotIn("super-secret", json.dumps(by_id["primary_api_spec"].content))
-            self.assertEqual(by_id["nvidia_ai_cloud_ready"].status, "missing")
 
     def test_github_issue_sync_filters_pull_requests_and_never_caches_token(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
@@ -66,7 +69,6 @@ class ContextTests(unittest.TestCase):
                 project,
                 manifest,
                 workspace / ".gapctl" / "cache",
-                allow_network=True,
                 fetcher=fetcher,
                 environment={"GITHUB_TOKEN": "do-not-cache"},
             )
@@ -124,13 +126,7 @@ class ContextTests(unittest.TestCase):
                     ).encode()
                 return b"Infrastructure as a Service includes VM lifecycle operations."
 
-            sync_context_sources(project, manifest, cache, allow_network=True, fetcher=fetcher)
-            mcp_export = workspace / "mcp.json"
-            mcp_export.write_text(
-                json.dumps({"guidance": "VM qualification evidence", "NVIDIA_TOKEN": "private"}),
-                encoding="utf-8",
-            )
-            import_context_source(project, "nvidia_ai_cloud_ready", mcp_export, cache)
+            sync_context_sources(project, manifest, cache, fetcher=fetcher)
             report = _gap_report(provider)
 
             pack = build_context_pack(
@@ -152,9 +148,57 @@ class ContextTests(unittest.TestCase):
             self.assertIn("issues/12", serialized)
             self.assertNotIn("issues/13", serialized)
             self.assertNotIn("available-but-never-serialized", serialized)
-            self.assertNotIn('"private"', serialized)
             self.assertEqual(raw["credentials"]["available_env"], ["ACME_TOKEN"])
             self.assertEqual(raw["items"][0]["trust"], "authoritative")
+
+    def test_latest_run_artifacts_enter_pack_as_top_ranked_empirical_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            workspace, project, manifest = _project(Path(tempdir), existing_provider=True)
+            provider = project.provider_root(manifest)
+            (provider / "scripts" / "vm").mkdir(parents=True)
+            (provider / "config").mkdir()
+            (provider / "scripts" / "vm" / "launch.py").write_text("# TODO\n", encoding="utf-8")
+            (provider / "config" / "vm.yaml").write_text("steps: []\n", encoding="utf-8")
+            (workspace / "openapi.yaml").write_text("paths: {}\n", encoding="utf-8")
+            report = _gap_report(provider)
+            cache = workspace / ".gapctl" / "context-cache"
+            runs_root = workspace / ".gapctl" / "runs"
+
+            stale_id, stale_dir = new_run_dir(runs_root, "vm", created_at="20260101T000000Z")
+            (stale_dir / "junit.xml").write_text(
+                '<testsuite><testcase name="stale VmLaunchCheck launch"/></testsuite>',
+                encoding="utf-8",
+            )
+            write_run_record(stale_dir, run_id=stale_id, domain="vm", config="config/vm.yaml", exit_code=1)
+            fresh_id, fresh_dir = new_run_dir(runs_root, "vm", created_at="20260102T000000Z")
+            (fresh_dir / "junit.xml").write_text(
+                '<testsuite><testcase name="fresh VmLaunchCheck launch"><failure>'
+                "VM launch returned no instance identifier\n"
+                "ACME_TOKEN=leaked-value\n"
+                "</failure></testcase></testsuite>",
+                encoding="utf-8",
+            )
+            write_run_record(fresh_dir, run_id=fresh_id, domain="vm", config="config/vm.yaml", exit_code=1)
+
+            resolved = latest_run(runs_root, "vm")
+            assert resolved is not None
+            self.assertEqual(resolved.run_id, fresh_id)
+            self.assertIsNone(latest_run(runs_root, "network"))
+
+            pack = build_context_pack(
+                project, manifest, report, gap_id="gap_0123456789ab", cache_dir=cache, environment={}
+            )
+            raw = pack.to_dict()
+            schema = json.loads(
+                (Path(__file__).parents[1] / "schemas" / "context-pack.schema.json").read_text(encoding="utf-8")
+            )
+            jsonschema.validate(raw, schema)
+            self.assertEqual(raw["items"][0]["trust"], "empirical")
+            self.assertEqual(raw["items"][0]["source_id"], "latest_run_vm_junit")
+            serialized = json.dumps(raw)
+            self.assertIn("fresh VmLaunchCheck", serialized)
+            self.assertNotIn("stale VmLaunchCheck", serialized)
+            self.assertNotIn("leaked-value", serialized)
 
     def test_html_sources_are_extracted_to_prose_and_zero_signal_guidance_is_skipped(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
@@ -179,7 +223,7 @@ class ContextTests(unittest.TestCase):
                 )
 
             cache = workspace / ".gapctl" / "cache-relevant"
-            sync_context_sources(project, manifest, cache, allow_network=True, fetcher=fetcher_relevant)
+            sync_context_sources(project, manifest, cache, fetcher=fetcher_relevant)
             nsrg = json.loads((cache / "nsrg.json").read_text(encoding="utf-8"))
             self.assertNotIn("<", nsrg["content"])
             self.assertNotIn("color:red", nsrg["content"])
@@ -196,7 +240,7 @@ class ContextTests(unittest.TestCase):
                 return b"<!DOCTYPE html><html><body><p>Quantum basket weaving weekly.</p></body></html>"
 
             cache = workspace / ".gapctl" / "cache-irrelevant"
-            sync_context_sources(project, manifest, cache, allow_network=True, fetcher=fetcher_boilerplate)
+            sync_context_sources(project, manifest, cache, fetcher=fetcher_boilerplate)
             pack = build_context_pack(
                 project, manifest, report, gap_id="gap_0123456789ab", cache_dir=cache, environment={}
             )

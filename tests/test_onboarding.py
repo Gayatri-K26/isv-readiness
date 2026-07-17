@@ -61,6 +61,37 @@ class CrossDomainOnboardingTests(unittest.TestCase):
             )
             self.assertIn("BCM cluster and node-pool API access", plan.required_inputs["kubernetes"])
 
+    def test_slurm_onboarding_supplies_the_missing_wrapper_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            validation_root = Path(tempdir) / "ai-cloud-validation"
+            template_dir = validation_root / "isvctl" / "configs" / "providers" / "my-isv"
+            template_dir.mkdir(parents=True)
+            plan = build_provider_onboarding_plan(validation_root, "acme", ["slurm"])
+
+            def runner(command: Sequence[str], cwd: Path, timeout_seconds: int) -> subprocess.CompletedProcess[str]:
+                del cwd, timeout_seconds
+                # The upstream scaffold ships slurm scripts but no config.
+                scripts_dir = plan.provider_dir / "scripts" / "slurm"
+                scripts_dir.mkdir(parents=True, exist_ok=True)
+                (scripts_dir / "setup.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                (scripts_dir / "teardown.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                return subprocess.CompletedProcess(command, 0, "created", "")
+
+            written = execute_provider_onboarding(plan, runner=runner)
+
+            wrapper = plan.provider_dir / "config" / "slurm.yaml"
+            self.assertIn(wrapper, written)
+            text = wrapper.read_text(encoding="utf-8")
+            self.assertIn("../../../suites/slurm.yaml", text)
+            self.assertIn("../scripts/slurm/setup.sh", text)
+            self.assertIn("platform: slurm", text)
+            self.assertIn(f"Slurm wrapper completion: {wrapper}", plan.summary_lines())
+
+            # A hand-authored config is preserved on rerun without overwrite.
+            wrapper.write_text("tests:\n  platform: slurm\n", encoding="utf-8")
+            execute_provider_onboarding(plan, runner=runner, overwrite=False)
+            self.assertEqual(wrapper.read_text(encoding="utf-8"), "tests:\n  platform: slurm\n")
+
     def test_uses_existing_checkout_executable_and_validates_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             validation_root = Path(tempdir) / "ai-cloud-validation"

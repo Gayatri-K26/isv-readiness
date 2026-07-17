@@ -16,8 +16,8 @@ GeneratorRunner = Callable[
 ]
 
 
-def run_generator(
-    context_pack: dict[str, Any],
+def dispatch_generator(
+    request: dict[str, Any],
     *,
     command: Sequence[str],
     cwd: Path,
@@ -25,31 +25,17 @@ def run_generator(
     timeout_seconds: int = 300,
     runner: GeneratorRunner | None = None,
     environment: Mapping[str, str] | None = None,
-) -> ChangeSet:
+) -> dict[str, Any]:
+    """Run a generator adapter under the shared guardrails and return its JSON object.
+
+    This is the single enforcement point for the adapter contract: allowlisted
+    child environment, no shell, request on stdin, exactly one JSON object on
+    stdout. Callers own request composition and output validation.
+    """
     if not command or not all(isinstance(item, str) and item for item in command):
         raise FixGuardrailError("Generator command must contain at least one non-empty argument.")
     if timeout_seconds < 1 or timeout_seconds > 1800:
         raise FixGuardrailError("Generator timeout must be between 1 and 1800 seconds.")
-    gap = context_pack.get("gap") or {}
-    gap_id = gap.get("id")
-    if not isinstance(gap_id, str) or not gap_id:
-        raise FixGuardrailError("Context pack has no selected gap ID.")
-    context_sha256 = canonical_sha256(context_pack)
-    schema_path = Path(__file__).resolve().parents[2] / "schemas" / "change-set.schema.json"
-    request = {
-        "schema_version": "0.1.0",
-        "task": "Produce the smallest provider-owned change set that addresses the selected gap.",
-        "context_pack_sha256": context_sha256,
-        "rules": [
-            "Return one JSON object and no Markdown or commentary.",
-            "Use only create or replace operations allowed by the output schema.",
-            "Do not include credentials, edit validation-suite contracts, or invent scope.",
-            "Every content_sha256 must be the SHA-256 of the UTF-8 content field.",
-            "Prefer the smallest change and preserve cleanup/error behavior required by the contract.",
-        ],
-        "output_schema": json.loads(schema_path.read_text(encoding="utf-8")),
-        "context_pack": context_pack,
-    }
     source_env = environment or os.environ
     child_env = {
         name: source_env[name]
@@ -73,6 +59,50 @@ def run_generator(
         raw = json.loads(output)
     except json.JSONDecodeError as exc:
         raise FixGuardrailError("Generator output must be one JSON object with no Markdown or logs.") from exc
+    if not isinstance(raw, dict):
+        raise FixGuardrailError("Generator output must be one JSON object.")
+    return raw
+
+
+def run_generator(
+    context_pack: dict[str, Any],
+    *,
+    command: Sequence[str],
+    cwd: Path,
+    pass_env: Sequence[str] = (),
+    timeout_seconds: int = 300,
+    runner: GeneratorRunner | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> ChangeSet:
+    gap = context_pack.get("gap") or {}
+    gap_id = gap.get("id")
+    if not isinstance(gap_id, str) or not gap_id:
+        raise FixGuardrailError("Context pack has no selected gap ID.")
+    context_sha256 = canonical_sha256(context_pack)
+    schema_path = Path(__file__).resolve().parents[2] / "schemas" / "change-set.schema.json"
+    request = {
+        "schema_version": "0.1.0",
+        "task": "Produce the smallest provider-owned change set that addresses the selected gap.",
+        "context_pack_sha256": context_sha256,
+        "rules": [
+            "Return one JSON object and no Markdown or commentary.",
+            "Use only create or replace operations allowed by the output schema.",
+            "Do not include credentials, edit validation-suite contracts, or invent scope.",
+            "Every content_sha256 must be the SHA-256 of the UTF-8 content field.",
+            "Prefer the smallest change and preserve cleanup/error behavior required by the contract.",
+        ],
+        "output_schema": json.loads(schema_path.read_text(encoding="utf-8")),
+        "context_pack": context_pack,
+    }
+    raw = dispatch_generator(
+        request,
+        command=command,
+        cwd=cwd,
+        pass_env=pass_env,
+        timeout_seconds=timeout_seconds,
+        runner=runner,
+        environment=environment,
+    )
     validate_change_set(raw)
     if raw["gap_id"] != gap_id:
         raise FixGuardrailError(f"Generator returned gap '{raw['gap_id']}', expected '{gap_id}'.")

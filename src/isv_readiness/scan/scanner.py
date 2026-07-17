@@ -201,6 +201,9 @@ def _scan_check(
         )
 
     if step is None:
+        # Wiring the step lives in the selected domain's own config — inside
+        # the guarded fix surface — so the agent may draft it; profile routing
+        # still decides whether this row is the ISV's to implement at all.
         return _row(
             provider_repo=provider_repo,
             domain=domain,
@@ -217,7 +220,7 @@ def _scan_check(
             aws_reference=aws_reference,
             schema_errors=[],
             missing_json_fields=[],
-            auto_fixable=False,
+            auto_fixable=True,
             rerun_config=rerun_config,
             enrichment=check.enrichment,
         )

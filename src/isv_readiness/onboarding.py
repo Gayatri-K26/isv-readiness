@@ -8,6 +8,7 @@ from pathlib import Path
 from isv_readiness.scan.k8s_onboard import (
     PROVIDER_NAME_RE,
     K8sOnboardingPlan,
+    _write_text,
     build_k8s_onboarding_plan,
     write_k8s_onboarding_files,
 )
@@ -97,6 +98,10 @@ class ProviderOnboardingPlan:
         ]
         if self.k8s_plan is not None:
             lines.append(f"Kubernetes wrapper completion: {self.k8s_plan.wrapper_path}")
+        if "slurm" in self.domains:
+            lines.append(
+                f"Slurm wrapper completion: {self.provider_dir / 'config' / DOMAIN_CONFIG_FILES['slurm']}"
+            )
         lines.append("Required ISV inputs:")
         for domain in self.domains:
             lines.append(f"[{domain}]")
@@ -179,7 +184,40 @@ def execute_provider_onboarding(
                 preserve_existing_scripts=True,
             )
         )
-    return written
+    if "slurm" in plan.domains:
+        # Slurm is a unified suite like Kubernetes: the upstream scaffold ships
+        # scripts/slurm/ but no per-provider config, so onboarding supplies the
+        # wrapper. An existing hand-authored config is preserved.
+        slurm_config = plan.provider_dir / "config" / DOMAIN_CONFIG_FILES["slurm"]
+        if overwrite or not slurm_config.exists():
+            _write_text(slurm_config, _slurm_wrapper_text(plan.provider_name), overwrite=True)
+            written.append(slurm_config)
+    return list(dict.fromkeys(written))
+
+
+def _slurm_wrapper_text(provider_name: str) -> str:
+    return f"""import:
+  - ../../../suites/slurm.yaml
+
+version: "1.0"
+
+commands:
+  slurm:
+    phases: ["setup", "test", "teardown"]
+    steps:
+      - name: setup
+        phase: setup
+        command: "../scripts/slurm/setup.sh"
+        timeout: 120
+      - name: teardown
+        phase: teardown
+        command: "../scripts/slurm/teardown.sh"
+        timeout: 30
+
+tests:
+  description: "{provider_name} Slurm validation"
+  platform: slurm
+"""
 
 
 def _inputs_for_domain(domain: str, profile: SolutionProfile | None) -> tuple[str, ...]:

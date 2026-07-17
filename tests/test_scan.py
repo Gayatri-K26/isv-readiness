@@ -44,7 +44,10 @@ class StaticScanTests(unittest.TestCase):
 
         missing = by_step[("describe_instance", "InstanceStateCheck")]
         self.assertEqual(missing.status, "not_implemented")
-        self.assertFalse(missing.remediation.auto_fixable)
+        # The unwired step's fix is wiring in the ISV-owned domain config —
+        # inside the guarded surface, so the agent may draft it.
+        self.assertTrue(missing.remediation.auto_fixable)
+        self.assertEqual(missing.remediation.target, "config/vm.yaml")
         self.assertIsNotNone(missing.remediation.aws_reference)
 
         teardown = by_step[("teardown", "StepSuccessCheck")]

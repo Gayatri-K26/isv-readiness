@@ -276,14 +276,16 @@ class SolutionProfile:
         blocking_domains = sorted(
             domain.domain
             for domain in owned_domains
-            if domain.coverage != "covered" or domain.validation_mode != "test"
+            if _blocks_readiness(domain.coverage, domain.validation_mode)
         )
         blocking_capabilities = sorted(
             capability.id
             for domain in owned_domains
             for capability in domain.capabilities
-            if (capability.coverage or domain.coverage) != "covered"
-            or (capability.validation_mode or domain.validation_mode) != "test"
+            if _blocks_readiness(
+                capability.coverage or domain.coverage,
+                capability.validation_mode or domain.validation_mode,
+            )
         )
         return {
             "solution_id": self.solution.id,
@@ -295,6 +297,20 @@ class SolutionProfile:
             "blocking_capabilities": blocking_capabilities,
             "validation_ready": bool(owned_domains) and not blocking_domains and not blocking_capabilities,
         }
+
+
+def _blocks_readiness(coverage: str, validation_mode: str) -> bool:
+    """A row blocks owned-scope readiness unless it is proven or deliberately excluded.
+
+    ``covered``+``test`` is the proven path; ``out_of_scope``+``skip`` is a
+    signed scope decision, not a deficiency, so it must not block forever.
+    Everything else (gaps, unknowns, half-pairings) still blocks.
+    """
+    if coverage == "covered" and validation_mode == "test":
+        return False
+    if coverage == "out_of_scope" and validation_mode == "skip":
+        return False
+    return True
 
 
 def load_solution_profile(path: Path, *, schema_path: Path | None = None) -> SolutionProfile:

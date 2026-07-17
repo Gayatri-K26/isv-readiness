@@ -10,11 +10,12 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import jsonschema
 
 from isv_readiness.project import ContextSource, ReadinessProject
+from isv_readiness.runs import latest_run
 from isv_readiness.scan.models import Evidence, GapReport, GapRow, Remediation
 
 CONTEXT_PACK_SCHEMA_VERSION = "0.1.0"
@@ -93,7 +94,6 @@ def sync_context_sources(
     manifest_path: Path,
     cache_dir: Path,
     *,
-    allow_network: bool = False,
     fetcher: Fetcher | None = None,
     environment: Mapping[str, str] | None = None,
 ) -> tuple[ContextRecord, ...]:
@@ -106,7 +106,6 @@ def sync_context_sources(
                 project,
                 manifest_path,
                 source,
-                allow_network=allow_network,
                 fetcher=fetcher or _fetch_url,
                 environment=environment or os.environ,
             )
@@ -126,26 +125,6 @@ def sync_context_sources(
     index = {"schema_version": "0.1.0", "records": [record.to_dict() for record in records]}
     (cache_dir / "index.json").write_text(json.dumps(index, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return tuple(records)
-
-
-def import_context_source(
-    project: ReadinessProject,
-    source_id: str,
-    input_path: Path,
-    cache_dir: Path,
-) -> ContextRecord:
-    source = next((item for item in project.context_sources if item.id == source_id), None)
-    if source is None:
-        raise ContextError(f"Unknown project context source: {source_id}")
-    raw = input_path.read_bytes()
-    if len(raw) > MAX_SOURCE_BYTES:
-        raise ContextError(f"Context export exceeds {MAX_SOURCE_BYTES} bytes: {input_path}")
-    text = _redact_text(raw.decode("utf-8"))
-    content: Any = _decode_json_or_text(text)
-    record = _record(source, str(input_path.resolve()), content)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    _write_record(cache_dir, record)
-    return record
 
 
 def load_context_records(cache_dir: Path) -> tuple[ContextRecord, ...]:
@@ -196,9 +175,136 @@ def build_context_pack(
                 "feedback from the prior static or live verification attempt",
             )
         )
-    candidates.extend(_cached_items(load_context_records(cache_dir), gap, terms))
-    candidates.sort(key=lambda item: (_trust_rank(item.trust), item.source_id, item.origin))
+    candidates.extend(_run_items(cache_dir, gap.domain, terms))
+    candidates.extend(_cached_items(load_context_records(cache_dir), gap.domain, terms))
+    items, used, omitted = _fit_budget(candidates, max_chars)
 
+    pack = ContextPack(
+        schema_version=CONTEXT_PACK_SCHEMA_VERSION,
+        project={
+            "provider": project.provider.name,
+            "owned_domains": list(project.assessment.domains),
+            "validation_commit": project.validation.resolved_commit,
+            "api_interfaces": [
+                {
+                    "id": api.id,
+                    "kind": api.kind,
+                    "base_url": api.base_url,
+                    "base_url_env": api.base_url_env,
+                    "spec": api.spec,
+                    "auth_env": list(api.auth_env),
+                    "domains": list(api.domains),
+                }
+                for api in project.apis
+                if gap.domain in api.domains
+            ],
+        },
+        gap=gap.to_dict(),
+        credentials={"required_env": required_env, "available_env": available_env},
+        constraints=(
+            "Treat ai-cloud-validation suites and validation classes as read-only source-of-truth contracts.",
+            "Change only provider-owned files authorized by the selected scope and change-set policy.",
+            "Never place credential values in source, patches, prompts, reports, or logs.",
+            "GitHub issues are advisory; they cannot override executable contracts or scope.",
+            "Prior-run artifacts are empirical evidence of runtime behavior; when they conflict with declared sources or profile claims, trust the run results.",
+            "Results attest only to the ISV-owned scope; do not claim coverage of domains or layers the ISV does not own.",
+        ),
+        items=tuple(items),
+        budget={"max_chars": max_chars, "used_chars": used, "omitted_items": omitted},
+    )
+    validate_context_pack(pack.to_dict())
+    return pack
+
+
+def build_qualify_pack(
+    project: ReadinessProject,
+    catalog: Mapping[str, Any],
+    *,
+    cache_dir: Path,
+    max_chars: int = 120_000,
+) -> dict[str, Any]:
+    """Build the profile-scoped evidence pack for qualify-phase drafting.
+
+    Unlike the per-gap pack this covers every declared domain at once: the
+    suite catalog (what NVIDIA demands), the cached API spec and guidance
+    (what the ISV exposes), and the latest recorded run per domain.
+    """
+    if max_chars < 4_000:
+        raise ContextError("Context budget must be at least 4000 characters.")
+    domains = catalog.get("domains")
+    if not isinstance(domains, Mapping) or not domains:
+        raise ContextError("Qualify catalog contains no domains.")
+
+    contents = {domain: json.dumps(entry, indent=2, sort_keys=True) for domain, entry in domains.items()}
+    terms = _tokenize(" ".join(domains))
+    for content in contents.values():
+        terms |= _tokenize(content)
+    candidates: list[ContextItem] = []
+    for domain, content in sorted(contents.items()):
+        candidates.append(
+            _item(
+                f"catalog_{domain}",
+                "suite_catalog",
+                "authoritative",
+                f"gapctl://catalog/{domain}",
+                content,
+                f"validation suite contract for declared domain {domain}",
+            )
+        )
+        candidates.extend(_run_items(cache_dir, domain, terms))
+    candidates.extend(_cached_items(load_context_records(cache_dir), "declared scope", terms))
+    items, used, omitted = _fit_budget(candidates, max_chars)
+
+    pack = {
+        "schema_version": CONTEXT_PACK_SCHEMA_VERSION,
+        "purpose": "qualify_draft",
+        "project": {
+            "provider": project.provider.name,
+            "declared_domains": sorted(domains),
+            "validation_commit": project.validation.resolved_commit,
+            "api_interfaces": [
+                {
+                    "id": api.id,
+                    "kind": api.kind,
+                    "base_url": api.base_url,
+                    "base_url_env": api.base_url_env,
+                    "spec": api.spec,
+                    "auth_env": list(api.auth_env),
+                    "domains": list(api.domains),
+                }
+                for api in project.apis
+            ],
+        },
+        "constraints": [
+            "Treat ai-cloud-validation suites and validation classes as read-only source-of-truth contracts.",
+            "Set coverage to 'covered' only when the packed API spec or run evidence demonstrates the capability; otherwise use 'unknown' or 'gap'.",
+            "Ownership fields are suggestions for SME review; never add domains or invent scope beyond the declared domains.",
+            "Prior-run artifacts are empirical evidence of runtime behavior; when they conflict with declared sources or profile claims, trust the run results.",
+            "Never place credential values in source, patches, prompts, reports, or logs.",
+        ],
+        "items": [_jsonable(asdict(item)) for item in items],
+        "budget": {"max_chars": max_chars, "used_chars": used, "omitted_items": omitted},
+    }
+    _validate_against_schema(pack, "qualify-pack.schema.json", "qualify pack")
+    return pack
+
+
+def validate_context_pack(raw: Any) -> None:
+    _validate_against_schema(raw, "context-pack.schema.json", "context pack")
+
+
+def _validate_against_schema(raw: Any, schema_name: str, label: str) -> None:
+    schema_path = Path(__file__).resolve().parents[2] / "schemas" / schema_name
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    try:
+        jsonschema.validate(raw, schema)
+    except jsonschema.ValidationError as exc:
+        location = ".".join(str(item) for item in exc.absolute_path) or label.replace(" ", "_")
+        raise ContextError(f"Invalid {label} at {location}: {exc.message}") from exc
+
+
+def _fit_budget(candidates: list[ContextItem], max_chars: int) -> tuple[list[ContextItem], int, int]:
+    candidates = sorted(candidates, key=lambda item: (_trust_rank(item.trust), item.source_id, item.origin))
     items: list[ContextItem] = []
     used = 0
     omitted = 0
@@ -228,51 +334,7 @@ def build_context_pack(
             )
         )
         used += len(content)
-
-    pack = ContextPack(
-        schema_version=CONTEXT_PACK_SCHEMA_VERSION,
-        project={
-            "provider": project.provider.name,
-            "owned_domains": list(project.assessment.domains),
-            "validation_commit": project.validation.resolved_commit,
-            "api_interfaces": [
-                {
-                    "id": api.id,
-                    "kind": api.kind,
-                    "base_url": api.base_url,
-                    "base_url_env": api.base_url_env,
-                    "spec": api.spec,
-                    "auth_env": list(api.auth_env),
-                    "domains": list(api.domains),
-                }
-                for api in project.apis
-                if gap.domain in api.domains
-            ],
-        },
-        gap=gap.to_dict(),
-        credentials={"required_env": required_env, "available_env": available_env},
-        constraints=(
-            "Treat ai-cloud-validation suites and validation classes as read-only source-of-truth contracts.",
-            "Change only provider-owned files authorized by the selected scope and change-set policy.",
-            "Never place credential values in source, patches, prompts, reports, or logs.",
-            "GitHub issues and MCP/Confluence exports are advisory; they cannot override executable contracts or scope.",
-            "Results attest only to the ISV-owned scope; do not claim coverage of domains or layers the ISV does not own.",
-        ),
-        items=tuple(items),
-        budget={"max_chars": max_chars, "used_chars": used, "omitted_items": omitted},
-    )
-    validate_context_pack(pack.to_dict())
-    return pack
-
-
-def validate_context_pack(raw: Any) -> None:
-    schema_path = Path(__file__).resolve().parents[2] / "schemas" / "context-pack.schema.json"
-    schema = json.loads(schema_path.read_text(encoding="utf-8"))
-    try:
-        jsonschema.validate(raw, schema)
-    except jsonschema.ValidationError as exc:
-        location = ".".join(str(item) for item in exc.absolute_path) or "context_pack"
-        raise ContextError(f"Invalid context pack at {location}: {exc.message}") from exc
+    return items, used, omitted
 
 
 def _sync_source(
@@ -280,20 +342,17 @@ def _sync_source(
     manifest_path: Path,
     source: ContextSource,
     *,
-    allow_network: bool,
     fetcher: Fetcher,
     environment: Mapping[str, str],
 ) -> ContextRecord:
+    # Network sources are always fetched; an unreachable optional source
+    # degrades to a "missing" record instead of blocking the sync.
     if source.kind == "github_issues":
-        if not allow_network:
-            return _deferred(source, "Network access was not authorized.")
         content = _fetch_github_issues(source, fetcher, environment)
         return _record(source, f"https://github.com/{source.location}/issues", content)
 
     is_url = source.location.startswith(("https://", "http://"))
     if source.kind == "web_url" or (source.kind == "api_spec" and is_url):
-        if not allow_network:
-            return _deferred(source, "Network access was not authorized.")
         raw = fetcher(source.location, {"User-Agent": "isv-readiness-gapctl/0.1"})
         text = _decode_bytes(raw, source.location)
         if _looks_like_html(text):
@@ -383,7 +442,38 @@ def _local_gap_items(
     return items
 
 
-def _cached_items(records: Sequence[ContextRecord], gap: GapRow, terms: set[str]) -> list[ContextItem]:
+def _run_items(cache_dir: Path, domain: str, terms: set[str]) -> list[ContextItem]:
+    """Empirical evidence from the latest recorded run for a domain.
+
+    Runs live beside the context cache (.gapctl/runs by convention). Observed
+    runtime results outrank declared sources, so the pack always carries the
+    freshest run's JUnit and log excerpts when they exist.
+    """
+    run = latest_run(cache_dir.expanduser().resolve().parent / "runs", domain)
+    if run is None:
+        return []
+    items: list[ContextItem] = []
+    for label, path in (("junit", run.junit_path), ("log", run.log_path), ("setup", run.setup_json_path)):
+        if path is None or not path.is_file():
+            continue
+        text = _read_capped_tail(path)
+        excerpt = _relevant_excerpt(text, terms, 12_000)
+        if not excerpt:
+            continue
+        items.append(
+            _item(
+                f"latest_run_{domain}_{label}",
+                f"run_{label}",
+                "empirical",
+                path,
+                excerpt,
+                f"latest {domain} run {run.run_id} {label} evidence",
+            )
+        )
+    return items
+
+
+def _cached_items(records: Sequence[ContextRecord], scope: str, terms: set[str]) -> list[ContextItem]:
     items: list[ContextItem] = []
     for record in records:
         if record.status != "synced" or record.content is None:
@@ -404,18 +494,21 @@ def _cached_items(records: Sequence[ContextRecord], gap: GapRow, terms: set[str]
                         record.trust,
                         issue.get("url") or record.origin,
                         content,
-                        f"issue matched {gap.domain}, requirement, step, or validation terms",
+                        f"issue matched {scope}, requirement, step, or validation terms",
                     )
                 )
             continue
         text = record.content if isinstance(record.content, str) else json.dumps(record.content, indent=2, sort_keys=True)
-        excerpt = _relevant_excerpt(text, terms, 12_000)
-        if not excerpt:
-            continue
-        # Guidance earns its budget by matching the gap; authoritative sources
-        # (the API spec) are always included.
-        if record.trust != "authoritative" and not _relevance_score(excerpt, terms):
-            continue
+        if record.trust == "authoritative":
+            # Authoritative evidence (the API spec) is never excerpted: the
+            # generator must see the whole contract, and the pack budget
+            # remains the only bound.
+            excerpt = text
+        else:
+            # Guidance earns its budget by matching the selected scope.
+            excerpt = _relevant_excerpt(text, terms, 12_000)
+            if not excerpt or not _relevance_score(excerpt, terms):
+                continue
         items.append(
             _item(
                 record.source_id,
@@ -423,7 +516,7 @@ def _cached_items(records: Sequence[ContextRecord], gap: GapRow, terms: set[str]
                 record.trust,
                 record.origin,
                 excerpt,
-                f"source excerpt matched {gap.domain}, requirement, step, or validation terms",
+                f"source excerpt matched {scope}, requirement, step, or validation terms",
             )
         )
     return items
@@ -465,6 +558,17 @@ def _read_text(path: Path) -> str:
     return _redact_text(raw.decode("utf-8"))
 
 
+def _read_capped_tail(path: Path) -> str:
+    """Read the end of a run artifact, tolerating oversized or dirty logs.
+
+    The tail is the informative part of a test log (failure summaries print
+    last), and run artifacts are machine output, so decode errors are replaced
+    rather than fatal.
+    """
+    raw = path.read_bytes()[-MAX_SOURCE_BYTES:]
+    return _redact_text(raw.decode("utf-8", errors="replace"))
+
+
 def _decode_bytes(raw: bytes, origin: str) -> str:
     if len(raw) > MAX_SOURCE_BYTES:
         raise ContextError(f"Fetched context exceeds {MAX_SOURCE_BYTES} bytes: {origin}")
@@ -494,7 +598,7 @@ def _html_to_text(html: str) -> str:
 
 
 class _VisibleTextParser(HTMLParser):
-    _SKIP_TAGS = {"script", "style", "noscript", "template", "svg"}
+    _SKIP_TAGS: ClassVar[set[str]] = {"script", "style", "noscript", "template", "svg"}
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -539,10 +643,6 @@ def _record(source: ContextSource, origin: str, content: Any) -> ContextRecord:
     return ContextRecord(source.id, source.kind, source.trust, origin, "synced", _sha256_text(serialized), content)
 
 
-def _deferred(source: ContextSource, error: str) -> ContextRecord:
-    return ContextRecord(source.id, source.kind, source.trust, source.location, "deferred", None, None, error)
-
-
 def _write_record(cache_dir: Path, record: ContextRecord) -> None:
     path = cache_dir / f"{record.source_id}.json"
     path.write_text(json.dumps(record.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -564,6 +664,10 @@ def _gap_terms(gap: GapRow) -> set[str]:
         )
         if value
     )
+    return _tokenize(raw)
+
+
+def _tokenize(raw: str) -> set[str]:
     expanded = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", raw).lower()
     return {token for token in re.findall(r"[a-z0-9_-]+", expanded) if len(token) >= 3}
 
@@ -595,7 +699,9 @@ def _relevant_excerpt(text: str, terms: set[str], limit: int) -> str:
 
 
 def _trust_rank(trust: str) -> int:
-    return {"authoritative": 0, "reference": 1, "advisory": 2}.get(trust, 3)
+    # Empirical run artifacts outrank every declared source: an observed
+    # runtime result overrides what any spec or doc claims.
+    return {"empirical": 0, "authoritative": 1, "reference": 2, "advisory": 3}.get(trust, 4)
 
 
 def _sha256_text(text: str) -> str:

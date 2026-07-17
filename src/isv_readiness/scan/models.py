@@ -24,7 +24,8 @@ class Evidence:
 
 @dataclass(frozen=True)
 class Remediation:
-    auto_fixable: bool
+    # How to fix the gap
+    auto_fixable: bool # profile can flip it off but never on
     target: str | None
     rerun_command: str
     aws_reference: str | None = None

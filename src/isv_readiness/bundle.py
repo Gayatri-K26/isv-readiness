@@ -129,7 +129,7 @@ def build_bundle(
         files=tuple(sorted(files, key=lambda item: item.path)),
         excluded_sensitive=(
             "context caches and context packs",
-            "raw API specifications and MCP exports",
+            "raw API specifications",
             "generated change-set source payloads",
             "credential values and process environments",
             "backup file contents",

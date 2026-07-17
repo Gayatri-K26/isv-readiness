@@ -42,6 +42,7 @@ class ValidationCheckout:
 
 
 @dataclass(frozen=True)
+# whether the provider dir exists or not
 class ProviderProject:
     name: str
     path: str
@@ -254,16 +255,6 @@ def execute_bootstrap(
             domains=plan.domains,
             labels=(),
             query=None,
-        ),
-        ContextSource(
-            id="nvidia_ai_cloud_ready",
-            kind="mcp_export",
-            location=".gapctl/context/nvidia-ai-cloud-ready.json",
-            trust="advisory",
-            required=False,
-            domains=plan.domains,
-            labels=(),
-            query="AI Cloud Ready qualification, validation, shared responsibility, and selected domain guidance",
         ),
     ]
     if plan.api_base_url or plan.api_spec:

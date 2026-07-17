@@ -196,7 +196,7 @@ def run_auto(
         )
 
     final_report = _scan(scratch, project.validation_root(project_path), canonical_domain, profile)
-    parked = _park(final_report, canonical_domain, staged)
+    parked = _park(final_report, canonical_domain, staged, attempts_by_gap, max_attempts)
     changed_files = _changed_files(provider_root, scratch)
     patch = _combined_patch(provider_root, scratch, changed_files)
     patch_sha256 = hashlib.sha256(patch.encode("utf-8")).hexdigest()
@@ -306,8 +306,15 @@ def _select_fixable(report: dict[str, Any], domain: str) -> list[dict[str, Any]]
     return rows
 
 
-def _park(report: dict[str, Any], domain: str, staged: Sequence[StagedFix]) -> list[ParkedGap]:
+def _park(
+    report: dict[str, Any],
+    domain: str,
+    staged: Sequence[StagedFix],
+    attempts_by_gap: Mapping[str, int] | None = None,
+    max_attempts: int = 0,
+) -> list[ParkedGap]:
     staged_ids = {fix.gap_id for fix in staged}
+    attempts_by_gap = attempts_by_gap or {}
     parked: list[ParkedGap] = []
     for row in report.get("rows", []):
         if row.get("domain") != domain or row.get("status") not in UNRESOLVED_STATUSES:
@@ -317,7 +324,13 @@ def _park(report: dict[str, Any], domain: str, staged: Sequence[StagedFix]) -> l
         action = _action(row)
         auto_fixable = (row.get("remediation") or {}).get("auto_fixable") is True
         if auto_fixable and action == FIX_ACTION:
-            reason = "Auto-fix attempts were exhausted without a verified candidate."
+            attempts = attempts_by_gap.get(str(row.get("id")), 0)
+            if attempts == 0:
+                reason = "Not attempted within this run's iteration budget; apply the staged patch and re-run auto to continue."
+            elif attempts < max_attempts:
+                reason = f"{attempts} failed attempt(s); retry budget remains — re-run auto after applying."
+            else:
+                reason = "Auto-fix attempts were exhausted without a verified candidate."
         elif action == FIX_ACTION:
             # e.g. an unwired step: the fix is a config/scope decision, and the
             # deterministic scanner refuses to authorize an automatic edit.

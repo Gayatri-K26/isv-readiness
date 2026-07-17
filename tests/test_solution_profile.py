@@ -55,6 +55,27 @@ class SolutionProfileTests(unittest.TestCase):
         self.assertFalse(nmc_summary["validation_ready"])
         self.assertIn("nmc-attestation-boundary", nmc_summary["blocking_capabilities"])
 
+    def test_out_of_scope_skip_is_a_signed_decision_and_does_not_block(self) -> None:
+        raw = yaml.safe_load(self.bcm_path.read_text(encoding="utf-8"))
+        profile = parse_solution_profile(raw)
+        base = profile.scope_summary()
+        blocking_before = set(base["blocking_capabilities"])
+        self.assertIn("bcm-k8s-storage", blocking_before)
+
+        # Flip one blocking capability to a deliberate exclusion: it must stop
+        # blocking, while every other blocker is unaffected.
+        edited = copy.deepcopy(raw)
+        for domain in edited["domains"]:
+            for capability in domain.get("capabilities", []):
+                if capability["id"] == "bcm-k8s-storage":
+                    capability["coverage"] = "out_of_scope"
+                    capability["validation_mode"] = "skip"
+        summary = parse_solution_profile(edited).scope_summary()
+        self.assertNotIn("bcm-k8s-storage", summary["blocking_capabilities"])
+        self.assertEqual(
+            set(summary["blocking_capabilities"]), blocking_before - {"bcm-k8s-storage"}
+        )
+
     def test_resolves_domain_defaults_and_capability_overrides(self) -> None:
         bcm = load_solution_profile(self.bcm_path)
 
