@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import shutil
 import subprocess
 import tempfile
@@ -12,6 +11,7 @@ import yaml
 
 from isv_readiness.live import LiveRunError, run_live_domain
 from isv_readiness.project import build_bootstrap_plan, execute_bootstrap, load_project
+from isv_readiness.schema import load_schema
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
@@ -80,7 +80,7 @@ class LiveRunTests(unittest.TestCase):
             self.assertEqual(seen["environment"]["ACME_REGION"], "west")
             self.assertNotIn("UNDECLARED_SECRET", seen["environment"])
             self.assertNotIn("super-secret-value", Path(result.log_path).read_text(encoding="utf-8"))
-            schema = json.loads((ROOT / "schemas" / "live-run.schema.json").read_text(encoding="utf-8"))
+            schema = load_schema("live-run.schema.json")
             jsonschema.validate(result.to_dict(), schema)
 
     def test_skipped_rows_do_not_veto_success_but_all_skipped_is_not_success(self) -> None:

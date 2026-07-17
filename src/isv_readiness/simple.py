@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -11,16 +10,15 @@ from isv_readiness.auto import AutoWorkflowError, run_auto
 from isv_readiness.context import ContextError
 from isv_readiness.fixes import FixGuardrailError
 from isv_readiness.live import LiveRunError, run_live_domain
+from isv_readiness.loop import UNRESOLVED_STATUSES
 from isv_readiness.onboarding import OnboardingError, build_provider_onboarding_plan, execute_provider_onboarding
-from isv_readiness.project import ProjectError, build_bootstrap_plan, execute_bootstrap, load_project
+from isv_readiness.project import ProjectError, ReadinessProject, build_bootstrap_plan, execute_bootstrap, load_project
 from isv_readiness.qualify import QualifyError, build_qualify_catalog
-from isv_readiness.scan.dynamic import DynamicArtifacts, scan_dynamic_artifacts
-from isv_readiness.scan.k8s_dynamic import K8sDynamicArtifacts, scan_k8s_artifacts
-from isv_readiness.scan.models import GapReport
+from isv_readiness.runs import JUNIT_FILENAME, LOG_FILENAME, RunRecordError, latest_run, new_run_dir, write_run_record
 from isv_readiness.scan.profile import enrich_report_with_profile
 from isv_readiness.scan.report import load_report, render_report
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
-from isv_readiness.solution_profile import SolutionProfileError
+from isv_readiness.solution_profile import SolutionProfileError, canonicalize_domain, load_solution_profile
 from isv_readiness.validation_adapter import IsvctlAdapter, ValidationAdapterError
 
 
@@ -33,9 +31,6 @@ _GENERATOR_ALIASES = {
     "codex": "gapctl-codex-generator",
 }
 
-_ACI_REPO_URL = "https://github.com/NVIDIA/ai-cloud-validation.git"
-
-
 def find_project() -> Path:
     """Walk up from CWD to find isv-project.yaml."""
     for directory in [Path.cwd(), *Path.cwd().parents]:
@@ -46,37 +41,6 @@ def find_project() -> Path:
         "No isv-project.yaml found in this directory or any parent.\n"
         "Run `gapctl init <provider-name> --workspace <dir> --domains ...` first."
     )
-
-
-def _find_validation_root() -> Path | None:
-    """Find ai-cloud-validation/ cloned by gapctl init, next to isv-project.yaml."""
-    try:
-        project_path = find_project()
-        candidate = project_path.parent / "ai-cloud-validation"
-        if candidate.is_dir() and (candidate / "pyproject.toml").exists():
-            return candidate
-    except SimpleError:
-        pass
-    return None
-
-
-def _clone_validation_repo(workspace: Path, ref: str = "main") -> Path:
-    """Clone ai-cloud-validation into workspace/ if not already present."""
-    checkout = workspace / "ai-cloud-validation"
-    if checkout.exists():
-        print(f"  Found existing checkout: {checkout}")
-        return checkout
-    print("  Cloning NVIDIA/ai-cloud-validation (this may take a moment)...")
-    result = subprocess.run(
-        ["git", "clone", "--depth", "1", "--branch", ref, _ACI_REPO_URL, str(checkout)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise SimpleError(f"Failed to clone ai-cloud-validation:\n{result.stderr.strip()}")
-    print(f"  Cloned to: {checkout}")
-    return checkout
 
 
 def _resolve_generator(name: str) -> str:
@@ -109,39 +73,32 @@ def cmd_init(
     validation_ref: str = "main",
 ) -> int:
     workspace = workspace.expanduser().resolve()
-    workspace.mkdir(parents=True, exist_ok=True)
     project_path = workspace / "isv-project.yaml"
 
-    # 1. Clone ai-cloud-validation into the workspace
-    print("[1/4] Cloning ai-cloud-validation...")
-    try:
-        resolved_root = _clone_validation_repo(workspace, ref=validation_ref)
-    except SimpleError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-
-    # 2. Bootstrap: write isv-project.yaml
-    print(f"[2/4] Bootstrapping project for provider '{provider_name}'...")
+    # Bootstrap owns checkout creation, validation, and commit pinning. Build
+    # the plan first so invalid input cannot trigger a clone.
+    print(f"[1/3] Creating a pinned project for provider '{provider_name}'...")
     try:
         plan = build_bootstrap_plan(
             workspace,
             provider_name=provider_name,
             domains=domains,
-            validation_root=resolved_root,
+            validation_ref=validation_ref,
             api_base_url=api_url,
             auth_env=auth_envs,
             api_spec=api_spec,
         )
-        execute_bootstrap(plan, overwrite=False)
+        project = execute_bootstrap(plan, overwrite=False)
     except (OSError, ProjectError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
+    resolved_root = project.validation_root(project_path)
     print(f"  Created: {project_path}")
+    print(f"  Pinned validation commit: {project.validation.resolved_commit}")
 
-    # 3. Catalog: distill suites into .gapctl/catalog.json
-    print("[3/4] Building check catalog...")
+    # 2. Catalog: distill suites into .gapctl/catalog.json
+    print("[2/3] Building check catalog...")
     try:
-        project = load_project(project_path)
         adapter = IsvctlAdapter(project.validation_root(project_path))
         catalog = build_qualify_catalog(adapter, project.assessment.domains)
         catalog_out = project_path.parent / ".gapctl" / "catalog.json"
@@ -153,8 +110,8 @@ def cmd_init(
         print(str(exc), file=sys.stderr)
         return 2
 
-    # 4. Onboard: scaffold provider script stubs for every domain
-    print(f"[4/4] Scaffolding provider scripts for {', '.join(domains)}...")
+    # 3. Onboard: scaffold provider script stubs for every domain
+    print(f"[3/3] Scaffolding provider scripts for {', '.join(domains)}...")
     try:
         onboard_plan = build_provider_onboarding_plan(resolved_root, provider_name, domains)
         written = execute_provider_onboarding(onboard_plan, overwrite=False)
@@ -165,10 +122,10 @@ def cmd_init(
         return 2
 
     print()
-    print("Ready. Next steps:")
-    print("  gapctl fill <domain> --generator <generator>   # fill gaps with AI")
-    print("  gapctl test <domain>                           # run against real cloud")
-    print("  gapctl status                                  # check progress")
+    print("Workspace created. Complete qualification before validation:")
+    print("  gapctl qualify-draft --project isv-project.yaml --generator <generator>")
+    print("  gapctl profile --in solution-profile.yaml --draft solution-profile.draft.yaml")
+    print("After SME ratification, use gapctl fill, gapctl test, and gapctl status.")
     return 0
 
 
@@ -237,93 +194,60 @@ def cmd_fill(
 def cmd_test(domain: str) -> int:
     try:
         project_path = find_project()
-    except SimpleError as exc:
+        project = load_project(project_path)
+        canonical_domain = canonicalize_domain(domain)
+    except (OSError, SimpleError, ProjectError, SolutionProfileError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
 
-    project = load_project(project_path)
-    artifacts_dir = _artifacts_dir(project_path)
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
     gaps_out = _gaps_path(project_path)
 
-    print(f"Running validation for domain '{domain}' against real cloud...")
+    print(f"Running validation for domain '{canonical_domain}' against real cloud...")
     try:
+        run_id, run_dir = new_run_dir(_artifacts_dir(project_path), canonical_domain)
         result = run_live_domain(
             project,
             project_path,
-            domain=domain,
-            artifacts_dir=artifacts_dir,
+            domain=canonical_domain,
+            artifacts_dir=run_dir,
             explicit_authorization=True,
         )
-    except (OSError, ProjectError, LiveRunError) as exc:
+        _canonicalize_run_artifacts(result.junit_path, result.log_path, run_dir)
+        write_run_record(
+            run_dir,
+            run_id=run_id,
+            domain=result.domain,
+            config=result.config,
+            exit_code=result.exit_code,
+        )
+    except (OSError, ProjectError, LiveRunError, RunRecordError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
 
     print(f"  Passed: {'yes' if result.success else 'no'}")
-    print(f"  Artifacts: {artifacts_dir}")
-
-    junit_path: Path | None = None
-    if result.junit_path and Path(result.junit_path).exists():
-        junit_path = Path(result.junit_path)
+    print(f"  Artifacts: {run_dir}")
 
     print("\nUpdating gaps.json...")
     try:
-        report = scan_provider(
-            ScanOptions(
-                provider_repo=project.provider_root(project_path),
-                domains=[domain],
-                validation_root=project.validation_root(project_path),
-            )
+        report = _scan_project_report(project, project_path)
+        current_rows = result.report.get("rows")
+        if not isinstance(current_rows, list):
+            raise SimpleError("Live run returned an invalid gap report.")
+        report["rows"] = sorted(
+            [row for row in report["rows"] if row.get("domain") != result.domain] + current_rows,
+            key=_row_sort_key,
         )
-
-        if junit_path is not None:
-            config_path = _first_provider_config(report, project.provider_root(project_path))
-            if domain in {"k8s", "kubernetes"}:
-                dynamic_rows = scan_k8s_artifacts(
-                    K8sDynamicArtifacts(
-                        provider_repo=project.provider_root(project_path),
-                        junit_path=junit_path,
-                        log_path=None,
-                        setup_json_path=None,
-                        config_path=config_path,
-                        scope=None,
-                    )
-                )
-            else:
-                dynamic_rows = scan_dynamic_artifacts(
-                    DynamicArtifacts(
-                        provider_repo=project.provider_root(project_path),
-                        domain=domain,
-                        junit_path=junit_path,
-                        log_path=None,
-                        config_path=config_path,
-                        static_rows=tuple(report.rows),
-                    )
-                )
-            report = GapReport(
-                schema_version=report.schema_version,
-                provider_repo=report.provider_repo,
-                domains=report.domains,
-                rows=sorted(
-                    [*report.rows, *dynamic_rows],
-                    key=lambda r: (r.domain, r.step_name, r.validation_class or "", r.detection, r.id),
-                ),
-            )
-
-        if project.assessment.profile:
-            from isv_readiness.solution_profile import load_solution_profile
-            profile_path = project.resolve_path(project_path, project.assessment.profile)
-            if profile_path.exists():
-                profile = load_solution_profile(profile_path)
-                report = enrich_report_with_profile(report, profile)
-
-        gaps_out.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    except (OSError, ProjectError) as exc:
+        gaps_out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except (OSError, ProjectError, SimpleError, SolutionProfileError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
 
-    open_gaps = sum(1 for r in report.rows if r.status != "pass")
-    print(f"  Open gaps in '{domain}': {open_gaps}")
+    open_gaps = sum(
+        1
+        for row in report["rows"]
+        if row.get("domain") == result.domain and row.get("status") in UNRESOLVED_STATUSES
+    )
+    print(f"  Open gaps in '{result.domain}': {open_gaps}")
     print()
     print(render_report(report, "scorecard"))
     return 0 if result.success else 1
@@ -335,42 +259,90 @@ def cmd_test(domain: str) -> int:
 def cmd_status() -> int:
     try:
         project_path = find_project()
-    except SimpleError as exc:
+        project = load_project(project_path)
+    except (OSError, SimpleError, ProjectError, SolutionProfileError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
 
-    project = load_project(project_path)
     gaps_out = _gaps_path(project_path)
-
-    if gaps_out.exists():
-        report = load_report(gaps_out)
-    else:
-        print("No gaps.json found — running static scan...")
-        report = scan_provider(
-            ScanOptions(
-                provider_repo=project.provider_root(project_path),
-                domains=list(project.assessment.domains),
-                validation_root=project.validation_root(project_path),
-            )
-        )
-        gaps_out.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        report = load_report(gaps_out) if gaps_out.exists() else None
+        expected_domains = set(project.assessment.domains)
+        reported_domains = set(report.get("domains", [])) if isinstance(report, dict) else set()
+        if report is None or reported_domains != expected_domains:
+            reason = "No gaps.json found" if report is None else "gaps.json does not cover the full project scope"
+            print(f"{reason} — running a full static scan...")
+            report = _scan_project_report(project, project_path)
+            gaps_out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        rows = report.get("rows")
+        if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+            raise SimpleError(f"Invalid rows in gap report: {gaps_out}")
+    except (OSError, json.JSONDecodeError, ProjectError, SimpleError, SolutionProfileError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
 
     print(render_report(report, "scorecard"))
-    open_gaps = sum(1 for r in report.rows if r.status != "pass")
-    if open_gaps == 0:
-        print("\nAll gaps closed. Ready to bundle:")
-        print("  gapctl bundle --project isv-project.yaml --agent-work-dir .gapctl/work/<domain> --out-dir validation-bundle/")
+    open_gaps = sum(1 for row in rows if row.get("status") in UNRESOLVED_STATUSES)
+    passing_dynamic_domains = {
+        row.get("domain")
+        for row in rows
+        if row.get("detection") == "dynamic" and row.get("status") == "pass"
+    }
+    unvalidated = [
+        domain
+        for domain in project.assessment.domains
+        if domain not in passing_dynamic_domains
+        or (record := latest_run(_artifacts_dir(project_path), domain)) is None
+        or record.exit_code != 0
+    ]
+    if open_gaps == 0 and not unvalidated:
+        print("\nAll gaps are closed and every owned domain has a passing recorded live run.")
+        print("Build the bundle from each completed agent-run work directory:")
+        print(
+            "  gapctl bundle --project isv-project.yaml "
+            "--agent-work-dir <completed-agent-work-dir> --out-dir validation-bundle/"
+        )
     else:
-        print(f"\n{open_gaps} gap(s) remaining.")
-    return 0 if open_gaps == 0 else 1
+        if open_gaps:
+            print(f"\n{open_gaps} gap(s) remaining.")
+        if unvalidated:
+            print("Live validation still required for: " + ", ".join(unvalidated))
+    return 0 if open_gaps == 0 and not unvalidated else 1
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
-def _first_provider_config(report: GapReport, provider_repo: Path) -> Path | None:
-    for row in report.rows:
-        if row.evidence.config_path:
-            path = Path(row.evidence.config_path)
-            return path if path.is_absolute() else provider_repo / path
-    return None
+def _scan_project_report(project: ReadinessProject, project_path: Path) -> dict:
+    report = scan_provider(
+        ScanOptions(
+            provider_repo=project.provider_root(project_path),
+            domains=list(project.assessment.domains),
+            validation_root=project.validation_root(project_path),
+        )
+    )
+    if project.assessment.profile:
+        profile_path = project.resolve_path(project_path, project.assessment.profile)
+        if profile_path.exists():
+            report = enrich_report_with_profile(report, load_solution_profile(profile_path))
+    return report.to_dict()
+
+
+def _canonicalize_run_artifacts(junit_path: str | None, log_path: str, run_dir: Path) -> None:
+    for raw_path, filename in ((junit_path, JUNIT_FILENAME), (log_path, LOG_FILENAME)):
+        if raw_path is None:
+            continue
+        source = Path(raw_path)
+        target = run_dir / filename
+        if source.is_file() and source != target:
+            source.replace(target)
+
+
+def _row_sort_key(row: dict) -> tuple[str, str, str, str, str]:
+    return (
+        str(row.get("domain") or ""),
+        str(row.get("step_name") or ""),
+        str(row.get("validation_class") or ""),
+        str(row.get("detection") or ""),
+        str(row.get("id") or ""),
+    )

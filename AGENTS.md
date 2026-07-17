@@ -55,20 +55,21 @@ Run these checks before handing off a behavioral change:
 uv run python -m unittest discover -s tests
 uvx ruff check src tests
 python3 -m compileall -q src tests
-python3 -m json.tool schemas/gaps.schema.json >/dev/null
-python3 -m json.tool schemas/validation-plan.schema.json >/dev/null
-python3 -m json.tool schemas/solution-profile.schema.json >/dev/null
-python3 -m json.tool schemas/loop-state.schema.json >/dev/null
-python3 -m json.tool schemas/project.schema.json >/dev/null
-python3 -m json.tool schemas/context-pack.schema.json >/dev/null
-python3 -m json.tool schemas/change-set.schema.json >/dev/null
-python3 -m json.tool schemas/change-proposal.schema.json >/dev/null
-python3 -m json.tool schemas/change-verification.schema.json >/dev/null
-python3 -m json.tool schemas/change-application.schema.json >/dev/null
-python3 -m json.tool schemas/change-rollback.schema.json >/dev/null
-python3 -m json.tool schemas/live-run.schema.json >/dev/null
-python3 -m json.tool schemas/agent-state.schema.json >/dev/null
-python3 -m json.tool schemas/bundle-manifest.schema.json >/dev/null
+python3 -m json.tool src/isv_readiness/schemas/gaps.schema.json >/dev/null
+python3 -m json.tool src/isv_readiness/schemas/validation-plan.schema.json >/dev/null
+python3 -m json.tool src/isv_readiness/schemas/solution-profile.schema.json >/dev/null
+python3 -m json.tool src/isv_readiness/schemas/loop-state.schema.json >/dev/null
+python3 -m json.tool src/isv_readiness/schemas/project.schema.json >/dev/null
+python3 -m json.tool src/isv_readiness/schemas/context-pack.schema.json >/dev/null
+python3 -m json.tool src/isv_readiness/schemas/qualify-pack.schema.json >/dev/null
+python3 -m json.tool src/isv_readiness/schemas/change-set.schema.json >/dev/null
+python3 -m json.tool src/isv_readiness/schemas/change-proposal.schema.json >/dev/null
+python3 -m json.tool src/isv_readiness/schemas/change-verification.schema.json >/dev/null
+python3 -m json.tool src/isv_readiness/schemas/change-application.schema.json >/dev/null
+python3 -m json.tool src/isv_readiness/schemas/change-rollback.schema.json >/dev/null
+python3 -m json.tool src/isv_readiness/schemas/live-run.schema.json >/dev/null
+python3 -m json.tool src/isv_readiness/schemas/agent-state.schema.json >/dev/null
+python3 -m json.tool src/isv_readiness/schemas/bundle-manifest.schema.json >/dev/null
 uv lock --check
 git diff --check
 ```

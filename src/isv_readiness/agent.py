@@ -28,6 +28,7 @@ from isv_readiness.scan.models import GapReport
 from isv_readiness.scan.profile import enrich_report_with_profile
 from isv_readiness.scan.report import load_report
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
+from isv_readiness.schema import load_schema
 from isv_readiness.solution_profile import canonicalize_domain, load_solution_profile
 
 AGENT_STATE_VERSION = "0.1.0"
@@ -571,10 +572,8 @@ def _save_state(path: Path, state: AgentState) -> None:
 
 
 def _validate_state(raw: Any) -> None:
-    schema_path = Path(__file__).resolve().parents[2] / "schemas" / "agent-state.schema.json"
-    schema = json.loads(schema_path.read_text(encoding="utf-8"))
     try:
-        jsonschema.validate(raw, schema)
+        jsonschema.validate(raw, load_schema("agent-state.schema.json"))
     except jsonschema.ValidationError as exc:
         location = ".".join(str(item) for item in exc.absolute_path) or "agent_state"
         raise AgentWorkflowError(f"Invalid agent state at {location}: {exc.message}") from exc

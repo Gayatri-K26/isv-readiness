@@ -35,6 +35,10 @@ Implemented:
 - Persistent `agent-run` orchestration across scan, context, generation, review,
   apply, targeted live feedback, final full-domain validation, and retry gates.
 - Sanitized, hash-inventoried owned-scope validation evidence bundles.
+- Explicit publication of completed, schema-valid bundles to the ISV Lab
+  Service, with exact platform mapping and optional JUnit upload.
+- Package-owned JSON schemas so the CLI works from a wheel installed by
+  `uv tool`, without an `isv-readiness` source checkout.
 - Versioned `solution-profile.json` contract for components, dependencies,
   actors, NSRG layers, domains, ISV ownership (`owned`), and validation mode.
 - Draft BCM 11 and NVIDIA Mission Control 2.3 reference profiles based on
@@ -63,14 +67,27 @@ Not implemented yet:
 - Additional model-vendor-native adapters; the command contract and the Codex
   and Claude Code reference adapters are implemented.
 - Pull-request submission; the change pipeline emits reviewed patches, not PRs.
-- Publication workflows (NVIDIA AI Cloud Ready's "publish" stage). The current
-  boundary ends with a reproducible owned-scope validation bundle.
 - Integrated multi-owner full-stack roll-up (an NCP/integrator concern that
   aggregates several validated single-owner profiles), which is out of scope
   for a single ISV.
 
 See [docs/architecture.md](docs/architecture.md) for the complete agentic design
 and implementation map.
+
+## Installed CLI journey
+
+ISVs install `gapctl` as a standalone tool; they do not clone this repository:
+
+```bash
+uv tool install git+https://github.com/your-org/isv-readiness.git
+gapctl init acme-cloud --workspace ./acme-readiness --domains vm,network
+cd acme-readiness
+```
+
+`init` validates the declared scope before cloning, pins the resulting
+`ai-cloud-validation` checkout, builds the check catalog, and scaffolds the
+provider. The generated profile remains a qualification draft. An SME must
+ratify ownership and scope before `fill` or live validation.
 
 ## Workflow
 
@@ -370,6 +387,21 @@ gapctl bundle \
   --out-dir readiness-bundle
 ```
 
+Publish only a completed bundle. Credentials are supplied at runtime through
+`ISV_SERVICE_ENDPOINT`, `ISV_SSA_ISSUER`, `ISV_CLIENT_ID`, and
+`ISV_CLIENT_SECRET`; their values are never written to the bundle or project:
+
+```bash
+gapctl publish \
+  --bundle-dir readiness-bundle \
+  --lab-id 35 \
+  --junit .gapctl/runs/<run-id>/junit.xml
+```
+
+For a bundle spanning more than one platform type, pass the intended portal
+target explicitly with `--platform` rather than allowing an arbitrary domain
+to label the whole run.
+
 ### 5.6. Run one live selection directly
 
 The gated `agent-run`/`auto` flows are the recommended way to execute live, but
@@ -522,33 +554,33 @@ retry budgets stop the controller rather than falling through to code changes.
 
 ## Contracts
 
-- [schemas/project.schema.json](schemas/project.schema.json): pinned workspace,
+- [src/isv_readiness/schemas/project.schema.json](src/isv_readiness/schemas/project.schema.json): pinned workspace,
   selected assessment scope, API/context declarations, and execution policy.
-- [schemas/context-pack.schema.json](schemas/context-pack.schema.json): bounded,
+- [src/isv_readiness/schemas/context-pack.schema.json](src/isv_readiness/schemas/context-pack.schema.json): bounded,
   redacted, source-ranked input for one selected gap.
-- [schemas/change-set.schema.json](schemas/change-set.schema.json): generated,
+- [src/isv_readiness/schemas/change-set.schema.json](src/isv_readiness/schemas/change-set.schema.json): generated,
   context-bound multi-file provider changes.
-- [schemas/change-proposal.schema.json](schemas/change-proposal.schema.json):
+- [src/isv_readiness/schemas/change-proposal.schema.json](src/isv_readiness/schemas/change-proposal.schema.json):
   guarded combined patch and per-file before/after hashes.
-- [schemas/change-verification.schema.json](schemas/change-verification.schema.json):
+- [src/isv_readiness/schemas/change-verification.schema.json](src/isv_readiness/schemas/change-verification.schema.json):
   isolated rescan result for the complete transaction.
-- [schemas/change-application.schema.json](schemas/change-application.schema.json):
+- [src/isv_readiness/schemas/change-application.schema.json](src/isv_readiness/schemas/change-application.schema.json):
   applied files and durable backup locations.
-- [schemas/change-rollback.schema.json](schemas/change-rollback.schema.json):
+- [src/isv_readiness/schemas/change-rollback.schema.json](src/isv_readiness/schemas/change-rollback.schema.json):
   explicit restoration/removal evidence.
-- [schemas/live-run.schema.json](schemas/live-run.schema.json): policy-authorized
+- [src/isv_readiness/schemas/live-run.schema.json](src/isv_readiness/schemas/live-run.schema.json): policy-authorized
   command, artifacts, selected outcomes, and normalized report.
-- [schemas/agent-state.schema.json](schemas/agent-state.schema.json): persistent
+- [src/isv_readiness/schemas/agent-state.schema.json](src/isv_readiness/schemas/agent-state.schema.json): persistent
   review/live/retry state for one selected domain.
-- [schemas/bundle-manifest.schema.json](schemas/bundle-manifest.schema.json):
+- [src/isv_readiness/schemas/bundle-manifest.schema.json](src/isv_readiness/schemas/bundle-manifest.schema.json):
   sanitized artifact and provider-file hash inventory.
-- [schemas/gaps.schema.json](schemas/gaps.schema.json): deterministic flat scan
+- [src/isv_readiness/schemas/gaps.schema.json](src/isv_readiness/schemas/gaps.schema.json): deterministic flat scan
   and dynamic-result rows.
-- [schemas/validation-plan.schema.json](schemas/validation-plan.schema.json):
+- [src/isv_readiness/schemas/validation-plan.schema.json](src/isv_readiness/schemas/validation-plan.schema.json):
   normalized, version-aware `isvctl` plan.
-- [schemas/solution-profile.schema.json](schemas/solution-profile.schema.json):
+- [src/isv_readiness/schemas/solution-profile.schema.json](src/isv_readiness/schemas/solution-profile.schema.json):
   versioned solution graph and responsibility model.
-- [schemas/loop-state.schema.json](schemas/loop-state.schema.json): persistent
+- [src/isv_readiness/schemas/loop-state.schema.json](src/isv_readiness/schemas/loop-state.schema.json): persistent
   selection, routing, retry, fingerprint, and history state for the controller.
 
 `gaps.json` stays flat so the loop controller can select one row deterministically.
@@ -601,9 +633,9 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 Validate all schemas and compile Python sources:
 
 ```bash
-python3 -m json.tool schemas/gaps.schema.json >/dev/null
-python3 -m json.tool schemas/validation-plan.schema.json >/dev/null
-python3 -m json.tool schemas/solution-profile.schema.json >/dev/null
-python3 -m json.tool schemas/loop-state.schema.json >/dev/null
+python3 -m json.tool src/isv_readiness/schemas/gaps.schema.json >/dev/null
+python3 -m json.tool src/isv_readiness/schemas/validation-plan.schema.json >/dev/null
+python3 -m json.tool src/isv_readiness/schemas/solution-profile.schema.json >/dev/null
+python3 -m json.tool src/isv_readiness/schemas/loop-state.schema.json >/dev/null
 python3 -m compileall -q src tests
 ```

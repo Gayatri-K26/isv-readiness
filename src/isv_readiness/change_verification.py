@@ -20,6 +20,7 @@ from isv_readiness.changes import (
 )
 from isv_readiness.fixes import FixGuardrailError, select_gap
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
+from isv_readiness.schema import load_schema
 from isv_readiness.verification import VerificationError, find_regressions
 
 CHANGE_VERIFICATION_VERSION = "0.1.0"
@@ -417,10 +418,8 @@ def _atomic_write(target: Path, content: bytes, mode: int) -> None:
 
 
 def _validate_schema(raw: Any, name: str) -> None:
-    path = Path(__file__).resolve().parents[2] / "schemas" / name
-    schema = json.loads(path.read_text(encoding="utf-8"))
     try:
-        jsonschema.validate(raw, schema)
+        jsonschema.validate(raw, load_schema(name))
     except jsonschema.ValidationError as exc:
         location = ".".join(str(item) for item in exc.absolute_path) or name
         raise VerificationError(f"Invalid {name} at {location}: {exc.message}") from exc

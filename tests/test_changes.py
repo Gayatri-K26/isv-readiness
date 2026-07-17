@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +15,7 @@ from isv_readiness.changes import (
     change_set_from_dict,
 )
 from isv_readiness.fixes import FixGuardrailError
+from isv_readiness.schema import load_schema
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -43,7 +43,7 @@ class ChangeProposalTests(unittest.TestCase):
             self.assertIn("a/acme/scripts/vm/launch.py", proposal.patch)
             self.assertIn("a/acme/config/vm.yaml", proposal.patch)
             self.assertEqual(script.read_text(encoding="utf-8"), "raise NotImplementedError()\n")
-            schema = json.loads((ROOT / "schemas" / "change-proposal.schema.json").read_text(encoding="utf-8"))
+            schema = load_schema("change-proposal.schema.json")
             jsonschema.validate(proposal.to_dict(), schema)
 
     def test_rejects_unrelated_config_missing_primary_target_and_secrets(self) -> None:

@@ -17,6 +17,7 @@ import jsonschema
 from isv_readiness.project import ContextSource, ReadinessProject
 from isv_readiness.runs import latest_run
 from isv_readiness.scan.models import Evidence, GapReport, GapRow, Remediation
+from isv_readiness.schema import load_schema
 
 CONTEXT_PACK_SCHEMA_VERSION = "0.1.0"
 MAX_SOURCE_BYTES = 1_000_000
@@ -294,10 +295,8 @@ def validate_context_pack(raw: Any) -> None:
 
 
 def _validate_against_schema(raw: Any, schema_name: str, label: str) -> None:
-    schema_path = Path(__file__).resolve().parents[2] / "schemas" / schema_name
-    schema = json.loads(schema_path.read_text(encoding="utf-8"))
     try:
-        jsonschema.validate(raw, schema)
+        jsonschema.validate(raw, load_schema(schema_name))
     except jsonschema.ValidationError as exc:
         location = ".".join(str(item) for item in exc.absolute_path) or label.replace(" ", "_")
         raise ContextError(f"Invalid {label} at {location}: {exc.message}") from exc

@@ -1260,3 +1260,38 @@ Plus an honesty fix in auto's review gate: parked auto-fixable gaps now
 distinguish "not attempted within this run's iteration budget" and "N failed
 attempts, retry budget remains" from the previously blanket (and usually
 false) "attempts exhausted".
+
+## Step 24 - Installed-CLI and High-Level Workflow Hardening
+
+### Decisions
+
+- Moved all runtime JSON schemas under `src/isv_readiness/schemas/`, declared
+  them as setuptools package data, and routed schema reads through one guarded
+  loader. A built wheel was inspected and installed into a clean Python 3.12
+  environment to prove that schema validation no longer depends on an
+  `isv-readiness` source checkout.
+- Removed the second clone implementation from the high-level `init` wrapper.
+  Bootstrap now owns validation, clone, and commit pinning, and the requested
+  validation ref is recorded correctly. Invalid input is rejected before any
+  clone begins.
+- Reused the live runner's normalized report in `gapctl test` instead of
+  rescanning and re-parsing JUnit. Each high-level test now writes a canonical
+  `.gapctl/runs/<run-id>/` empirical record, while `gaps.json` retains the full
+  declared project scope.
+- Made `gapctl status` operate consistently on report dictionaries, refresh
+  legacy partial-scope reports, and require passing recorded live evidence for
+  every owned domain before claiming bundle readiness.
+- Hardened publication before any remote mutation: validate the bundle schema,
+  refuse incomplete bundles, validate local JUnit presence, use the exact
+  upstream platform enum for every domain, require an explicit platform for a
+  mixed-platform bundle, and normalize endpoint URLs.
+
+### Rationale
+
+The high-level commands were added without regression tests and passed the
+lower-level suite while crashing on ordinary status calls, losing multi-domain
+scope, and mislabeling several portal result types. The package also omitted
+every runtime schema even though the product is installed as a standalone
+wheel. These are boundary and evidence-integrity failures, not presentation
+issues, so the fixes keep one authoritative implementation per operation and
+add command-level coverage.

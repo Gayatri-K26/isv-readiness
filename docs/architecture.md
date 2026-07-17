@@ -6,8 +6,9 @@ The full system helps an ISV qualify a versioned metal-to-model solution,
 prepare its `ai-cloud-validation` provider implementation, execute validation,
 and close actionable gaps with human-reviewed changes.
 
-The current project boundary ends with a reproducible technical qualification
-or validation bundle. Publication is deliberately deferred.
+The project produces a reproducible technical qualification or validation
+bundle. A separate explicit command may publish a completed bundle's result to
+the ISV Lab Service; publication never changes qualification scope or evidence.
 
 ## System View
 
@@ -60,14 +61,17 @@ flowchart TD
     Actions --> Ticket[Product-gap ticket draft]
     Actions --> Evidence[Evidence request]
     Actions --> Skip[Documented skip or scope decision]
+    Run --> Bundle[Sanitized evidence bundle]
+    Bundle --> Publish[Explicit ISV Lab Service publication]
 ```
 
 Solid contracts through context collection, an explicit generator adapter,
 guarded multi-file patch proposal, isolated static verification, transactional
 hash-bound application/rollback, targeted and full-domain live verification,
-persistent agent orchestration, and evidence bundling are implemented. Built-in
-model-vendor adapters beyond the included Codex reference adapter, PR
-submission, and publication remain optional future integrations.
+persistent agent orchestration, evidence bundling, and explicit completed-result
+publication are implemented. Built-in model-vendor adapters beyond the included
+Codex and Claude Code reference adapters and PR submission remain optional
+future integrations.
 
 ## Journey Stages
 
@@ -403,6 +407,7 @@ solution supplies them.
 | Explicit rollback and policy-gated live verifier | Implemented |
 | Persistent review-gated agent runner | Implemented |
 | Sanitized evidence bundle | Implemented |
+| Completed-bundle publication to ISV Lab Service | Implemented |
+| Wheel-packaged runtime schemas | Implemented |
 | Additional model-vendor generator adapters | Optional next |
 | Pull-request creation | Optional next |
-| Publication workflow | Deferred |

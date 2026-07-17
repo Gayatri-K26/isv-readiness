@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +8,7 @@ import jsonschema
 
 from isv_readiness.agent import run_agent_turn
 from isv_readiness.bundle import BundleError, build_bundle
+from isv_readiness.schema import load_schema
 from tests.test_agent import COMMIT, _generator_runner, _live_runner, _project
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,7 +65,7 @@ class BundleTests(unittest.TestCase):
             self.assertTrue(any("application-" in path for path in included))
             self.assertFalse(any("context-" in path or "changes-" in path for path in included))
             self.assertFalse(any(path.suffix == ".log" for path in output.rglob("*")))
-            schema = json.loads((ROOT / "schemas" / "bundle-manifest.schema.json").read_text(encoding="utf-8"))
+            schema = load_schema("bundle-manifest.schema.json")
             jsonschema.validate(manifest.to_dict(), schema)
 
             with self.assertRaisesRegex(BundleError, "Refusing to overwrite"):

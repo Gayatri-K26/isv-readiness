@@ -8,6 +8,7 @@ from pathlib import Path
 import jsonschema
 
 from isv_readiness.loop import LoopStateError, advance_loop, load_loop_state
+from isv_readiness.schema import load_schema
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -170,7 +171,7 @@ class LoopControllerTests(unittest.TestCase):
             )
             persisted = load_loop_state(state_path)
 
-            schema = json.loads((ROOT / "schemas" / "loop-state.schema.json").read_text(encoding="utf-8"))
+            schema = load_schema("loop-state.schema.json")
             jsonschema.Draft202012Validator(schema).validate(persisted.to_dict())
 
         self.assertEqual(exit_code, 0)

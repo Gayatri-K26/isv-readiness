@@ -11,6 +11,7 @@ from isv_readiness.cli import main
 from isv_readiness.scan.k8s_dynamic import K8sDynamicArtifacts, scan_k8s_artifacts
 from isv_readiness.scan.k8s_scope import load_k8s_scope
 from isv_readiness.scan.report import render_report
+from isv_readiness.schema import load_schema
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
@@ -69,7 +70,7 @@ class K8sDynamicScanTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             data = json.loads(output.read_text(encoding="utf-8"))
 
-        schema = json.loads((ROOT / "schemas" / "gaps.schema.json").read_text(encoding="utf-8"))
+        schema = load_schema("gaps.schema.json")
         jsonschema.Draft202012Validator(schema).validate(data)
         self.assertTrue(any(row["detection"] == "static" for row in data["rows"]))
         self.assertTrue(any(row["detection"] == "dynamic" for row in data["rows"]))

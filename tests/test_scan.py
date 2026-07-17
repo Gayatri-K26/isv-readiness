@@ -10,6 +10,7 @@ import jsonschema
 from isv_readiness.scan.models import SCHEMA_VERSION
 from isv_readiness.scan.report import render_report
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
+from isv_readiness.schema import load_schema
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
@@ -25,7 +26,7 @@ class StaticScanTests(unittest.TestCase):
             )
         )
         data = report.to_dict()
-        schema = json.loads((ROOT / "schemas" / "gaps.schema.json").read_text(encoding="utf-8"))
+        schema = load_schema("gaps.schema.json")
         jsonschema.Draft202012Validator(schema).validate(data)
 
         self.assertEqual(data["schema_version"], SCHEMA_VERSION)

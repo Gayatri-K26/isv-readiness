@@ -10,8 +10,6 @@ from pathlib import Path
 import yaml
 
 from isv_readiness.agent import AgentWorkflowError, run_agent_turn
-from isv_readiness.publish import PublishError, check_publish_credentials, publish_bundle
-from isv_readiness.simple import cmd_fill, cmd_init, cmd_status, cmd_test
 from isv_readiness.auto import AutoWorkflowError, run_auto
 from isv_readiness.bundle import BundleError, build_bundle
 from isv_readiness.change_verification import (
@@ -45,6 +43,7 @@ from isv_readiness.project import (
     execute_bootstrap,
     load_project,
 )
+from isv_readiness.publish import PublishError, check_publish_credentials, publish_bundle
 from isv_readiness.qualify import (
     QualifyError,
     build_qualify_catalog,
@@ -61,6 +60,7 @@ from isv_readiness.scan.models import GapReport
 from isv_readiness.scan.profile import enrich_report_with_profile
 from isv_readiness.scan.report import load_report, render_report
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
+from isv_readiness.simple import cmd_fill, cmd_init, cmd_status, cmd_test
 from isv_readiness.solution_profile import SolutionProfile, SolutionProfileError, load_solution_profile
 from isv_readiness.validation_adapter import IsvctlAdapter, ValidationAdapterError
 from isv_readiness.verification import VerificationError
@@ -92,22 +92,32 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Create an engagement workspace: clones ai-cloud-validation, bootstraps project, scaffolds scripts",
     )
     init_parser.add_argument("provider_name", help="Your provider name, e.g. acme-cloud")
-    init_parser.add_argument("--workspace", type=Path, default=Path("."), help="Directory to create the workspace in (default: current directory)")
+    init_parser.add_argument(
+        "--workspace", type=Path, default=Path("."), help="Directory to create the workspace in (default: current directory)"
+    )
     init_parser.add_argument("--domains", required=True, help="Comma-separated domains you own: vm,network,iam")
     init_parser.add_argument("--api", dest="api_url", default=None, help="Your API base URL")
-    init_parser.add_argument("--auth", dest="auth_envs", action="append", default=[], help="Credential env var name (repeat for multiple)")
+    init_parser.add_argument(
+        "--auth", dest="auth_envs", action="append", default=[], help="Credential env var name (repeat for multiple)"
+    )
     init_parser.add_argument("--api-spec", default=None, help="Path or URL to your OpenAPI spec")
     init_parser.add_argument("--validation-ref", default="main", help="ai-cloud-validation branch or tag to clone (default: main)")
     init_parser.set_defaults(handler=_init)
 
     fill_parser = subparsers.add_parser("fill", help="AI-assisted gap-filling loop for one domain")
     fill_parser.add_argument("domain", help="Domain to fill: vm, network, iam, k8s, etc.")
-    fill_parser.add_argument("--generator", required=True, help="Generator to use: 'claude', 'codex', or a full executable path")
-    fill_parser.add_argument("--approve", dest="approve_patch", default=None, metavar="SHA256", help="Approve and apply a reviewed patch")
+    fill_parser.add_argument(
+        "--generator", required=True, help="Generator to use: 'claude', 'codex', or a full executable path"
+    )
+    fill_parser.add_argument(
+        "--approve", dest="approve_patch", default=None, metavar="SHA256", help="Approve and apply a reviewed patch"
+    )
     fill_parser.add_argument("--max-iterations", type=int, default=50)
     fill_parser.set_defaults(handler=_fill)
 
-    test_parser = subparsers.add_parser("test", help="Run validation against real cloud for one domain and update gaps.json")
+    test_parser = subparsers.add_parser(
+        "test", help="Run validation against real cloud for one domain and update gaps.json"
+    )
     test_parser.add_argument("domain", help="Domain to test: vm, network, iam, k8s, etc.")
     test_parser.set_defaults(handler=_test)
 
@@ -118,7 +128,22 @@ def _build_parser() -> argparse.ArgumentParser:
     publish_parser.add_argument("--bundle-dir", type=Path, required=True, help="Directory produced by `gapctl bundle`")
     publish_parser.add_argument("--lab-id", type=int, required=True, help="NVIDIA-assigned lab ID")
     publish_parser.add_argument("--junit", type=Path, default=None, help="Optional JUnit XML to upload")
-    publish_parser.add_argument("--platform", default=None, choices=["VM", "BARE_METAL", "KUBERNETES", "SLURM"])
+    publish_parser.add_argument(
+        "--platform",
+        default=None,
+        choices=[
+            "BARE_METAL",
+            "CONTROL_PLANE",
+            "IAM",
+            "IMAGE_REGISTRY",
+            "KUBERNETES",
+            "NETWORK",
+            "OBSERVABILITY",
+            "SECURITY",
+            "SLURM",
+            "VM",
+        ],
+    )
     publish_parser.add_argument("--isv-software-version", default=None)
     publish_parser.add_argument("--tag", action="append", default=[])
     publish_parser.set_defaults(handler=_publish)
@@ -400,7 +425,12 @@ def _init(args: argparse.Namespace) -> int:
 
 
 def _fill(args: argparse.Namespace) -> int:
-    return cmd_fill(args.domain, generator=args.generator, approve_patch=args.approve_patch, max_iterations=args.max_iterations)
+    return cmd_fill(
+        args.domain,
+        generator=args.generator,
+        approve_patch=args.approve_patch,
+        max_iterations=args.max_iterations,
+    )
 
 
 def _test(args: argparse.Namespace) -> int:

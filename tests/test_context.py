@@ -15,6 +15,7 @@ from isv_readiness.context import (
 from isv_readiness.project import build_bootstrap_plan, execute_bootstrap
 from isv_readiness.runs import latest_run, new_run_dir, write_run_record
 from isv_readiness.scan.models import Evidence, GapReport, GapRow, Remediation
+from isv_readiness.schema import load_schema
 
 COMMIT = "b" * 40
 
@@ -139,9 +140,7 @@ class ContextTests(unittest.TestCase):
             )
 
             raw = pack.to_dict()
-            schema = json.loads(
-                (Path(__file__).parents[1] / "schemas" / "context-pack.schema.json").read_text(encoding="utf-8")
-            )
+            schema = load_schema("context-pack.schema.json")
             jsonschema.validate(raw, schema)
             serialized = json.dumps(raw)
             self.assertIn("launchVm", serialized)
@@ -189,9 +188,7 @@ class ContextTests(unittest.TestCase):
                 project, manifest, report, gap_id="gap_0123456789ab", cache_dir=cache, environment={}
             )
             raw = pack.to_dict()
-            schema = json.loads(
-                (Path(__file__).parents[1] / "schemas" / "context-pack.schema.json").read_text(encoding="utf-8")
-            )
+            schema = load_schema("context-pack.schema.json")
             jsonschema.validate(raw, schema)
             self.assertEqual(raw["items"][0]["trust"], "empirical")
             self.assertEqual(raw["items"][0]["source_id"], "latest_run_vm_junit")

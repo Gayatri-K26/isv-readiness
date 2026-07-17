@@ -9,6 +9,8 @@ from typing import Any, Literal
 import jsonschema
 import yaml
 
+from isv_readiness.schema import load_schema
+
 PROFILE_SCHEMA_VERSION = "0.1.0"
 
 SUPPORTED_DOMAINS = frozenset(
@@ -324,9 +326,12 @@ def load_solution_profile(path: Path, *, schema_path: Path | None = None) -> Sol
 def parse_solution_profile(
     payload: Mapping[str, Any], *, schema_path: Path | None = None
 ) -> SolutionProfile:
-    schema_file = schema_path or Path(__file__).resolve().parents[2] / "schemas" / "solution-profile.schema.json"
     try:
-        schema = yaml.safe_load(schema_file.read_text(encoding="utf-8"))
+        schema = (
+            yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+            if schema_path is not None
+            else load_schema("solution-profile.schema.json")
+        )
         jsonschema.Draft202012Validator(schema).validate(dict(payload))
     except (OSError, yaml.YAMLError, jsonschema.ValidationError) as exc:
         raise SolutionProfileError(f"Invalid solution profile: {exc}") from exc

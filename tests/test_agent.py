@@ -13,6 +13,7 @@ import yaml
 
 from isv_readiness.agent import run_agent_turn
 from isv_readiness.project import build_bootstrap_plan, execute_bootstrap
+from isv_readiness.schema import load_schema
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
@@ -90,7 +91,7 @@ class AgentWorkflowTests(unittest.TestCase):
                 environment={"PATH": "/bin", "HOME": "/home/test", "ACME_TOKEN": "secret"},
             )
             self.assertEqual(state.status, "complete")
-            schema = json.loads((ROOT / "schemas" / "agent-state.schema.json").read_text(encoding="utf-8"))
+            schema = load_schema("agent-state.schema.json")
             jsonschema.validate(state.to_dict(), schema)
 
 

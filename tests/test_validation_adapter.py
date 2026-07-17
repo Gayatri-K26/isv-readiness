@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import jsonschema
 
+from isv_readiness.schema import load_schema
 from isv_readiness.validation_adapter import (
     ADAPTER_CONTRACT_VERSION,
     IsvctlAdapter,
@@ -188,7 +189,7 @@ class IsvctlAdapterTests(unittest.TestCase):
         self.assertEqual(plan.isvctl_version, "isvctl 0.8.0")
         self.assertEqual(plan.catalog_version, "0.8.0")
         self.assertEqual(len(plan.validations), 1)
-        schema = json.loads((ROOT / "schemas" / "validation-plan.schema.json").read_text(encoding="utf-8"))
+        schema = load_schema("validation-plan.schema.json")
         jsonschema.Draft202012Validator(schema).validate(plan.to_dict())
         self.assertEqual(
             calls[0][0],
@@ -287,7 +288,7 @@ class IsvctlAdapterTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         adapter_class.assert_called_once_with(validation_root)
-        schema = json.loads((ROOT / "schemas" / "validation-plan.schema.json").read_text(encoding="utf-8"))
+        schema = load_schema("validation-plan.schema.json")
         jsonschema.Draft202012Validator(schema).validate(payload)
 
     def test_cli_plan_allows_isvctl_from_path_without_checkout(self) -> None:

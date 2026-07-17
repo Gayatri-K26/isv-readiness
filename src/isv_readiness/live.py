@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import re
 import subprocess
@@ -20,6 +19,7 @@ from isv_readiness.scan.k8s_scope import load_k8s_scope
 from isv_readiness.scan.models import GapReport
 from isv_readiness.scan.profile import enrich_report_with_profile
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
+from isv_readiness.schema import load_schema
 from isv_readiness.solution_profile import canonicalize_domain, load_solution_profile
 from isv_readiness.validation_adapter import IsvctlAdapter
 
@@ -229,10 +229,8 @@ def _same_validation(selection: str, validation_class: str | None) -> bool:
 
 
 def _validate_live_result(raw: Any) -> None:
-    path = Path(__file__).resolve().parents[2] / "schemas" / "live-run.schema.json"
-    schema = json.loads(path.read_text(encoding="utf-8"))
     try:
-        jsonschema.validate(raw, schema)
+        jsonschema.validate(raw, load_schema("live-run.schema.json"))
     except jsonschema.ValidationError as exc:
         location = ".".join(str(item) for item in exc.absolute_path) or "live_run"
         raise LiveRunError(f"Invalid live run at {location}: {exc.message}") from exc

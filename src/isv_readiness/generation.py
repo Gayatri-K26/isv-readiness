@@ -9,6 +9,7 @@ from typing import Any
 
 from isv_readiness.changes import ChangeSet, canonical_sha256, change_set_from_dict, validate_change_set
 from isv_readiness.fixes import FixGuardrailError
+from isv_readiness.schema import load_schema
 
 GeneratorRunner = Callable[
     [Sequence[str], Path, str, Mapping[str, str], int],
@@ -79,7 +80,6 @@ def run_generator(
     if not isinstance(gap_id, str) or not gap_id:
         raise FixGuardrailError("Context pack has no selected gap ID.")
     context_sha256 = canonical_sha256(context_pack)
-    schema_path = Path(__file__).resolve().parents[2] / "schemas" / "change-set.schema.json"
     request = {
         "schema_version": "0.1.0",
         "task": "Produce the smallest provider-owned change set that addresses the selected gap.",
@@ -91,7 +91,7 @@ def run_generator(
             "Every content_sha256 must be the SHA-256 of the UTF-8 content field.",
             "Prefer the smallest change and preserve cleanup/error behavior required by the contract.",
         ],
-        "output_schema": json.loads(schema_path.read_text(encoding="utf-8")),
+        "output_schema": load_schema("change-set.schema.json"),
         "context_pack": context_pack,
     }
     raw = dispatch_generator(

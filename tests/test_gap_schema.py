@@ -6,12 +6,14 @@ from pathlib import Path
 
 import jsonschema
 
+from isv_readiness.schema import load_schema
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class GapSchemaTests(unittest.TestCase):
     def test_sample_report_matches_schema(self) -> None:
-        schema = json.loads((ROOT / "schemas" / "gaps.schema.json").read_text(encoding="utf-8"))
+        schema = load_schema("gaps.schema.json")
         sample = json.loads((ROOT / "examples" / "gaps.sample.json").read_text(encoding="utf-8"))
 
         jsonschema.Draft202012Validator(schema).validate(sample)

@@ -10,6 +10,7 @@ import jsonschema
 from isv_readiness.cli import main
 from isv_readiness.scan.dynamic import DynamicArtifacts, scan_dynamic_artifacts
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
+from isv_readiness.schema import load_schema
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
@@ -100,7 +101,7 @@ class CrossDomainDynamicScanTests(unittest.TestCase):
             data = json.loads(output.read_text(encoding="utf-8"))
 
         self.assertEqual(exit_code, 0)
-        schema = json.loads((ROOT / "schemas" / "gaps.schema.json").read_text(encoding="utf-8"))
+        schema = load_schema("gaps.schema.json")
         jsonschema.Draft202012Validator(schema).validate(data)
         dynamic_rows = [row for row in data["rows"] if row["detection"] == "dynamic"]
         self.assertEqual(len(dynamic_rows), 4)

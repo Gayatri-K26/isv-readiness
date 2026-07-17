@@ -15,6 +15,7 @@ from isv_readiness.project import (
     execute_bootstrap,
     load_project,
 )
+from isv_readiness.schema import load_schema
 from isv_readiness.solution_profile import load_solution_profile
 
 COMMIT = "a" * 40
@@ -64,9 +65,7 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertEqual(profile.resolve("vm").action, "implement_or_fix_adapter")
             self.assertEqual(load_project(plan.manifest_path), project)
             raw = yaml.safe_load(plan.manifest_path.read_text(encoding="utf-8"))
-            schema = yaml.safe_load(
-                (Path(__file__).parents[1] / "schemas" / "project.schema.json").read_text(encoding="utf-8")
-            )
+            schema = load_schema("project.schema.json")
             jsonschema.validate(raw, schema)
 
     def test_missing_checkout_is_cloned_before_manifest_is_written(self) -> None:

@@ -9,6 +9,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from xml.etree import ElementTree
+
+from isv_readiness.bundle import BundleError, load_bundle_manifest
 
 
 class PublishError(ValueError):
@@ -21,20 +24,27 @@ _DOMAIN_TO_PLATFORM = {
     "slurm": "SLURM",
     "bare_metal": "BARE_METAL",
     "vm": "VM",
-    "network": "VM",
-    "iam": "VM",
-    "control-plane": "VM",
-    "image-registry": "VM",
-    "observability": "VM",
-    "security": "VM",
+    "network": "NETWORK",
+    "iam": "IAM",
+    "control_plane": "CONTROL_PLANE",
+    "image_registry": "IMAGE_REGISTRY",
+    "observability": "OBSERVABILITY",
+    "security": "SECURITY",
 }
+_PLATFORMS = frozenset(_DOMAIN_TO_PLATFORM.values())
 
 
 def _detect_platform(domains: list[str]) -> str:
-    for domain in domains:
-        if domain in _DOMAIN_TO_PLATFORM:
-            return _DOMAIN_TO_PLATFORM[domain]
-    return "VM"
+    unknown = sorted(set(domains).difference(_DOMAIN_TO_PLATFORM))
+    if unknown:
+        raise PublishError(f"Cannot infer a publish platform for domains: {', '.join(unknown)}")
+    platforms = {_DOMAIN_TO_PLATFORM[domain] for domain in domains}
+    if len(platforms) != 1:
+        raise PublishError(
+            "The bundle spans multiple platform types; pass --platform explicitly "
+            f"({', '.join(sorted(platforms))})."
+        )
+    return platforms.pop()
 
 
 def _require_env(name: str) -> str:
@@ -63,6 +73,8 @@ def _post(url: str, payload: dict, *, token: str, method: str = "POST") -> dict:
         raise PublishError(f"ISV Lab Service returned HTTP {exc.code}: {detail}") from exc
     except URLError as exc:
         raise PublishError(f"Could not reach ISV Lab Service ({url}): {exc.reason}") from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise PublishError(f"ISV Lab Service returned an invalid JSON response: {url}") from exc
 
 
 def _get_jwt_token(ssa_issuer: str, client_id: str, client_secret: str) -> str:
@@ -80,7 +92,8 @@ def _get_jwt_token(ssa_issuer: str, client_id: str, client_secret: str) -> str:
     )
     try:
         with urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read().decode())["access_token"]
+            response = json.loads(resp.read().decode())
+            return response["access_token"]
     except HTTPError as exc:
         raise PublishError(
             f"Failed to obtain JWT token (HTTP {exc.code}). Check ISV_CLIENT_ID and ISV_CLIENT_SECRET."
@@ -89,6 +102,8 @@ def _get_jwt_token(ssa_issuer: str, client_id: str, client_secret: str) -> str:
         raise PublishError(f"Could not reach SSA issuer ({ssa_issuer}): {exc.reason}") from exc
     except KeyError as exc:
         raise PublishError("JWT response did not contain an access_token field.") from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise PublishError("JWT endpoint returned an invalid JSON response.") from exc
 
 
 def publish_bundle(
@@ -106,23 +121,39 @@ def publish_bundle(
         PublishError: If the bundle or credentials are missing/invalid
     """
     bundle_dir = bundle_dir.expanduser().resolve()
-    manifest_path = bundle_dir / "bundle-manifest.json"
-    if not manifest_path.is_file():
-        raise PublishError(
-            f"bundle-manifest.json not found in {bundle_dir}. "
-            "Run `gapctl bundle` first to assemble the validation evidence."
-        )
+    if lab_id < 1:
+        raise PublishError("Lab ID must be a positive integer.")
+    try:
+        manifest = load_bundle_manifest(bundle_dir)
+    except BundleError as exc:
+        raise PublishError(str(exc)) from exc
 
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    provider = manifest.get("provider", "unknown")
-    outcome = manifest.get("outcome", "incomplete")
-    domains = [d["domain"] for d in manifest.get("domains", [])]
+    provider = manifest["provider"]
+    outcome = manifest["outcome"]
+    domains = [domain["domain"] for domain in manifest["domains"]]
+    if outcome != "validation_complete" or any(domain["status"] != "complete" for domain in manifest["domains"]):
+        raise PublishError(
+            "Refusing to publish an incomplete evidence bundle; complete every owned domain and rebuild the bundle."
+        )
+    if platform is not None and platform not in _PLATFORMS:
+        raise PublishError(f"Unsupported publish platform: {platform}")
 
     resolved_platform = platform or _detect_platform(domains)
-    resolved_tags = list(tags or []) + [provider] + domains
+    resolved_tags = list(dict.fromkeys([*list(tags or []), provider, *domains]))
 
-    endpoint = _require_env("ISV_SERVICE_ENDPOINT")
-    ssa_issuer = _require_env("ISV_SSA_ISSUER")
+    junit_xml: str | None = None
+    if junit_xml_path is not None:
+        junit_path = junit_xml_path.expanduser().resolve()
+        if not junit_path.is_file():
+            raise PublishError(f"JUnit XML not found: {junit_path}")
+        junit_xml = junit_path.read_text(encoding="utf-8")
+        try:
+            ElementTree.fromstring(junit_xml)
+        except ElementTree.ParseError as exc:
+            raise PublishError(f"JUnit XML is not well formed: {junit_path}") from exc
+
+    endpoint = _require_env("ISV_SERVICE_ENDPOINT").rstrip("/")
+    ssa_issuer = _require_env("ISV_SSA_ISSUER").rstrip("/")
     client_id = _require_env("ISV_CLIENT_ID")
     client_secret = _require_env("ISV_CLIENT_SECRET")
 
@@ -148,17 +179,17 @@ def publish_bundle(
         payload["isvSoftwareVersion"] = isv_software_version
 
     result = _post(f"{endpoint}/v1/labs/{lab_id}/test-runs", payload, token=jwt_token)
-    test_run_id = result["data"]["testRunId"]
+    try:
+        test_run_id = str(result["data"]["testRunId"])
+    except (KeyError, TypeError) as exc:
+        raise PublishError("ISV Lab Service create response did not contain data.testRunId.") from exc
     print(f"Test run created: {test_run_id}")
 
-    if junit_xml_path is not None:
-        junit_path = junit_xml_path.expanduser().resolve()
-        if not junit_path.is_file():
-            raise PublishError(f"JUnit XML not found: {junit_path}")
-        print(f"Uploading JUnit XML: {junit_path}")
+    if junit_xml is not None:
+        print(f"Uploading JUnit XML: {junit_xml_path.expanduser().resolve()}")
         _post(
             f"{endpoint}/v1/labs/{lab_id}/test-runs/{test_run_id}/test-results",
-            {"junitXml": junit_path.read_text(encoding="utf-8")},
+            {"junitXml": junit_xml},
             token=jwt_token,
         )
 

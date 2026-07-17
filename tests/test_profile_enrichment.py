@@ -11,6 +11,7 @@ import jsonschema
 
 from isv_readiness.scan.profile import enrich_report_with_profile
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
+from isv_readiness.schema import load_schema
 from isv_readiness.solution_profile import load_solution_profile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,7 +46,7 @@ class ProfileEnrichmentTests(unittest.TestCase):
         self.assertEqual(storage_profile["action"], "request_scope_decision")
         self.assertFalse(storage.remediation.auto_fixable)
 
-        schema = json.loads((ROOT / "schemas" / "gaps.schema.json").read_text(encoding="utf-8"))
+        schema = load_schema("gaps.schema.json")
         jsonschema.Draft202012Validator(schema).validate(enriched.to_dict())
 
     def test_out_of_scope_domain_disables_automatic_adapter_edits(self) -> None:

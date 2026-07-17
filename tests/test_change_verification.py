@@ -17,6 +17,7 @@ from isv_readiness.change_verification import (
 )
 from isv_readiness.changes import Change, ChangeSet, canonical_sha256
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
+from isv_readiness.schema import load_schema
 from isv_readiness.verification import VerificationError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,9 +48,7 @@ class ChangeVerificationTests(unittest.TestCase):
             self.assertEqual(len(manifest.files), 2)
             self.assertEqual(script.read_text(encoding="utf-8"), script_before)
             self.assertEqual(config.read_text(encoding="utf-8"), config_before)
-            verification_schema = json.loads(
-                (ROOT / "schemas" / "change-verification.schema.json").read_text(encoding="utf-8")
-            )
+            verification_schema = load_schema("change-verification.schema.json")
             jsonschema.validate(manifest.to_dict(), verification_schema)
             manifest_path = root / "manifest.json"
             manifest_path.write_text(json.dumps(manifest.to_dict()), encoding="utf-8")
@@ -68,18 +67,14 @@ class ChangeVerificationTests(unittest.TestCase):
             self.assertEqual(len(result.files), 2)
             self.assertTrue(all(item.backup_path for item in result.files))
             self.assertEqual(Path(result.files[0].backup_path).read_text(encoding="utf-8"), script_before)
-            application_schema = json.loads(
-                (ROOT / "schemas" / "change-application.schema.json").read_text(encoding="utf-8")
-            )
+            application_schema = load_schema("change-application.schema.json")
             jsonschema.validate(result.to_dict(), application_schema)
 
             rollback = rollback_change_application(result, provider_repo=provider)
             self.assertTrue(rollback.rolled_back)
             self.assertEqual(script.read_text(encoding="utf-8"), script_before)
             self.assertEqual(config.read_text(encoding="utf-8"), config_before)
-            rollback_schema = json.loads(
-                (ROOT / "schemas" / "change-rollback.schema.json").read_text(encoding="utf-8")
-            )
+            rollback_schema = load_schema("change-rollback.schema.json")
             jsonschema.validate(rollback.to_dict(), rollback_schema)
 
     def test_application_rejects_any_file_drift(self) -> None:

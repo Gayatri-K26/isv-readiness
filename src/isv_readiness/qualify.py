@@ -9,7 +9,6 @@ ratifies by editing the draft and flipping ``profile_status`` off ``draft``.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -17,6 +16,7 @@ from typing import Any
 from isv_readiness.changes import canonical_sha256
 from isv_readiness.generation import GeneratorRunner, dispatch_generator
 from isv_readiness.runs import latest_run
+from isv_readiness.schema import load_schema
 from isv_readiness.solution_profile import (
     SolutionProfile,
     canonicalize_domain,
@@ -106,7 +106,6 @@ def run_profile_draft(
     ``draft`` in the ``qualify`` stage regardless of what the model claims,
     and its domain set must exactly match the declared scope.
     """
-    schema_path = Path(__file__).resolve().parents[2] / "schemas" / "solution-profile.schema.json"
     request = {
         "schema_version": "0.1.0",
         "task": (
@@ -126,7 +125,7 @@ def run_profile_draft(
             "Copy environment facts (versions, addresses, CIDRs) verbatim from the evidence; do not infer them.",
             "Do not include credential values anywhere.",
         ],
-        "output_schema": json.loads(schema_path.read_text(encoding="utf-8")),
+        "output_schema": load_schema("solution-profile.schema.json"),
         "context_pack": pack,
     }
     raw = dispatch_generator(

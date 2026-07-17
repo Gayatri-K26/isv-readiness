@@ -17,6 +17,7 @@ from isv_readiness.fixes import (
     validate_candidate_content,
 )
 from isv_readiness.onboarding import DOMAIN_CONFIG_FILES
+from isv_readiness.schema import schema_path
 from isv_readiness.solution_profile import canonicalize_domain
 
 CHANGE_PROPOSAL_VERSION = "0.1.0"
@@ -276,7 +277,7 @@ def _logical_patch_path(provider_root: Path, change: Change) -> str:
 
 
 def _schema_path(name: str) -> Path:
-    return Path(__file__).resolve().parents[2] / "schemas" / name
+    return schema_path(name)
 
 
 def _sha256_bytes(value: bytes) -> str:

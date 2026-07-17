@@ -11,6 +11,7 @@ import jsonschema
 import yaml
 
 from isv_readiness.scan.k8s_onboard import PROVIDER_NAME_RE
+from isv_readiness.schema import load_schema
 from isv_readiness.solution_profile import (
     SUPPORTED_DOMAINS,
     SolutionProfile,
@@ -365,10 +366,8 @@ def load_project(path: Path) -> ReadinessProject:
 
 
 def validate_project(raw: Any) -> None:
-    schema_path = Path(__file__).resolve().parents[2] / "schemas" / "project.schema.json"
-    schema = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
     try:
-        jsonschema.validate(raw, schema)
+        jsonschema.validate(raw, load_schema("project.schema.json"))
     except jsonschema.ValidationError as exc:
         location = ".".join(str(item) for item in exc.absolute_path) or "project"
         raise ProjectError(f"Invalid project at {location}: {exc.message}") from exc

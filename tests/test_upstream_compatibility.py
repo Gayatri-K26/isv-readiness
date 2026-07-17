@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import shutil
 import tempfile
 import unittest
@@ -11,6 +10,7 @@ import yaml
 
 from isv_readiness.scan.profile import enrich_report_with_profile
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
+from isv_readiness.schema import load_schema
 from isv_readiness.solution_profile import load_solution_profile
 from isv_readiness.validation_adapter import normalize_catalog, normalize_validation_plan
 
@@ -82,8 +82,8 @@ class UpstreamSuiteCompatibilityTests(unittest.TestCase):
             self.assertEqual(routing["capability_id"], "kubernetes.default")
             self.assertEqual(routing["action"], "implement_or_fix_adapter")
 
-            plan_schema = json.loads((ROOT / "schemas" / "validation-plan.schema.json").read_text(encoding="utf-8"))
-            gaps_schema = json.loads((ROOT / "schemas" / "gaps.schema.json").read_text(encoding="utf-8"))
+            plan_schema = load_schema("validation-plan.schema.json")
+            gaps_schema = load_schema("gaps.schema.json")
             jsonschema.Draft202012Validator(plan_schema).validate(changed_plan.to_dict())
             jsonschema.Draft202012Validator(gaps_schema).validate(enriched.to_dict())
 

@@ -13,6 +13,7 @@ import jsonschema
 
 from isv_readiness.agent import load_agent_state, project_identity
 from isv_readiness.project import load_project
+from isv_readiness.schema import load_schema
 
 BUNDLE_VERSION = "0.1.0"
 ARTIFACT_PREFIXES = {
@@ -57,6 +58,19 @@ class BundleManifest:
         payload["files"] = [asdict(item) for item in self.files]
         payload["excluded_sensitive"] = list(self.excluded_sensitive)
         return payload
+
+
+def load_bundle_manifest(bundle_dir: Path) -> dict[str, Any]:
+    """Load and validate an existing evidence-bundle manifest."""
+    manifest_path = bundle_dir.expanduser().resolve() / "bundle-manifest.json"
+    if not manifest_path.is_file():
+        raise BundleError(f"Bundle manifest not found: {manifest_path}")
+    try:
+        raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise BundleError(f"Bundle manifest is not valid JSON: {manifest_path}") from exc
+    _validate_bundle(raw)
+    return raw
 
 
 def build_bundle(
@@ -201,10 +215,8 @@ def _resolve_commit(root: Path) -> str:
 
 
 def _validate_bundle(raw: Any) -> None:
-    path = Path(__file__).resolve().parents[2] / "schemas" / "bundle-manifest.schema.json"
-    schema = json.loads(path.read_text(encoding="utf-8"))
     try:
-        jsonschema.validate(raw, schema)
+        jsonschema.validate(raw, load_schema("bundle-manifest.schema.json"))
     except jsonschema.ValidationError as exc:
         location = ".".join(str(item) for item in exc.absolute_path) or "bundle"
         raise BundleError(f"Invalid bundle manifest at {location}: {exc.message}") from exc
