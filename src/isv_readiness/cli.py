@@ -7,7 +7,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 from isv_readiness.agent import AgentWorkflowError, run_agent_turn
+from isv_readiness.publish import PublishError, check_publish_credentials, publish_bundle
+from isv_readiness.simple import cmd_fill, cmd_init, cmd_status, cmd_test
 from isv_readiness.auto import AutoWorkflowError, run_auto
 from isv_readiness.bundle import BundleError, build_bundle
 from isv_readiness.change_verification import (
@@ -21,7 +25,8 @@ from isv_readiness.changes import build_change_proposal, load_change_set
 from isv_readiness.context import (
     ContextError,
     build_context_pack,
-    import_context_source,
+    build_qualify_pack,
+    redact_text,
     sync_context_sources,
 )
 from isv_readiness.fixes import FixGuardrailError
@@ -40,6 +45,14 @@ from isv_readiness.project import (
     execute_bootstrap,
     load_project,
 )
+from isv_readiness.qualify import (
+    QualifyError,
+    build_qualify_catalog,
+    empirical_conflicts,
+    profile_draft_diff,
+    run_profile_draft,
+)
+from isv_readiness.runs import new_run_dir, write_run_record
 from isv_readiness.scan.dynamic import DynamicArtifacts, scan_dynamic_artifacts
 from isv_readiness.scan.k8s_dynamic import K8sDynamicArtifacts, scan_k8s_artifacts
 from isv_readiness.scan.k8s_onboard import build_k8s_onboarding_plan, write_k8s_onboarding_files
@@ -72,6 +85,44 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     subparsers = parser.add_subparsers(dest="command")
+
+    # ── High-level ISV commands ────────────────────────────────────────────────
+    init_parser = subparsers.add_parser(
+        "init",
+        help="Create an engagement workspace: clones ai-cloud-validation, bootstraps project, scaffolds scripts",
+    )
+    init_parser.add_argument("provider_name", help="Your provider name, e.g. acme-cloud")
+    init_parser.add_argument("--workspace", type=Path, default=Path("."), help="Directory to create the workspace in (default: current directory)")
+    init_parser.add_argument("--domains", required=True, help="Comma-separated domains you own: vm,network,iam")
+    init_parser.add_argument("--api", dest="api_url", default=None, help="Your API base URL")
+    init_parser.add_argument("--auth", dest="auth_envs", action="append", default=[], help="Credential env var name (repeat for multiple)")
+    init_parser.add_argument("--api-spec", default=None, help="Path or URL to your OpenAPI spec")
+    init_parser.add_argument("--validation-ref", default="main", help="ai-cloud-validation branch or tag to clone (default: main)")
+    init_parser.set_defaults(handler=_init)
+
+    fill_parser = subparsers.add_parser("fill", help="AI-assisted gap-filling loop for one domain")
+    fill_parser.add_argument("domain", help="Domain to fill: vm, network, iam, k8s, etc.")
+    fill_parser.add_argument("--generator", required=True, help="Generator to use: 'claude', 'codex', or a full executable path")
+    fill_parser.add_argument("--approve", dest="approve_patch", default=None, metavar="SHA256", help="Approve and apply a reviewed patch")
+    fill_parser.add_argument("--max-iterations", type=int, default=50)
+    fill_parser.set_defaults(handler=_fill)
+
+    test_parser = subparsers.add_parser("test", help="Run validation against real cloud for one domain and update gaps.json")
+    test_parser.add_argument("domain", help="Domain to test: vm, network, iam, k8s, etc.")
+    test_parser.set_defaults(handler=_test)
+
+    status_parser = subparsers.add_parser("status", help="Show a gap scorecard across all domains")
+    status_parser.set_defaults(handler=_status)
+
+    publish_parser = subparsers.add_parser("publish", help="Publish a completed validation bundle to ISV Lab Service")
+    publish_parser.add_argument("--bundle-dir", type=Path, required=True, help="Directory produced by `gapctl bundle`")
+    publish_parser.add_argument("--lab-id", type=int, required=True, help="NVIDIA-assigned lab ID")
+    publish_parser.add_argument("--junit", type=Path, default=None, help="Optional JUnit XML to upload")
+    publish_parser.add_argument("--platform", default=None, choices=["VM", "BARE_METAL", "KUBERNETES", "SLURM"])
+    publish_parser.add_argument("--isv-software-version", default=None)
+    publish_parser.add_argument("--tag", action="append", default=[])
+    publish_parser.set_defaults(handler=_publish)
+    # ── End high-level ISV commands ────────────────────────────────────────────
 
     bootstrap_parser = subparsers.add_parser(
         "bootstrap",
@@ -110,19 +161,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     context_sync_parser.add_argument("--project", type=Path, required=True)
     context_sync_parser.add_argument("--cache-dir", type=Path, default=None)
-    context_sync_parser.add_argument(
-        "--allow-network", action="store_true", help="Fetch declared HTTP and GitHub issue sources"
-    )
     context_sync_parser.set_defaults(handler=_context_sync)
-
-    context_import_parser = subparsers.add_parser(
-        "context-import", help="Import a host-fetched MCP or other declared context export"
-    )
-    context_import_parser.add_argument("--project", type=Path, required=True)
-    context_import_parser.add_argument("--source-id", required=True)
-    context_import_parser.add_argument("--in", dest="input_path", type=Path, required=True)
-    context_import_parser.add_argument("--cache-dir", type=Path, default=None)
-    context_import_parser.set_defaults(handler=_context_import)
 
     context_pack_parser = subparsers.add_parser(
         "context-pack", help="Build one bounded, redacted context pack for a selected gap"
@@ -254,7 +293,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--setup-json", type=Path, default=None, help="K8s dynamic scan: captured setup inventory JSON"
     )
     scan_parser.add_argument("--scope", type=Path, default=None, help="K8s dynamic scan: ISV ownership/scope JSON")
-    scan_parser.add_argument("--artifacts-dir", type=Path, default=None, help="Directory for --run JUnit/log artifacts")
+    scan_parser.add_argument(
+        "--artifacts-dir",
+        type=Path,
+        default=None,
+        help="Runs root for --run artifacts; each run records runs/<run-id>/ (default: .gapctl/runs beside --out)",
+    )
     scan_parser.add_argument(
         "--run", action="store_true", help="Execute one domain with isvctl and parse its artifacts"
     )
@@ -271,7 +315,38 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     profile_parser.add_argument("--in", dest="input_path", type=Path, required=True)
     profile_parser.add_argument("--format", choices=["summary", "json"], default="summary")
+    profile_parser.add_argument(
+        "--draft", type=Path, default=None, help="Diff a drafted profile against --in for SME ratification"
+    )
     profile_parser.set_defaults(handler=_profile)
+
+    catalog_parser = subparsers.add_parser(
+        "catalog", help="Qualify phase: distill the pinned suites into the per-domain check/test-id catalog"
+    )
+    catalog_parser.add_argument("--project", type=Path, required=True)
+    catalog_parser.add_argument("--out", type=Path, default=None, help="Default: .gapctl/catalog.json beside --project")
+    catalog_parser.set_defaults(handler=_catalog)
+
+    qualify_draft_parser = subparsers.add_parser(
+        "qualify-draft",
+        help="Qualify phase: draft an evidence-grounded solution profile for SME ratification",
+    )
+    qualify_draft_parser.add_argument("--project", type=Path, required=True)
+    qualify_draft_parser.add_argument("--generator", required=True, help="Generator adapter executable (no shell)")
+    qualify_draft_parser.add_argument("--generator-arg", action="append", default=[])
+    qualify_draft_parser.add_argument("--generator-env", action="append", default=[])
+    qualify_draft_parser.add_argument("--cwd", type=Path, default=Path.cwd())
+    # Drafting reads the whole multi-domain pack; give the generator more
+    # headroom than the single-gap default before declaring it hung.
+    qualify_draft_parser.add_argument("--timeout", type=int, default=600)
+    # The qualify pack spans every declared domain (catalog + whole API spec),
+    # so its default budget is wider than the single-gap 48k pack.
+    qualify_draft_parser.add_argument("--max-chars", type=int, default=120_000)
+    qualify_draft_parser.add_argument(
+        "--out", type=Path, default=None, help="Default: solution-profile.draft.yaml beside --project"
+    )
+    qualify_draft_parser.add_argument("--overwrite", action="store_true", help="Replace an existing draft")
+    qualify_draft_parser.set_defaults(handler=_qualify_draft)
 
     plan_parser = subparsers.add_parser("plan", help="Export the merged, normalized isvctl validation plan")
     plan_parser.add_argument("-f", "--config", type=Path, action="append", required=True)
@@ -309,6 +384,53 @@ def _build_parser() -> argparse.ArgumentParser:
     onboard_parser.add_argument("--overwrite", action="store_true", help="Overwrite existing generated files")
     onboard_parser.set_defaults(handler=_onboard)
     return parser
+
+
+def _init(args: argparse.Namespace) -> int:
+    domains = [d.strip() for d in args.domains.split(",") if d.strip()]
+    return cmd_init(
+        args.provider_name,
+        workspace=args.workspace,
+        domains=domains,
+        api_url=args.api_url,
+        auth_envs=args.auth_envs,
+        api_spec=args.api_spec,
+        validation_ref=args.validation_ref,
+    )
+
+
+def _fill(args: argparse.Namespace) -> int:
+    return cmd_fill(args.domain, generator=args.generator, approve_patch=args.approve_patch, max_iterations=args.max_iterations)
+
+
+def _test(args: argparse.Namespace) -> int:
+    return cmd_test(args.domain)
+
+
+def _status(args: argparse.Namespace) -> int:
+    return cmd_status()
+
+
+def _publish(args: argparse.Namespace) -> int:
+    missing = check_publish_credentials()
+    if missing:
+        print("Missing required environment variables:", file=sys.stderr)
+        for name in missing:
+            print(f"  {name}", file=sys.stderr)
+        return 2
+    try:
+        publish_bundle(
+            args.bundle_dir,
+            lab_id=args.lab_id,
+            junit_xml_path=args.junit,
+            platform=args.platform,
+            isv_software_version=args.isv_software_version,
+            tags=args.tag or [],
+        )
+    except (OSError, PublishError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    return 0
 
 
 def _bootstrap(args: argparse.Namespace) -> int:
@@ -355,7 +477,6 @@ def _context_sync(args: argparse.Namespace) -> int:
             project,
             args.project,
             _context_cache_dir(args.project, args.cache_dir),
-            allow_network=args.allow_network,
         )
     except (OSError, ProjectError, ContextError) as exc:
         print(str(exc), file=sys.stderr)
@@ -365,21 +486,6 @@ def _context_sync(args: argparse.Namespace) -> int:
         print(f"{record.source_id}: {record.status}{detail}")
     required_failures = [record for record in records if record.status == "error"]
     return 1 if required_failures else 0
-
-
-def _context_import(args: argparse.Namespace) -> int:
-    try:
-        record = import_context_source(
-            load_project(args.project),
-            args.source_id,
-            args.input_path,
-            _context_cache_dir(args.project, args.cache_dir),
-        )
-    except (OSError, ProjectError, ContextError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-    print(f"Imported {record.source_id}: {record.sha256}")
-    return 0
 
 
 def _context_pack(args: argparse.Namespace) -> int:
@@ -723,11 +829,12 @@ def _run_validation(
     if args.validation_root is None:
         raise SystemExit("--run requires --validation-root so gapctl knows where to execute ai-cloud-validation.")
     validation_root = args.validation_root.resolve()
-    artifacts_dir = args.artifacts_dir or (args.out.parent / f"{args.out.stem}-artifacts")
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
-    artifact_domain = domain.replace("_", "-")
-    junit_path = artifacts_dir / f"junit-{artifact_domain}.xml"
-    log_path = artifacts_dir / f"isvctl-{artifact_domain}.log"
+    # Absolute: isvctl executes with cwd inside the checkout, so a relative
+    # runs root would send its JUnit into the wrong tree.
+    runs_root = (args.artifacts_dir or (args.out.parent / ".gapctl" / "runs")).resolve()
+    run_id, run_dir = new_run_dir(runs_root, domain)
+    junit_path = run_dir / "junit.xml"
+    log_path = run_dir / "isvctl.log"
     try:
         config_arg = str(config_path.resolve().relative_to(validation_root))
     except ValueError:
@@ -753,12 +860,17 @@ def _run_validation(
         stderr=subprocess.STDOUT,
         check=False,
     )
-    log_path.write_text(result.stdout or "", encoding="utf-8")
+    log_path.write_text(redact_text(result.stdout or ""), encoding="utf-8")
+    write_run_record(
+        run_dir,
+        run_id=run_id,
+        domain=domain,
+        config=config_arg,
+        exit_code=result.returncode,
+    )
     print(f"Ran {' '.join(command)}")
-    print(f"Wrote {log_path}")
-    if junit_path.exists():
-        print(f"Wrote {junit_path}")
-    else:
+    print(f"Recorded run {run_id}: {run_dir}")
+    if not junit_path.exists():
         print(f"JUnit artifact was not produced at {junit_path}; log output will still be preserved.", file=sys.stderr)
     return junit_path if junit_path.exists() else None, log_path
 
@@ -868,6 +980,17 @@ def _profile(args: argparse.Namespace) -> int:
     profile = _load_profile_arg(args.input_path)
     if profile is None:
         return 2
+    if args.draft is not None:
+        draft = _load_profile_arg(args.draft)
+        if draft is None:
+            return 2
+        for line in profile_draft_diff(profile, draft) or ["no domain differences"]:
+            print(f"draft diff: {line}")
+        conflicts = empirical_conflicts(draft, args.draft.resolve().parent / ".gapctl" / "runs")
+        for conflict in conflicts:
+            print(f"empirical conflict: {conflict}", file=sys.stderr)
+        print("Ratify by editing the draft, moving it into place, and setting profile_status past 'draft'.")
+        return 1 if conflicts else 0
     if args.format == "json":
         print(json.dumps(profile.to_dict(), indent=2, sort_keys=True))
         return 0
@@ -887,6 +1010,69 @@ def _profile(args: argparse.Namespace) -> int:
     print("Blocking domains: " + (", ".join(summary["blocking_domains"]) or "none"))
     print("Blocking capabilities: " + (", ".join(summary["blocking_capabilities"]) or "none"))
     return 0
+
+
+def _catalog(args: argparse.Namespace) -> int:
+    try:
+        project = load_project(args.project)
+        adapter = IsvctlAdapter(project.validation_root(args.project))
+        catalog = build_qualify_catalog(adapter, project.assessment.domains)
+        out = args.out or (args.project.resolve().parent / ".gapctl" / "catalog.json")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(catalog, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except (OSError, ProjectError, ValidationAdapterError, QualifyError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    checks = sum(len(entry["checks"]) for entry in catalog["domains"].values())
+    print(f"Wrote {out}")
+    print(f"Domains: {', '.join(sorted(catalog['domains']))}")
+    print(f"Checks: {checks}")
+    return 0
+
+
+def _qualify_draft(args: argparse.Namespace) -> int:
+    out = args.out or (args.project.resolve().parent / "solution-profile.draft.yaml")
+    if out.exists() and not args.overwrite:
+        print(f"Refusing to overwrite existing draft without --overwrite: {out}", file=sys.stderr)
+        return 2
+    try:
+        project = load_project(args.project)
+        if out.resolve() == project.resolve_path(args.project, project.assessment.profile).resolve():
+            print("The draft may not overwrite the active solution profile.", file=sys.stderr)
+            return 2
+        adapter = IsvctlAdapter(project.validation_root(args.project))
+        catalog = build_qualify_catalog(adapter, project.assessment.domains)
+        cache_dir = _context_cache_dir(args.project, None)
+        pack = build_qualify_pack(project, catalog, cache_dir=cache_dir, max_chars=args.max_chars)
+        raw = run_profile_draft(
+            pack,
+            command=[args.generator, *args.generator_arg],
+            cwd=args.cwd,
+            pass_env=args.generator_env,
+            timeout_seconds=args.timeout,
+        )
+        out.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    except (
+        OSError,
+        json.JSONDecodeError,
+        subprocess.SubprocessError,
+        ProjectError,
+        ValidationAdapterError,
+        ContextError,
+        FixGuardrailError,
+        SolutionProfileError,
+        QualifyError,
+    ) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(f"Wrote draft: {out}")
+    conflicts = empirical_conflicts(
+        load_solution_profile(out), args.project.resolve().parent / ".gapctl" / "runs"
+    )
+    for conflict in conflicts:
+        print(f"empirical conflict: {conflict}", file=sys.stderr)
+    print(f"SME ratification required: review with `gapctl profile --in <profile> --draft {out}`.")
+    return 1 if conflicts else 0
 
 
 def _plan(args: argparse.Namespace) -> int:
