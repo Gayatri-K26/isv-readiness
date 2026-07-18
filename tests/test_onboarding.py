@@ -4,8 +4,6 @@ import subprocess
 import tempfile
 import unittest
 from collections.abc import Sequence
-from contextlib import redirect_stdout
-from io import StringIO
 from pathlib import Path
 
 from isv_readiness.onboarding import (
@@ -109,28 +107,13 @@ class CrossDomainOnboardingTests(unittest.TestCase):
             with self.assertRaisesRegex(OnboardingError, "Provider name"):
                 build_provider_onboarding_plan(validation_root, "../acme", ["vm"])
 
-    def test_cli_prints_cross_domain_scaffold_and_k8s_completion_plan(self) -> None:
-        from isv_readiness.cli import main
-
+    def test_plan_summarizes_cross_domain_scaffold_and_k8s_completion(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             validation_root = Path(tempdir) / "ai-cloud-validation"
             (validation_root / "isvctl" / "configs" / "providers" / "my-isv").mkdir(parents=True)
-            stdout = StringIO()
-            with redirect_stdout(stdout):
-                exit_code = main(
-                    [
-                        "onboard",
-                        "--provider-name",
-                        "acme",
-                        "--validation-root",
-                        str(validation_root),
-                        "--domains",
-                        "vm,k8s",
-                    ]
-                )
+            plan = build_provider_onboarding_plan(validation_root, "acme", ["vm", "k8s"])
+            output = "\n".join(plan.summary_lines())
 
-        self.assertEqual(exit_code, 0)
-        output = stdout.getvalue()
         self.assertIn("uv run isvctl provider scaffold acme", output)
         self.assertIn("Domains: vm, kubernetes", output)
         self.assertIn("Kubernetes wrapper completion", output)

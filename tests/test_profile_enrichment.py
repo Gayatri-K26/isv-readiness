@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-import json
-import tempfile
 import unittest
-from contextlib import redirect_stdout
-from io import StringIO
 from pathlib import Path
 
 import jsonschema
@@ -107,70 +103,31 @@ class ProfileEnrichmentTests(unittest.TestCase):
             self.assertNotIn("reconciliation", sp)
             self.assertEqual(sp["action"], "skip_with_rationale")
 
-    def test_cli_profile_summary_and_profile_aware_scan(self) -> None:
-        from isv_readiness.cli import main
-
+    def test_profile_summary_and_profile_aware_scan(self) -> None:
         profile_path = ROOT / "examples" / "profiles" / "bcm.reference.yaml"
-        stdout = StringIO()
-        with redirect_stdout(stdout):
-            exit_code = main(["profile", "--in", str(profile_path)])
-
-        self.assertEqual(exit_code, 0)
-        self.assertIn("Validation-ready (owned scope): no", stdout.getvalue())
-        self.assertIn("Owned domains: bare_metal, kubernetes, observability, slurm", stdout.getvalue())
-        self.assertIn("bcm-k8s-identity", stdout.getvalue())
+        profile = load_solution_profile(profile_path)
+        summary = profile.scope_summary()
+        self.assertFalse(summary["validation_ready"])
+        self.assertEqual(summary["owned_domains"], ["bare_metal", "kubernetes", "observability", "slurm"])
+        self.assertIn("bcm-k8s-identity", summary["blocking_capabilities"])
 
         provider = FIXTURES / "ai-cloud-validation" / "isvctl" / "configs" / "providers" / "dsx-air"
-        with tempfile.TemporaryDirectory() as tempdir:
-            output = Path(tempdir) / "profile-gaps.json"
-            with redirect_stdout(StringIO()):
-                exit_code = main(
-                    [
-                        "scan",
-                        "-p",
-                        str(provider),
-                        "--domains",
-                        "k8s",
-                        "--validation-root",
-                        str(FIXTURES / "ai-cloud-validation"),
-                        "--profile",
-                        str(profile_path),
-                        "--out",
-                        str(output),
-                    ]
-                )
-            data = json.loads(output.read_text(encoding="utf-8"))
+        report = scan_provider(
+            ScanOptions(
+                provider_repo=provider,
+                domains=["kubernetes"],
+                validation_root=FIXTURES / "ai-cloud-validation",
+            )
+        )
+        enriched = enrich_report_with_profile(report, profile)
+        storage = next(row for row in enriched.rows if row.validation_class == "K8sCsiStorageTypesCheck")
+        self.assertEqual(storage.enrichment["solution_profile"]["action"], "request_scope_decision")
 
-        self.assertEqual(exit_code, 0)
-        storage = next(row for row in data["rows"] if row["validation_class"] == "K8sCsiStorageTypesCheck")
-        self.assertEqual(storage["enrichment"]["solution_profile"]["action"], "request_scope_decision")
-
-    def test_cli_derives_scan_domains_from_profile(self) -> None:
-        from isv_readiness.cli import main
-
+    def test_profile_derives_covered_scan_domains(self) -> None:
         profile_path = ROOT / "examples" / "profiles" / "bcm.reference.yaml"
-        provider = FIXTURES / "ai-cloud-validation" / "isvctl" / "configs" / "providers" / "dsx-air"
-        with tempfile.TemporaryDirectory() as tempdir:
-            output = Path(tempdir) / "all-covered-domains.json"
-            with redirect_stdout(StringIO()):
-                exit_code = main(
-                    [
-                        "scan",
-                        "-p",
-                        str(provider),
-                        "--validation-root",
-                        str(FIXTURES / "ai-cloud-validation"),
-                        "--profile",
-                        str(profile_path),
-                        "--out",
-                        str(output),
-                    ]
-                )
-            data = json.loads(output.read_text(encoding="utf-8"))
-
-        self.assertEqual(exit_code, 0)
+        profile = load_solution_profile(profile_path)
         self.assertEqual(
-            data["domains"],
+            [domain.domain for domain in profile.domains if domain.coverage == "covered" and domain.validation_mode == "test"],
             ["bare_metal", "kubernetes", "slurm", "observability"],
         )
 

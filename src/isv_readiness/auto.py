@@ -98,7 +98,7 @@ def run_auto(
         raise AutoWorkflowError(f"Domain '{canonical_domain}' is outside the ISV-owned project scope.")
     provider_root = project.provider_root(project_path)
     if not provider_root.is_dir():
-        raise AutoWorkflowError("Provider is not scaffolded; run gapctl onboard --write first.")
+        raise AutoWorkflowError("Provider is not scaffolded; create a new workspace with `gapctl init`.")
     if not generator_command:
         raise AutoWorkflowError("An explicit generator adapter is required (--generator).")
 
@@ -458,7 +458,8 @@ def _apply_to_provider(
         source = scratch / change.path
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.is_file():
-            backup = backup_dir / f"{change.path.replace('/', '_')}.bak"
+            backup = backup_dir / change.path
+            backup.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(target, backup)
         tmp = target.with_suffix(target.suffix + ".gapctl-tmp")
         tmp.write_bytes(source.read_bytes())

@@ -82,7 +82,7 @@ class PublishTests(unittest.TestCase):
             create_payload = post.call_args_list[0].args[1]
             self.assertEqual(create_payload["testTargetType"], "VM")
             self.assertEqual(create_payload["tags"], ["acme", "vm"])
-            self.assertIn("gapctl test vm", create_payload["ciReference"])
+            self.assertIn("gapctl validate vm", create_payload["ciReference"])
             self.assertEqual(
                 post.call_args_list[1],
                 call(

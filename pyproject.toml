@@ -1,7 +1,7 @@
 [project]
 name = "isv-readiness"
 version = "0.1.0"
-description = "Gap scanner and readiness loop helpers for ai-cloud-validation provider scripts"
+description = "Four-command ISV qualification and validation journey for NVIDIA ai-cloud-validation"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

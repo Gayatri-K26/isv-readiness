@@ -101,7 +101,7 @@ def run_agent_turn(
     if not provider_root.is_dir():
         if not onboard_if_missing:
             raise AgentWorkflowError(
-                "Provider is not scaffolded; rerun with --onboard or run gapctl onboard --write first."
+                "Provider is not scaffolded; create a new workspace with `gapctl init`."
             )
         plan = build_provider_onboarding_plan(
             project.validation_root(project_path),

@@ -1381,3 +1381,45 @@ new ISVs to understand agent work directories, duplicated readiness logic, and
 made the simple wrappers dead-end before publication. Direct publication keeps
 the safety checks while deleting the unused transport format and the mixed-
 platform ambiguity.
+
+## Step 28 - Make the Four-Command Journey the Only CLI
+
+### Decisions
+
+- Replaced the 1,100-line public parser with four commands only: `init`,
+  `qualify`, `validate`, and `publish`. The former bootstrap, context, profile,
+  scan, generation, change, agent, live, report, and status commands are no
+  longer an alternative operator interface. Their deterministic modules remain
+  internal and directly unit-tested.
+- Made `init` own context synchronization in addition to clone/pin, catalog,
+  and provider scaffolding. Required API-spec failures stop initialization;
+  unavailable optional references remain visible without blocking it.
+- Added one resumable `qualify` orchestration. It builds the evidence-grounded
+  proposal, keeps unresolved ownership visible, displays a content hash, and
+  promotes only an explicitly approved proposal. The command performs the
+  status/stage transition, so the ISV does not edit workflow-control YAML.
+- Added one resumable `validate` orchestration across every owned domain. It
+  stages and verifies provider changes in scratch copies, resumes an existing
+  patch without regeneration, obtains hash-bound approval, applies it, rescans,
+  stops on parked static blockers, asks once for real-cloud authorization, runs
+  domains individually, and prints the shared readiness result.
+- Kept the internal live policy gate but satisfy it with a transient authorized
+  project after the explicit `validate` confirmation. This removes the manual
+  `allow_live_runs` YAML toggle without weakening authorization.
+- Fixed multi-domain evidence replacement: each new domain run now combines
+  current full-scope static rows with prior dynamic rows from other domains and
+  the current domain's new dynamic rows. A later run no longer erases an
+  earlier domain's passing evidence.
+- Replaced advanced CLI tests with direct service tests and added public-surface
+  tests proving only the four journey commands are exposed, qualification
+  promotion is human-gated, validation keeps patch/live approval inside one
+  command, and multi-domain dynamic evidence persists.
+
+### Rationale
+
+The lower-level commands accurately exposed implementation stages but forced a
+new ISV to learn the tool's internals and manually connect them. Hiding them in
+documentation would still leave two product interfaces and duplicate choices.
+The simpler boundary is one command per user intent while retaining the same
+deterministic checks underneath: initialize the engagement, approve what is in
+scope, validate it safely, and publish canonical evidence.

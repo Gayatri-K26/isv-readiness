@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import json
 import tempfile
 import unittest
 from pathlib import Path
 
 import jsonschema
 
-from isv_readiness.cli import main
 from isv_readiness.scan.dynamic import DynamicArtifacts, scan_dynamic_artifacts
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
 from isv_readiness.schema import load_schema
@@ -80,29 +78,27 @@ class CrossDomainDynamicScanTests(unittest.TestCase):
         self.assertEqual(rows[0].validation_class, "JUnitContract")
         self.assertFalse(rows[0].remediation.auto_fixable)
 
-    def test_cli_merges_static_and_dynamic_vm_rows(self) -> None:
-        with tempfile.TemporaryDirectory() as tempdir:
-            output = Path(tempdir) / "vm-gaps.json"
-            exit_code = main(
-                [
-                    "scan",
-                    "-p",
-                    str(PROVIDER),
-                    "--domains",
-                    "vm",
-                    "--validation-root",
-                    str(FIXTURES / "ai-cloud-validation"),
-                    "--junit",
-                    str(DYNAMIC / "junit.xml"),
-                    "--log",
-                    str(DYNAMIC / "isvctl.log"),
-                    "--out",
-                    str(output),
-                ]
+    def test_combined_static_and_dynamic_vm_rows_match_gap_schema(self) -> None:
+        static = scan_provider(
+            ScanOptions(
+                provider_repo=PROVIDER,
+                domains=["vm"],
+                validation_root=FIXTURES / "ai-cloud-validation",
             )
-            data = json.loads(output.read_text(encoding="utf-8"))
+        )
+        dynamic = scan_dynamic_artifacts(
+            DynamicArtifacts(
+                provider_repo=PROVIDER,
+                domain="vm",
+                junit_path=DYNAMIC / "junit.xml",
+                log_path=DYNAMIC / "isvctl.log",
+                config_path=PROVIDER / "config" / "vm.yaml",
+                static_rows=tuple(static.rows),
+            )
+        )
+        data = static.to_dict()
+        data["rows"].extend(row.to_dict() for row in dynamic)
 
-        self.assertEqual(exit_code, 0)
         schema = load_schema("gaps.schema.json")
         jsonschema.Draft202012Validator(schema).validate(data)
         dynamic_rows = [row for row in data["rows"] if row["detection"] == "dynamic"]

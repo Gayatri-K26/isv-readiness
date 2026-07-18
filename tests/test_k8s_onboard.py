@@ -5,7 +5,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from isv_readiness.cli import main
 from isv_readiness.scan.k8s_onboard import build_k8s_onboarding_plan, write_k8s_onboarding_files
 
 
@@ -34,38 +33,15 @@ class K8sOnboardingTests(unittest.TestCase):
             self.assertIn("needed_isv_info", scope)
             self.assertEqual(scope["owns"], {})
 
-    def test_cli_onboard_dry_plan_and_write(self) -> None:
+    def test_building_plan_does_not_write_until_explicit_application(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             validation_root = Path(tempdir) / "ai-cloud-validation"
             (validation_root / "isvctl" / "configs" / "providers").mkdir(parents=True)
 
-            dry_exit = main(
-                [
-                    "onboard",
-                    "--domain",
-                    "k8s",
-                    "--provider-name",
-                    "acme-k8s",
-                    "--validation-root",
-                    str(validation_root),
-                ]
-            )
-            self.assertEqual(dry_exit, 0)
+            plan = build_k8s_onboarding_plan(validation_root, "acme-k8s")
             self.assertFalse((validation_root / "isvctl" / "configs" / "providers" / "acme-k8s.yaml").exists())
 
-            write_exit = main(
-                [
-                    "onboard",
-                    "--domain",
-                    "k8s",
-                    "--provider-name",
-                    "acme-k8s",
-                    "--validation-root",
-                    str(validation_root),
-                    "--write",
-                ]
-            )
-            self.assertEqual(write_exit, 0)
+            write_k8s_onboarding_files(plan)
             self.assertTrue((validation_root / "isvctl" / "configs" / "providers" / "acme-k8s.yaml").exists())
 
 

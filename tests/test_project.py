@@ -8,7 +8,6 @@ from pathlib import Path
 import jsonschema
 import yaml
 
-from isv_readiness.cli import main
 from isv_readiness.project import (
     ProjectError,
     build_bootstrap_plan,
@@ -22,22 +21,14 @@ COMMIT = "a" * 40
 
 
 class ProjectBootstrapTests(unittest.TestCase):
-    def test_cli_bootstrap_dry_run_does_not_create_workspace(self) -> None:
+    def test_building_bootstrap_plan_does_not_create_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             workspace = Path(tempdir) / "workspace"
-            exit_code = main(
-                [
-                    "bootstrap",
-                    "--workspace",
-                    str(workspace),
-                    "--provider-name",
-                    "acme",
-                    "--domains",
-                    "vm,k8s",
-                ]
-            )
-            self.assertEqual(exit_code, 0)
+            plan = build_bootstrap_plan(workspace, provider_name="acme", domains=["vm", "k8s"])
+
             self.assertFalse(workspace.exists())
+            self.assertTrue(plan.clone_required)
+            self.assertEqual(plan.domains, ("vm", "kubernetes"))
 
     def test_existing_checkout_writes_pinned_scoped_project(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:

@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import yaml
 
@@ -19,10 +19,65 @@ from tests.test_live import _project
 
 
 class SimpleCommandTests(unittest.TestCase):
+    def test_init_imports_context_as_part_of_the_single_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            workspace = Path(tempdir) / "workspace"
+            project = MagicMock()
+            project.assessment.domains = ("vm",)
+            project.validation.resolved_commit = "a" * 40
+            project.validation_root.return_value = workspace / "ai-cloud-validation"
+            catalog = {"domains": {"vm": {"checks": []}}}
+            with (
+                patch("isv_readiness.simple.build_bootstrap_plan", return_value=MagicMock()),
+                patch("isv_readiness.simple.execute_bootstrap", return_value=project),
+                patch("isv_readiness.simple.build_qualify_catalog", return_value=catalog),
+                patch("isv_readiness.simple.build_provider_onboarding_plan", return_value=MagicMock()),
+                patch("isv_readiness.simple.execute_provider_onboarding", return_value=[]),
+                patch("isv_readiness.simple.sync_context_sources", return_value=()) as sync,
+                redirect_stdout(io.StringIO()),
+            ):
+                exit_code = cmd_init(
+                    "acme",
+                    workspace=workspace,
+                    domains=["vm"],
+                    api_url=None,
+                    auth_envs=[],
+                    api_spec=None,
+                )
+
+            self.assertEqual(exit_code, 0)
+            sync.assert_called_once_with(
+                project,
+                workspace.resolve() / "isv-project.yaml",
+                workspace.resolve() / ".gapctl" / "context-cache",
+            )
+
+    def test_init_rejects_missing_local_api_spec_before_bootstrap(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            workspace = Path(tempdir) / "workspace"
+            with (
+                patch("isv_readiness.simple.execute_bootstrap") as execute,
+                redirect_stderr(io.StringIO()),
+            ):
+                exit_code = cmd_init(
+                    "acme",
+                    workspace=workspace,
+                    domains=["vm"],
+                    api_url=None,
+                    auth_envs=[],
+                    api_spec=str(Path(tempdir) / "missing-openapi.yaml"),
+                )
+
+            self.assertEqual(exit_code, 2)
+            self.assertFalse(workspace.exists())
+            execute.assert_not_called()
+
     def test_init_passes_requested_validation_ref_to_bootstrap(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
+
             def stop_before_clone(plan, *, overwrite):
                 self.assertEqual(plan.validation_ref, "release-1.2")
+                self.assertEqual(plan.api_base_url_env, "ISV_API_BASE_URL")
                 self.assertFalse(overwrite)
                 raise ProjectError("stop before clone")
 
@@ -36,7 +91,7 @@ class SimpleCommandTests(unittest.TestCase):
                         "acme",
                         workspace=Path(tempdir) / "workspace",
                         domains=["vm"],
-                        api_url=None,
+                        api_url="https://api.acme.invalid/v1",
                         auth_envs=[],
                         api_spec=None,
                         validation_ref="release-1.2",
@@ -112,17 +167,20 @@ class SimpleCommandTests(unittest.TestCase):
                 redirect_stdout(io.StringIO()),
             ):
                 self.assertEqual(cmd_test("vm"), 0)
+                self.assertEqual(cmd_test("network"), 0)
 
             report = json.loads((manifest.parent / "gaps.json").read_text(encoding="utf-8"))
             self.assertEqual(report["domains"], ["vm", "network"])
             self.assertTrue(any(row["domain"] == "network" for row in report["rows"]))
-            self.assertTrue(any(row["detection"] == "dynamic" for row in report["rows"]))
+            dynamic_domains = {row["domain"] for row in report["rows"] if row["detection"] == "dynamic"}
+            self.assertEqual(dynamic_domains, {"vm", "network"})
 
             run_dirs = list((manifest.parent / ".gapctl" / "runs").iterdir())
-            self.assertEqual(len(run_dirs), 1)
-            self.assertTrue((run_dirs[0] / "run.json").is_file())
-            self.assertTrue((run_dirs[0] / "junit.xml").is_file())
-            self.assertTrue((run_dirs[0] / "isvctl.log").is_file())
+            self.assertEqual(len(run_dirs), 2)
+            for run_dir in run_dirs:
+                self.assertTrue((run_dir / "run.json").is_file())
+                self.assertTrue((run_dir / "junit.xml").is_file())
+                self.assertTrue((run_dir / "isvctl.log").is_file())
             self.assertEqual(load_project(manifest).assessment.domains, ("vm", "network"))
 
 

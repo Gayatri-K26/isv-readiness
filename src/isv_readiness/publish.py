@@ -125,7 +125,7 @@ def publish_project(
         project = load_project(project_path)
         report_path = project_path.parent / "gaps.json"
         if not report_path.is_file():
-            raise PublishError("gaps.json not found; run gapctl test and gapctl status before publishing.")
+            raise PublishError("gaps.json not found; run `gapctl validate` before publishing.")
         report = load_report(report_path)
         readiness = assess_readiness(project, project_path, report)
     except PublishError:
@@ -165,7 +165,7 @@ def publish_project(
         now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00")
         payload: dict = {
             "executedBy": "gapctl",
-            "ciReference": f"gapctl test {evidence.domain} ({evidence.run.run_id})",
+            "ciReference": f"gapctl validate {evidence.domain} ({evidence.run.run_id})",
             "tags": resolved_tags,
             "testTargetType": platform,
             "testRunStartAt": now,

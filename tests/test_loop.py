@@ -169,37 +169,19 @@ class LoopControllerTests(unittest.TestCase):
                 attempted_gap_id="gap_other00001",
             )
 
-    def test_cli_persists_and_loads_loop_state(self) -> None:
-        from isv_readiness.cli import main
-
+    def test_persists_and_loads_loop_state(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             root = Path(tempdir)
-            report_path = root / "gaps.json"
             state_path = root / "loop-state.json"
-            report_path.write_text(
-                json.dumps(_report([_row("gap_cli00000001")])),
-                encoding="utf-8",
-            )
-
-            exit_code = main(
-                [
-                    "loop",
-                    "--in",
-                    str(report_path),
-                    "--domain",
-                    "vm",
-                    "--state",
-                    str(state_path),
-                ]
-            )
+            state = advance_loop(_report([_row("gap_state000001")]), domain="vm")
+            state_path.write_text(json.dumps(state.to_dict()), encoding="utf-8")
             persisted = load_loop_state(state_path)
 
             schema = load_schema("loop-state.schema.json")
             jsonschema.Draft202012Validator(schema).validate(persisted.to_dict())
 
-        self.assertEqual(exit_code, 0)
         self.assertEqual(persisted.status, "ready")
-        self.assertEqual(persisted.selected_gap_id, "gap_cli00000001")
+        self.assertEqual(persisted.selected_gap_id, "gap_state000001")
         self.assertEqual(len(persisted.history), 1)
 
 

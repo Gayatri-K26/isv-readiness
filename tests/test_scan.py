@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import shutil
 import tempfile
 import unittest
@@ -58,35 +57,21 @@ class StaticScanTests(unittest.TestCase):
         self.assertEqual(teardown.status, "skipped")
         self.assertFalse(teardown.remediation.auto_fixable)
 
-    def test_cli_scan_and_report_rendering(self) -> None:
-        from isv_readiness.cli import main
-
-        with tempfile.TemporaryDirectory() as tempdir:
-            output = Path(tempdir) / "gaps.json"
-            exit_code = main(
-                [
-                    "scan",
-                    "-p",
-                    str(FIXTURES / "provider_repo"),
-                    "--domains",
-                    "vm",
-                    "--validation-root",
-                    str(FIXTURES / "ai-cloud-validation"),
-                    "--out",
-                    str(output),
-                ]
+    def test_scan_report_rendering(self) -> None:
+        report = scan_provider(
+            ScanOptions(
+                provider_repo=FIXTURES / "provider_repo",
+                domains=["vm"],
+                validation_root=FIXTURES / "ai-cloud-validation",
             )
-            self.assertEqual(exit_code, 0)
-            self.assertTrue(output.exists())
+        ).to_dict()
+        scorecard = render_report(report, "scorecard")
+        tree = render_report(report, "tree")
+        markdown = render_report(report, "md")
 
-            report = json.loads(output.read_text(encoding="utf-8"))
-            scorecard = render_report(report, "scorecard")
-            tree = render_report(report, "tree")
-            markdown = render_report(report, "md")
-
-            self.assertIn("Gap Scorecard", scorecard)
-            self.assertIn("not_implemented=2", scorecard)
-            self.assertIn("describe_instance", tree)
+        self.assertIn("Gap Scorecard", scorecard)
+        self.assertIn("not_implemented=2", scorecard)
+        self.assertIn("describe_instance", tree)
         self.assertIn("| ID | Requirement | Labels | Domain | Step |", markdown)
 
     def test_python_comments_are_not_stubs_and_syntax_errors_are_explicit(self) -> None:
@@ -254,28 +239,15 @@ tests:
             {"repeated:1", "repeated:2"},
         )
 
-    def test_k8s_run_writes_onboarding_report_when_config_missing(self) -> None:
-        from isv_readiness.cli import main
-
+    def test_k8s_scan_reports_missing_config_as_fixable(self) -> None:
         provider = FIXTURES / "ai-cloud-validation" / "isvctl" / "configs" / "providers" / "missing-run-provider"
-        with tempfile.TemporaryDirectory() as tempdir:
-            output = Path(tempdir) / "gaps.json"
-            exit_code = main(
-                [
-                    "scan",
-                    "-p",
-                    str(provider),
-                    "--domains",
-                    "k8s",
-                    "--validation-root",
-                    str(FIXTURES / "ai-cloud-validation"),
-                    "--run",
-                    "--out",
-                    str(output),
-                ]
+        data = scan_provider(
+            ScanOptions(
+                provider_repo=provider,
+                domains=["kubernetes"],
+                validation_root=FIXTURES / "ai-cloud-validation",
             )
-            self.assertEqual(exit_code, 1)
-            data = json.loads(output.read_text(encoding="utf-8"))
+        ).to_dict()
 
         self.assertTrue(data["rows"][0]["remediation"]["auto_fixable"])
         self.assertIn("No Kubernetes provider wrapper", data["rows"][0]["evidence"]["message"])

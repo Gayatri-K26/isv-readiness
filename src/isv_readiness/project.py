@@ -138,7 +138,7 @@ class BootstrapPlan:
             f"Provider: {self.provider_name}",
             "Phase: qualify (assess & scope) — enter validate after SME profile review",
             "Owned domains: " + ", ".join(self.domains),
-            "Live infrastructure runs: disabled until explicitly enabled in the project",
+            "Live infrastructure runs: require explicit confirmation during gapctl validate",
         ]
 
 

@@ -6,7 +6,6 @@ import tempfile
 import unittest
 from collections.abc import Sequence
 from pathlib import Path
-from unittest.mock import patch
 
 import jsonschema
 
@@ -252,9 +251,7 @@ class IsvctlAdapterTests(unittest.TestCase):
 
         self.assertEqual(calls[0], (str(executable.resolve()), "catalog", "list", "--json"))
 
-    def test_cli_exports_schema_valid_validation_plan(self) -> None:
-        from isv_readiness.cli import main
-
+    def test_normalized_validation_plan_matches_schema(self) -> None:
         catalog = normalize_catalog(CATALOG_PAYLOAD)
         plan = normalize_validation_plan(
             {
@@ -268,53 +265,12 @@ class IsvctlAdapterTests(unittest.TestCase):
             config_files=("provider.yaml",),
             isvctl_version="isvctl 0.8.0",
         )
-        with tempfile.TemporaryDirectory() as tempdir:
-            output = Path(tempdir) / "validation-plan.json"
-            validation_root = Path(tempdir) / "ai-cloud-validation"
-            with patch("isv_readiness.cli.IsvctlAdapter") as adapter_class:
-                adapter_class.return_value.plan.return_value = plan
-                exit_code = main(
-                    [
-                        "plan",
-                        "-f",
-                        "provider.yaml",
-                        "--validation-root",
-                        str(validation_root),
-                        "--out",
-                        str(output),
-                    ]
-                )
-            payload = json.loads(output.read_text(encoding="utf-8"))
 
-        self.assertEqual(exit_code, 0)
-        adapter_class.assert_called_once_with(validation_root)
         schema = load_schema("validation-plan.schema.json")
-        jsonschema.Draft202012Validator(schema).validate(payload)
+        jsonschema.Draft202012Validator(schema).validate(plan.to_dict())
 
-    def test_cli_plan_allows_isvctl_from_path_without_checkout(self) -> None:
-        from isv_readiness.cli import main
-
-        plan = normalize_validation_plan(
-            {"tests": {"platform": "vm", "validations": {}}},
-            normalize_catalog({"entries": []}),
-            config_files=("provider.yaml",),
-        )
-        with tempfile.TemporaryDirectory() as tempdir:
-            output = Path(tempdir) / "validation-plan.json"
-            with patch("isv_readiness.cli.IsvctlAdapter") as adapter_class:
-                adapter_class.return_value.plan.return_value = plan
-                exit_code = main(
-                    [
-                        "plan",
-                        "-f",
-                        "provider.yaml",
-                        "--out",
-                        str(output),
-                    ]
-                )
-
-        self.assertEqual(exit_code, 0)
-        adapter_class.assert_called_once_with(None)
+    def test_adapter_without_checkout_uses_isvctl_from_path(self) -> None:
+        self.assertEqual(IsvctlAdapter().command_prefix, ("isvctl",))
 
 
 if __name__ == "__main__":
