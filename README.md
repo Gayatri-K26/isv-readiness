@@ -81,15 +81,26 @@ and implementation map.
 ISVs install `gapctl` as a standalone tool; they do not clone this repository:
 
 ```bash
-uv tool install git+https://github.com/your-org/isv-readiness.git
+uv tool install git+https://github.com/Gayatri-K26/isv-readiness.git
 gapctl init acme-cloud --workspace ./acme-readiness --domains vm,network
 cd acme-readiness
 ```
 
-`init` validates the declared scope before cloning, pins the resulting
-`ai-cloud-validation` checkout, builds the check catalog, and scaffolds the
-provider. The generated profile remains a qualification draft. An SME must
-ratify ownership and scope before `fill` or live validation.
+Installation only installs the `gapctl` package and its generator adapters; it
+does not clone `ai-cloud-validation`. `init` validates the declared scope, then
+clones the selected NVIDIA validation branch into
+`<workspace>/ai-cloud-validation` when that checkout is absent. It records the
+exact resulting commit in `isv-project.yaml`, builds the check catalog, and
+scaffolds the provider.
+
+A new workspace therefore gets the head of `main` at initialization time by
+default, or the requested branch/tag with `--validation-ref`. Existing
+workspaces are intentionally not pulled forward on later commands: `fill`,
+`test`, `status`, and `publish` use the pinned checkout, and live/publication
+gates reject commit drift. This keeps one qualification run reproducible even
+when NVIDIA updates upstream tests. The generated profile remains a
+qualification draft; an SME must ratify ownership and scope before `fill` or
+live validation.
 
 After ratification, the normal installed journey is:
 
