@@ -263,6 +263,9 @@ class ProfileDraftTests(unittest.TestCase):
             self.assertIn(rule, captured["rules"])
         self.assertTrue(any("every check" in rule for rule in captured["rules"]))
         self.assertTrue(any("partially supported domain" in rule for rule in captured["rules"]))
+        self.assertTrue(any("required behavior" in rule for rule in captured["rules"]))
+        self.assertTrue(any("target version" in rule for rule in captured["rules"]))
+        self.assertTrue(any("numeric nsrg_layers" in rule for rule in captured["rules"]))
 
     def test_draft_rejects_invented_or_missing_scope(self) -> None:
         pack = {"project": {"declared_domains": ["vm"]}}

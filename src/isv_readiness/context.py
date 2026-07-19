@@ -30,10 +30,19 @@ NCP_GUIDE_LINK_RE = re.compile(r"\[([^\]]+)\]\((https://docs\.nvidia\.com/dsx/nc
 QUALIFICATION_MAPPING_RULES = (
     "Match capabilities explicitly declared by the ISV's supplied interfaces and "
     "documentation to the closest applicable checks in each declared domain.",
+    "Match the required behavior, not nearby terminology: a read or inventory interface "
+    "does not prove create, update, placement, retention, aggregation, policy, or other "
+    "semantics that the evidence does not declare.",
+    "Every validation class or step grouped under one capability selector must be "
+    "independently supported by the cited evidence; split the group or leave a check "
+    "unmatched when its behavior differs.",
     "Treat an API specification as authoritative evidence of the interfaces the ISV "
     "declares, not proof that those interfaces work in the target environment.",
     "Use covered/test when a declared capability maps to an upstream check and should "
     "be validated; runtime results, not qualification claims, determine whether it passes.",
+    "Do not use unknown/deferred merely because the target version, credentials, hardware, "
+    "topology, or runtime behavior are unverified when supplied ISV evidence explicitly "
+    "declares the capability; map it to covered/test and let validation determine the result.",
     "Use covered/test as a domain default only when the supplied ISV evidence explicitly "
     "maps every check in that domain's pinned catalog.",
     "For a partially supported domain, add grouped covered/test capability entries for "
@@ -45,6 +54,8 @@ QUALIFICATION_MAPPING_RULES = (
     "current lab lacks hardware, credentials, or runtime evidence.",
     "Missing provider script implementations are validate-phase gaps, not product "
     "capability gaps.",
+    "Do not assign numeric nsrg_layers unless a supplied source explicitly maps the "
+    "component to those exact layer numbers.",
 )
 TEXT_EXTENSIONS = {
     ".json",

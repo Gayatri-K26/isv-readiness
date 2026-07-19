@@ -1478,6 +1478,12 @@ context with relevance-ranked issue snippets.
 - Scope exclusion is not inferred from missing lab hardware, credentials, or
   runtime evidence. Provider script TODOs remain validate-phase implementation
   gaps rather than qualification gaps.
+- Capability matching is semantic: an inventory/read surface cannot stand in
+  for undeclared placement, retention, policy, or mutation behavior, and every
+  check in a grouped selector needs its own support in the cited evidence.
+- Unverified runtime behavior no longer justifies `unknown/deferred` when the
+  supplied contract explicitly declares the capability. Numeric `nsrg_layers`
+  are omitted unless a source supplies the exact numbering.
 - The mapping rules are defined once and shared by the qualification pack and
   the generator request so the two instruction surfaces cannot drift.
 

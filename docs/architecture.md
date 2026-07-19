@@ -78,12 +78,20 @@ The profile is deliberately small:
   check in that pinned domain catalog;
 - partial domains use grouped capability entries for explicitly mapped checks
   instead of silently treating unmatched checks as covered;
+- grouped selectors require evidence for every selected check's actual behavior;
+  nearby terminology is not a capability match;
 - an `out_of_scope/skip` partial-domain default requires evidence that every
   unmatched check is outside the product claim; otherwise it remains an SME
   decision;
 - `covered/test` means the capability exists and should be tested;
 - `out_of_scope/skip` is an explicit reviewed scope decision;
 - `unknown`, `gap`, `evidence`, and `deferred` block entry into validation.
+
+Missing live evidence does not by itself make a declared capability unknown.
+Qualification routes it to `covered/test`; validation determines whether the
+target implementation passes. Numeric `nsrg_layers` are omitted unless a source
+explicitly provides that numbering because the current NCP guide describes
+IaaS, CaaS, and AI PaaS by name.
 
 Provider implementation gaps do not belong in the qualification profile. A
 domain may be `covered/test` while its provider adapter is incomplete; the
