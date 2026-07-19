@@ -47,6 +47,7 @@ instead of silently pulling different tests into an active engagement.
 flowchart TD
     Catalog[Pinned suite catalog] --> Pack[Bounded qualification pack]
     Context[Redacted ISV evidence] --> Pack
+    Guide[Complete NCP reference guide] --> Pack
     Runs[Prior empirical evidence] --> Pack
     Pack --> Generator[Replaceable generator]
     Generator --> Harden[Schema and scope hardening]
@@ -56,11 +57,20 @@ flowchart TD
     SME -- yes --> Active[Reviewed validate-stage profile]
 ```
 
-The generator can suggest component mappings, coverage, and ownership. The
-deterministic layer forces the proposal to remain a qualify-stage draft and
-requires its domains to equal the domains declared during `init`. The SME edits
-the proposal when facts are unresolved. Only an explicit approval promotes the
-reviewed document.
+The generator maps capabilities explicitly declared by the ISV to the closest
+applicable pinned checks and can suggest component mappings, coverage, and
+ownership. An API specification is authoritative for the interfaces the ISV
+declares, not proof that those interfaces work. The deterministic layer forces
+the proposal to remain a qualify-stage draft and requires its domains to equal
+the domains declared during `init`. The SME edits the proposal when facts are
+unresolved. Only an explicit approval promotes the reviewed document.
+
+Qualification receives the complete NCP Software Reference Guide collection
+published in NVIDIA's documentation index. The collection is required and is
+accepted only when every indexed guide page is fetched. Suite catalogs,
+authoritative ISV evidence, and that reference collection are never silently
+shortened: packing fails closed when the configured limit cannot hold them.
+GitHub issues are not a supported qualification source.
 
 The profile is deliberately small:
 
@@ -160,7 +170,7 @@ Conflicts are resolved in this order:
 3. the ISV API specification and provider-owned implementation;
 4. NVIDIA reference providers as patterns, not universal truth;
 5. NVIDIA Software Reference Guide material;
-6. GitHub issues and approved internal exports as advisory context.
+6. explicitly supplied, approved advisory material.
 
 No advisory source can override an executable validation contract or a recorded
 runtime result.

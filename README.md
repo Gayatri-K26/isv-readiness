@@ -54,8 +54,13 @@ cd acme-readiness
 - records the exact validation commit in `isv-project.yaml`;
 - builds the NVIDIA check catalog for the declared domains;
 - scaffolds the provider-owned scripts and configuration;
-- imports and redacts the declared API specification and optional references;
+- imports and redacts the declared API specification and the complete NVIDIA
+  NCP Software Reference Guide from NVIDIA's published documentation index;
 - creates the initial draft solution profile.
+
+GitHub issues are not qualification sources. The pinned executable contracts,
+the ISV's own evidence, the complete reference guide, and recorded runs are the
+qualification inputs.
 
 When `--api` is supplied, `validate` injects that value into provider scripts as
 `ISV_API_BASE_URL`; the operator does not need to export it separately.
@@ -79,6 +84,12 @@ and creates:
 ```text
 .gapctl/qualification/solution-profile.proposed.yaml
 ```
+
+The qualification pack keeps the suite catalogs, authoritative ISV evidence,
+and NCP Software Reference Guide whole. The complete guide is a required
+qualification source. If a page cannot be imported or the sources do not fit
+the guarded context limit, `qualify` stops with an error instead of silently
+continuing with missing, omitted, or truncated material.
 
 The ISV SME reviews that file. Unresolved ownership or coverage decisions stop
 the command and remain visible. Edit the proposal and run the same command

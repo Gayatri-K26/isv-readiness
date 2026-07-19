@@ -23,10 +23,8 @@ guardrails, verification, and application as separate stages.
   guarded patch, verification manifest, and human-reviewed application step.
 - Never execute remediation strings copied from `gaps.json`. Commands must come
   from explicit, reviewed CLI inputs or deterministic built-in checks.
-- Treat GitHub issues as advisory context. They may explain intent but cannot
-  override installed suite contracts, ISV-approved scope, or dynamic test
-  results. Recorded run artifacts (`.gapctl/runs/`) are empirical evidence and
-  outrank every declared source.
+- Recorded run artifacts (`.gapctl/runs/`) are empirical evidence and outrank
+  every declared source.
 - Keep credentials, private source, and infrastructure execution inside the
   authorized environment. Do not add secrets to candidates, patches, reports,
   fixtures, or logs.

@@ -10,9 +10,14 @@ import jsonschema
 
 from isv_readiness.context import (
     build_context_pack,
+    context_cache_is_current,
     sync_context_sources,
 )
-from isv_readiness.project import build_bootstrap_plan, execute_bootstrap
+from isv_readiness.project import (
+    DEFAULT_NSRG_URL,
+    build_bootstrap_plan,
+    execute_bootstrap,
+)
 from isv_readiness.runs import latest_run, new_run_dir, write_run_record
 from isv_readiness.scan.models import Evidence, GapReport, GapRow, Remediation
 from isv_readiness.schema import load_schema
@@ -37,54 +42,12 @@ class ContextTests(unittest.TestCase):
             records = sync_context_sources(project, manifest, cache, fetcher=offline_fetcher)
             by_id = {record.source_id: record for record in records}
 
-            self.assertEqual(by_id["validation_issues"].status, "missing")
-            self.assertEqual(by_id["nsrg"].status, "missing")
+            self.assertEqual(by_id["nsrg"].status, "error")
             self.assertEqual(by_id["primary_api_spec"].status, "synced")
+            self.assertNotIn("validation_issues", by_id)
             self.assertNotIn("super-secret", json.dumps(by_id["primary_api_spec"].content))
 
-    def test_github_issue_sync_filters_pull_requests_and_never_caches_token(self) -> None:
-        with tempfile.TemporaryDirectory() as tempdir:
-            workspace, project, manifest = _project(Path(tempdir))
-            (workspace / "openapi.yaml").write_text("openapi: 3.1.0\n", encoding="utf-8")
-            seen: list[tuple[str, dict[str, str]]] = []
-
-            def fetcher(url: str, headers: dict[str, str]) -> bytes:
-                seen.append((url, dict(headers)))
-                if "api.github.com" in url:
-                    return json.dumps(
-                        [
-                            {
-                                "number": 12,
-                                "title": "VM launch validation contract",
-                                "body": "Implement VmLaunchCheck for the provider adapter",
-                                "labels": [{"name": "vm"}],
-                                "html_url": "https://github.com/NVIDIA/ai-cloud-validation/issues/12",
-                                "updated_at": "2026-06-01T00:00:00Z",
-                            },
-                            {"number": 99, "title": "PR", "pull_request": {}},
-                        ]
-                    ).encode()
-                return b"VM lifecycle guidance"
-
-            records = sync_context_sources(
-                project,
-                manifest,
-                workspace / ".gapctl" / "cache",
-                fetcher=fetcher,
-                environment={"GITHUB_TOKEN": "do-not-cache"},
-            )
-            issues = next(record for record in records if record.source_id == "validation_issues")
-
-            self.assertEqual(len(issues.content), 1)
-            self.assertEqual(issues.content[0]["number"], 12)
-            self.assertEqual(seen[0][1]["Authorization"], "Bearer do-not-cache")
-            cache_text = "".join(
-                path.read_text(encoding="utf-8")
-                for path in (workspace / ".gapctl" / "cache").glob("*.json")
-            )
-            self.assertNotIn("do-not-cache", cache_text)
-
-    def test_context_pack_prioritizes_contracts_and_relevant_advisory_evidence(self) -> None:
+    def test_context_pack_prioritizes_contracts_without_default_github_noise(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             workspace, project, manifest = _project(Path(tempdir), existing_provider=True)
             provider = project.provider_root(manifest)
@@ -106,25 +69,8 @@ class ContextTests(unittest.TestCase):
 
             def fetcher(url: str, headers: dict[str, str]) -> bytes:
                 del headers
-                if "api.github.com" in url:
-                    return json.dumps(
-                        [
-                            {
-                                "number": 12,
-                                "title": "VmLaunchCheck needs provider script",
-                                "body": "VM launch should return an instance identifier",
-                                "labels": [{"name": "vm"}],
-                                "html_url": "https://github.com/NVIDIA/ai-cloud-validation/issues/12",
-                            },
-                            {
-                                "number": 13,
-                                "title": "Unrelated Kubernetes telemetry",
-                                "body": "GPU metrics",
-                                "labels": [{"name": "kubernetes"}],
-                                "html_url": "https://github.com/NVIDIA/ai-cloud-validation/issues/13",
-                            },
-                        ]
-                    ).encode()
+                if url == DEFAULT_NSRG_URL:
+                    return _guide_index("introduction")
                 return b"Infrastructure as a Service includes VM lifecycle operations."
 
             sync_context_sources(project, manifest, cache, fetcher=fetcher)
@@ -144,8 +90,7 @@ class ContextTests(unittest.TestCase):
             jsonschema.validate(raw, schema)
             serialized = json.dumps(raw)
             self.assertIn("launchVm", serialized)
-            self.assertIn("issues/12", serialized)
-            self.assertNotIn("issues/13", serialized)
+            self.assertNotIn("github.com/NVIDIA/ai-cloud-validation/issues", serialized)
             self.assertNotIn("available-but-never-serialized", serialized)
             self.assertEqual(raw["credentials"]["available_env"], ["ACME_TOKEN"])
             self.assertEqual(raw["items"][0]["trust"], "authoritative")
@@ -197,7 +142,7 @@ class ContextTests(unittest.TestCase):
             self.assertNotIn("stale VmLaunchCheck", serialized)
             self.assertNotIn("leaked-value", serialized)
 
-    def test_html_sources_are_extracted_to_prose_and_zero_signal_guidance_is_skipped(self) -> None:
+    def test_ncp_guide_collects_every_indexed_page_and_zero_signal_guidance_is_skipped(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             workspace, project, manifest = _project(Path(tempdir), existing_provider=True)
             provider = project.provider_root(manifest)
@@ -208,23 +153,32 @@ class ContextTests(unittest.TestCase):
             (workspace / "openapi.yaml").write_text("paths: {}\n", encoding="utf-8")
             report = _gap_report(provider)
 
+            fetched: list[str] = []
+
             def fetcher_relevant(url: str, headers: dict[str, str]) -> bytes:
                 del headers
-                if "api.github.com" in url:
-                    return b"[]"
-                return (
-                    b"<!DOCTYPE html><html><head><style>.x{color:red}</style>"
-                    b"<script>let a=1;</script></head><body>"
-                    b"<p>VM launch guidance: an instance must report its identifier.</p>"
-                    b"</body></html>"
-                )
+                fetched.append(url)
+                if url == DEFAULT_NSRG_URL:
+                    return (
+                        _guide_index("introduction")
+                        + b"\n- [Part 1](https://docs.nvidia.com/dsx/ncp/part-1-software-reference-guide/"
+                        b"ncp-software-reference-guide.md):"
+                        + b"\n- [Part 2](https://docs.nvidia.com/dsx/ncp/part-2-software-components/"
+                        b"nvidia-software-components.md):"
+                        + b"\n- [Other product](https://docs.nvidia.com/dsx/ncp/inference-ra/home.md):"
+                    )
+                if url.endswith("introduction.md"):
+                    return b"VM launch guidance: an instance must report its identifier."
+                return b"Data center VM lifecycle guidance."
 
             cache = workspace / ".gapctl" / "cache-relevant"
             sync_context_sources(project, manifest, cache, fetcher=fetcher_relevant)
             nsrg = json.loads((cache / "nsrg.json").read_text(encoding="utf-8"))
-            self.assertNotIn("<", nsrg["content"])
-            self.assertNotIn("color:red", nsrg["content"])
             self.assertIn("VM launch guidance", nsrg["content"])
+            self.assertIn("Data center VM lifecycle guidance", nsrg["content"])
+            self.assertIn("Pages: 3", nsrg["content"])
+            self.assertNotIn("inference-ra/home.md", fetched)
+            self.assertTrue(context_cache_is_current(project, cache))
             pack = build_context_pack(
                 project, manifest, report, gap_id="gap_0123456789ab", cache_dir=cache, environment={}
             )
@@ -232,9 +186,9 @@ class ContextTests(unittest.TestCase):
 
             def fetcher_boilerplate(url: str, headers: dict[str, str]) -> bytes:
                 del headers
-                if "api.github.com" in url:
-                    return b"[]"
-                return b"<!DOCTYPE html><html><body><p>Quantum basket weaving weekly.</p></body></html>"
+                if url == DEFAULT_NSRG_URL:
+                    return _guide_index("introduction")
+                return b"Quantum basket weaving weekly."
 
             cache = workspace / ".gapctl" / "cache-irrelevant"
             sync_context_sources(project, manifest, cache, fetcher=fetcher_boilerplate)
@@ -242,6 +196,11 @@ class ContextTests(unittest.TestCase):
                 project, manifest, report, gap_id="gap_0123456789ab", cache_dir=cache, environment={}
             )
             self.assertNotIn("nsrg", [item.source_id for item in pack.items])
+
+
+def _guide_index(*slugs: str) -> bytes:
+    lines = [f"- [{slug}](https://docs.nvidia.com/dsx/ncp/software-reference-guide/{slug}.md):" for slug in slugs]
+    return "\n".join(lines).encode()
 
 
 def _project(root: Path, *, existing_provider: bool = False):

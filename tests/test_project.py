@@ -9,6 +9,7 @@ import jsonschema
 import yaml
 
 from isv_readiness.project import (
+    DEFAULT_NSRG_URL,
     ProjectError,
     build_bootstrap_plan,
     execute_bootstrap,
@@ -52,6 +53,9 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertEqual(project.provider.state, "existing")
             self.assertFalse(project.execution.allow_live_runs)
             self.assertEqual(project.apis[0].auth_env, ("ACME_TOKEN",))
+            self.assertEqual([source.id for source in project.context_sources], ["nsrg", "primary_api_spec"])
+            self.assertEqual(project.context_sources[0].location, DEFAULT_NSRG_URL)
+            self.assertTrue(project.context_sources[0].required)
             profile = load_solution_profile(project.resolve_path(plan.manifest_path, project.assessment.profile))
             self.assertEqual(profile.resolve("vm").action, "implement_or_fix_adapter")
             self.assertEqual(load_project(plan.manifest_path), project)
@@ -64,7 +68,9 @@ class ProjectBootstrapTests(unittest.TestCase):
             workspace = Path(tempdir) / "workspace"
             commands: list[tuple[str, ...]] = []
 
-            def runner(command: list[str] | tuple[str, ...], cwd: Path, timeout: int) -> subprocess.CompletedProcess[str]:
+            def runner(
+                command: list[str] | tuple[str, ...], cwd: Path, timeout: int
+            ) -> subprocess.CompletedProcess[str]:
                 del cwd, timeout
                 command = tuple(command)
                 commands.append(command)
@@ -138,9 +144,7 @@ def _make_checkout(root: Path, provider: str | None = None) -> None:
         (providers / provider).mkdir()
 
 
-def _git_runner(
-    command: list[str] | tuple[str, ...], cwd: Path, timeout: int
-) -> subprocess.CompletedProcess[str]:
+def _git_runner(command: list[str] | tuple[str, ...], cwd: Path, timeout: int) -> subprocess.CompletedProcess[str]:
     del cwd, timeout
     return subprocess.CompletedProcess(command, 0, COMMIT + "\n", "")
 

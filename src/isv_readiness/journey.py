@@ -18,7 +18,13 @@ from pathlib import Path
 import yaml
 
 from isv_readiness.auto import AutoReview, AutoWorkflowError, run_auto
-from isv_readiness.context import ContextError, build_qualify_pack, load_context_records, sync_context_sources
+from isv_readiness.context import (
+    ContextError,
+    build_qualify_pack,
+    context_cache_is_current,
+    load_context_records,
+    sync_context_sources,
+)
 from isv_readiness.decision import validation_profile_issues
 from isv_readiness.fixes import FixGuardrailError
 from isv_readiness.project import ProjectError, load_project
@@ -65,7 +71,9 @@ def cmd_qualify(*, generator: str = "codex", confirm: Confirm | None = None) -> 
             qualification_dir.mkdir(parents=True, exist_ok=True)
             cache_dir = project_path.parent / ".gapctl" / "context-cache"
             cached_records = load_context_records(cache_dir)
-            if not (cache_dir / "index.json").is_file() or any(record.status == "error" for record in cached_records):
+            if not context_cache_is_current(project, cache_dir) or any(
+                record.status == "error" for record in cached_records
+            ):
                 records = sync_context_sources(project, project_path, cache_dir)
                 failures = [record for record in records if record.status == "error"]
                 if failures:

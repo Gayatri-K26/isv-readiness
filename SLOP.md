@@ -1423,3 +1423,43 @@ documentation would still leave two product interfaces and duplicate choices.
 The simpler boundary is one command per user intent while retaining the same
 deterministic checks underneath: initialize the engagement, approve what is in
 scope, validate it safely, and publish canonical evidence.
+
+## Step 29 - Keep Qualification Context Complete and Capability-Focused
+
+### Decisions
+
+- Replaced the single-page NSRG import with a bounded collection import driven
+  by NVIDIA's published NCP `llms.txt` index. Every Markdown page under the
+  Software Reference Guide, Part 1, and Part 2 navigation families is fetched
+  and cached as one required reference source; failure to fetch any page stops
+  context import instead of presenting a partial guide as complete.
+- Qualification now preserves reference material whole in addition to suite
+  catalogs and authoritative ISV evidence. Its guarded budget is 300k
+  characters and fails closed if a source would be omitted or truncated.
+  Per-gap validate packs retain relevance excerpts because they answer one
+  implementation question rather than an entire ownership assessment.
+- Removed GitHub issues as a context-source type. They no longer add broad,
+  unstable noise to qualification. Pack construction filters cached records to
+  current manifest sources, and cache schema `0.2.0` forces existing workspaces
+  to refresh once into the new complete-guide format.
+- Clarified qualify semantics: match ISV-declared capabilities to the closest
+  applicable pinned checks; treat an API specification as authoritative for
+  declared interfaces but not runtime success; use `covered/test` to mean a
+  capability should be tested; and leave missing provider implementations for
+  the validate-phase scanner. Domain defaults remain preferred, with capability
+  entries only for genuine exceptions.
+- Made the Codex adapter translate the full product JSON Schema into Codex's
+  supported Structured Outputs subset while retaining the original schema for
+  final product validation. The adapter also finds macOS Codex.app without a
+  PATH workaround and reports the actual error tail instead of echoing the
+  beginning of a large prompt.
+
+### Rationale
+
+The BCM rehearsal showed that the introduction page alone omitted most of the
+reference architecture, while broad issue matching selected unrelated catalog
+and storage discussions. It also exposed a semantic ambiguity: a declared API
+capability is enough to route an upstream test, but only a live run proves that
+the implementation works. Complete stable references plus explicit mapping
+rules are both simpler and more accurate than attempting to recover missing
+context with relevance-ranked issue snippets.

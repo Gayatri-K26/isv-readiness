@@ -7,8 +7,8 @@ import unittest
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from isv_readiness.context import build_qualify_pack, sync_context_sources
-from isv_readiness.project import build_bootstrap_plan, execute_bootstrap
+from isv_readiness.context import ContextError, build_qualify_pack, sync_context_sources
+from isv_readiness.project import DEFAULT_NSRG_URL, build_bootstrap_plan, execute_bootstrap
 from isv_readiness.qualify import (
     QualifyError,
     build_qualify_catalog,
@@ -185,6 +185,32 @@ class AuthoritativeWholeTests(unittest.TestCase):
             self.assertFalse(item["truncated"])
             self.assertIn("unrelated billing paragraph 399", item["content"])
 
+    def test_qualify_keeps_the_complete_reference_guide_or_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            workspace, project, manifest = _project(Path(tempdir))
+            (workspace / "openapi.yaml").write_text("paths: {}\n", encoding="utf-8")
+            cache = workspace / ".gapctl" / "context-cache"
+            guide_tail = "END-OF-GUIDE"
+
+            def fetcher(url: str, headers: Mapping[str, str]) -> bytes:
+                del headers
+                if url == DEFAULT_NSRG_URL:
+                    return (
+                        b"- [Introduction](https://docs.nvidia.com/dsx/ncp/software-reference-guide/introduction.md):"
+                    )
+                return ("VM lifecycle reference\n" + "x" * 14_000 + guide_tail).encode()
+
+            sync_context_sources(project, manifest, cache, fetcher=fetcher)
+            catalog = build_qualify_catalog(IsvctlAdapter(Path("/tmp"), runner=_isvctl_runner), ["vm"])
+            pack = build_qualify_pack(project, catalog, cache_dir=cache)
+
+            item = next(item for item in pack["items"] if item["source_id"] == "nsrg")
+            self.assertFalse(item["truncated"])
+            self.assertIn(guide_tail, item["content"])
+            self.assertEqual(pack["budget"]["omitted_items"], 0)
+            with self.assertRaisesRegex(ContextError, "refusing to truncate evidence"):
+                build_qualify_pack(project, catalog, cache_dir=cache, max_chars=4_000)
+
 
 class ProfileDraftTests(unittest.TestCase):
     def test_draft_is_hardened_to_qualify_stage_draft_status(self) -> None:
@@ -258,6 +284,10 @@ class RatificationAidTests(unittest.TestCase):
 
 def _offline_fetcher(url: str, headers: Mapping[str, str]) -> bytes:
     del headers
+    if url == DEFAULT_NSRG_URL:
+        return b"- [Introduction](https://docs.nvidia.com/dsx/ncp/software-reference-guide/introduction.md):"
+    if url.endswith("introduction.md"):
+        return b"VM lifecycle reference guidance"
     raise OSError(f"network unreachable: {url}")
 
 

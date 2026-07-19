@@ -23,7 +23,7 @@ from isv_readiness.solution_profile import (
 
 PROJECT_SCHEMA_VERSION = "0.1.0"
 DEFAULT_VALIDATION_URL = "https://github.com/NVIDIA/ai-cloud-validation.git"
-DEFAULT_NSRG_URL = "https://docs.nvidia.com/dsx/ncp/software-reference-guide/introduction"
+DEFAULT_NSRG_URL = "https://docs.nvidia.com/dsx/ncp/llms.txt"
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
 ProviderState = Literal["new", "existing"]
@@ -238,21 +238,11 @@ def execute_bootstrap(
     apis: tuple[ApiInterface, ...] = ()
     sources = [
         ContextSource(
-            id="validation_issues",
-            kind="github_issues",
-            location="NVIDIA/ai-cloud-validation",
-            trust="advisory",
-            required=False,
-            domains=plan.domains,
-            labels=(),
-            query=None,
-        ),
-        ContextSource(
             id="nsrg",
             kind="web_url",
             location=DEFAULT_NSRG_URL,
             trust="reference",
-            required=False,
+            required=True,
             domains=plan.domains,
             labels=(),
             query=None,

@@ -38,11 +38,7 @@ def dispatch_generator(
     if timeout_seconds < 1 or timeout_seconds > 1800:
         raise FixGuardrailError("Generator timeout must be between 1 and 1800 seconds.")
     source_env = environment or os.environ
-    child_env = {
-        name: source_env[name]
-        for name in ("HOME", "PATH", "SSL_CERT_FILE", "TMPDIR")
-        if source_env.get(name)
-    }
+    child_env = {name: source_env[name] for name in ("HOME", "PATH", "SSL_CERT_FILE", "TMPDIR") if source_env.get(name)}
     for name in pass_env:
         if "=" in name:
             raise FixGuardrailError("Generator environment inputs must be variable names, not assignments.")
@@ -52,9 +48,9 @@ def dispatch_generator(
     result = run(command, cwd.resolve(), json.dumps(request, sort_keys=True), child_env, timeout_seconds)
     if result.returncode != 0:
         details = (result.stderr or result.stdout or "").strip()
-        raise FixGuardrailError(
-            f"Generator exited with code {result.returncode}: {details[:2000] or 'no output'}"
-        )
+        if len(details) > 2000:
+            details = "..." + details[-2000:]
+        raise FixGuardrailError(f"Generator exited with code {result.returncode}: {details or 'no output'}")
     output = (result.stdout or "").strip()
     try:
         raw = json.loads(output)

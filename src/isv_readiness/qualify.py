@@ -116,7 +116,12 @@ def run_profile_draft(
         "rules": [
             "Return one JSON object and no Markdown or commentary.",
             "Draft every declared domain and no others; never invent scope.",
-            "Set coverage to 'covered' only when the packed API spec or run evidence demonstrates the capability; otherwise use 'unknown' or 'gap'.",
+            "Match capabilities explicitly declared by the ISV's supplied interfaces and documentation to the closest applicable upstream checks.",
+            "Treat an API specification as authoritative for what interfaces the ISV declares, not as proof that they work in the target environment.",
+            "Use covered/test when a declared capability maps to an upstream check and should be validated; only runtime evidence proves that it passes.",
+            "Prefer domain-level defaults and add capability entries only for genuine exceptions.",
+            "Do not turn missing provider script implementations into product capability gaps; provider implementation is handled during validate.",
+            "Use unknown or deferred when the capability mapping is unclear, and use gap only when the supplied ISV evidence explicitly shows a required capability is absent.",
             "Use 'gap' only for capabilities the ISV should close; a capability this environment can never provide is 'out_of_scope'.",
             "State the supporting evidence for each domain in its 'rationale'.",
             "Every id used in 'evidence_refs' must also be declared in the profile's 'sources' list.",
@@ -148,9 +153,7 @@ def run_profile_draft(
     if drafted != declared:
         extra = ", ".join(sorted(drafted - declared)) or "none"
         missing = ", ".join(sorted(declared - drafted)) or "none"
-        raise QualifyError(
-            f"Draft domains must exactly match the declared scope (extra: {extra}; missing: {missing})."
-        )
+        raise QualifyError(f"Draft domains must exactly match the declared scope (extra: {extra}; missing: {missing}).")
     return raw
 
 
@@ -166,11 +169,7 @@ def _declare_cited_pack_items(raw: dict[str, Any], pack: Mapping[str, Any]) -> N
         for item in pack.get("items", ())
         if isinstance(item, Mapping) and isinstance(item.get("source_id"), str)
     }
-    declared = {
-        source.get("id")
-        for source in raw.get("sources") or ()
-        if isinstance(source, Mapping)
-    }
+    declared = {source.get("id") for source in raw.get("sources") or () if isinstance(source, Mapping)}
     cited: set[str] = set()
     for domain in raw.get("domains") or ():
         if not isinstance(domain, Mapping):

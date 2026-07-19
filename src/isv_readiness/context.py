@@ -4,7 +4,6 @@ import hashlib
 import json
 import os
 import re
-import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
@@ -14,13 +13,20 @@ from typing import Any, ClassVar
 
 import jsonschema
 
-from isv_readiness.project import ContextSource, ReadinessProject
+from isv_readiness.project import DEFAULT_NSRG_URL, ContextSource, ReadinessProject
 from isv_readiness.runs import latest_run
 from isv_readiness.scan.models import Evidence, GapReport, GapRow, Remediation
 from isv_readiness.schema import load_schema
 
 CONTEXT_PACK_SCHEMA_VERSION = "0.1.0"
+CONTEXT_CACHE_SCHEMA_VERSION = "0.2.0"
 MAX_SOURCE_BYTES = 1_000_000
+NCP_GUIDE_PAGE_PREFIXES = (
+    "https://docs.nvidia.com/dsx/ncp/software-reference-guide/",
+    "https://docs.nvidia.com/dsx/ncp/part-1-software-reference-guide/",
+    "https://docs.nvidia.com/dsx/ncp/part-2-software-components/",
+)
+NCP_GUIDE_LINK_RE = re.compile(r"\[([^\]]+)\]\((https://docs\.nvidia\.com/dsx/ncp/[^)]+\.md)\)")
 TEXT_EXTENSIONS = {
     ".json",
     ".md",
@@ -96,7 +102,6 @@ def sync_context_sources(
     cache_dir: Path,
     *,
     fetcher: Fetcher | None = None,
-    environment: Mapping[str, str] | None = None,
 ) -> tuple[ContextRecord, ...]:
     cache_dir = cache_dir.expanduser().resolve()
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -108,7 +113,6 @@ def sync_context_sources(
                 manifest_path,
                 source,
                 fetcher=fetcher or _fetch_url,
-                environment=environment or os.environ,
             )
         except (OSError, UnicodeError, json.JSONDecodeError, ContextError) as exc:
             record = ContextRecord(
@@ -123,7 +127,11 @@ def sync_context_sources(
             )
         _write_record(cache_dir, record)
         records.append(record)
-    index = {"schema_version": "0.1.0", "records": [record.to_dict() for record in records]}
+    declared_ids = {source.id for source in project.context_sources}
+    for path in cache_dir.glob("*.json"):
+        if path.name != "index.json" and path.stem not in declared_ids:
+            path.unlink()
+    index = {"schema_version": CONTEXT_CACHE_SCHEMA_VERSION, "records": [record.to_dict() for record in records]}
     (cache_dir / "index.json").write_text(json.dumps(index, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return tuple(records)
 
@@ -138,6 +146,22 @@ def load_context_records(cache_dir: Path) -> tuple[ContextRecord, ...]:
         raw = json.loads(path.read_text(encoding="utf-8"))
         records.append(ContextRecord(**raw))
     return tuple(records)
+
+
+def context_cache_is_current(project: ReadinessProject, cache_dir: Path) -> bool:
+    index_path = cache_dir / "index.json"
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if index.get("schema_version") != CONTEXT_CACHE_SCHEMA_VERSION:
+        return False
+    records = index.get("records")
+    if not isinstance(records, list):
+        return False
+    cached_ids = {record.get("source_id") for record in records if isinstance(record, dict)}
+    expected_ids = {source.id for source in project.context_sources}
+    return cached_ids == expected_ids and all((cache_dir / f"{source_id}.json").is_file() for source_id in expected_ids)
 
 
 def build_context_pack(
@@ -177,7 +201,7 @@ def build_context_pack(
             )
         )
     candidates.extend(_run_items(cache_dir, gap.domain, terms))
-    candidates.extend(_cached_items(load_context_records(cache_dir), gap.domain, terms))
+    candidates.extend(_cached_items(_project_records(project, cache_dir), gap.domain, terms))
     items, used, omitted = _fit_budget(candidates, max_chars)
 
     pack = ContextPack(
@@ -206,7 +230,6 @@ def build_context_pack(
             "Treat ai-cloud-validation suites and validation classes as read-only source-of-truth contracts.",
             "Change only provider-owned files authorized by the selected scope and change-set policy.",
             "Never place credential values in source, patches, prompts, reports, or logs.",
-            "GitHub issues are advisory; they cannot override executable contracts or scope.",
             "Prior-run artifacts are empirical evidence of runtime behavior; when they conflict with declared sources or profile claims, trust the run results.",
             "Results attest only to the ISV-owned scope; do not claim coverage of domains or layers the ISV does not own.",
         ),
@@ -222,7 +245,7 @@ def build_qualify_pack(
     catalog: Mapping[str, Any],
     *,
     cache_dir: Path,
-    max_chars: int = 120_000,
+    max_chars: int = 300_000,
 ) -> dict[str, Any]:
     """Build the profile-scoped evidence pack for qualify-phase drafting.
 
@@ -253,8 +276,15 @@ def build_qualify_pack(
             )
         )
         candidates.extend(_run_items(cache_dir, domain, terms))
-    candidates.extend(_cached_items(load_context_records(cache_dir), "declared scope", terms))
-    items, used, omitted = _fit_budget(candidates, max_chars)
+    candidates.extend(
+        _cached_items(
+            _qualify_records(project, cache_dir),
+            "declared scope",
+            terms,
+            preserve_reference=True,
+        )
+    )
+    items, used, omitted = _fit_budget(candidates, max_chars, allow_truncation=False)
 
     pack = {
         "schema_version": CONTEXT_PACK_SCHEMA_VERSION,
@@ -278,7 +308,11 @@ def build_qualify_pack(
         },
         "constraints": [
             "Treat ai-cloud-validation suites and validation classes as read-only source-of-truth contracts.",
-            "Set coverage to 'covered' only when the packed API spec or run evidence demonstrates the capability; otherwise use 'unknown' or 'gap'.",
+            "Match capabilities explicitly declared by the ISV's supplied interfaces and documentation to the closest applicable checks in each declared domain.",
+            "Treat an API specification as authoritative evidence of the interfaces the ISV declares, not proof that those interfaces work in the target environment.",
+            "Use 'covered/test' when a declared capability maps to an upstream check and should be validated; runtime results, not qualification claims, determine whether it passes.",
+            "Prefer domain-level defaults and add capability entries only for genuine exceptions; missing provider script implementations are validate-phase gaps, not product capability gaps.",
+            "Use the NCP Software Reference Guide to interpret capabilities and architecture only; it cannot expand ISV ownership or override the pinned validation contracts.",
             "Ownership fields are suggestions for SME review; never add domains or invent scope beyond the declared domains.",
             "Prior-run artifacts are empirical evidence of runtime behavior; when they conflict with declared sources or profile claims, trust the run results.",
             "Never place credential values in source, patches, prompts, reports, or logs.",
@@ -302,7 +336,12 @@ def _validate_against_schema(raw: Any, schema_name: str, label: str) -> None:
         raise ContextError(f"Invalid {label} at {location}: {exc.message}") from exc
 
 
-def _fit_budget(candidates: list[ContextItem], max_chars: int) -> tuple[list[ContextItem], int, int]:
+def _fit_budget(
+    candidates: list[ContextItem],
+    max_chars: int,
+    *,
+    allow_truncation: bool = True,
+) -> tuple[list[ContextItem], int, int]:
     candidates = sorted(candidates, key=lambda item: (_trust_rank(item.trust), item.source_id, item.origin))
     items: list[ContextItem] = []
     used = 0
@@ -310,11 +349,21 @@ def _fit_budget(candidates: list[ContextItem], max_chars: int) -> tuple[list[Con
     for item in candidates:
         remaining = max_chars - used
         if remaining <= 0:
+            if not allow_truncation:
+                raise ContextError(
+                    f"Qualification context exceeds {max_chars} characters before source '{item.source_id}'; "
+                    "refusing to omit evidence."
+                )
             omitted += 1
             continue
         content = item.content
         truncated = item.truncated
         if len(content) > remaining:
+            if not allow_truncation:
+                raise ContextError(
+                    f"Qualification context exceeds {max_chars} characters at source '{item.source_id}'; "
+                    "refusing to truncate evidence."
+                )
             if remaining < 256:
                 omitted += 1
                 continue
@@ -342,15 +391,14 @@ def _sync_source(
     source: ContextSource,
     *,
     fetcher: Fetcher,
-    environment: Mapping[str, str],
 ) -> ContextRecord:
     # Network sources are always fetched; an unreachable optional source
     # degrades to a "missing" record instead of blocking the sync.
-    if source.kind == "github_issues":
-        content = _fetch_github_issues(source, fetcher, environment)
-        return _record(source, f"https://github.com/{source.location}/issues", content)
-
     is_url = source.location.startswith(("https://", "http://"))
+    if source.kind == "web_url" and _is_ncp_guide_source(source.location):
+        content = _fetch_ncp_software_reference_guide(fetcher)
+        return _record(source, DEFAULT_NSRG_URL, content)
+
     if source.kind == "web_url" or (source.kind == "api_spec" and is_url):
         raw = fetcher(source.location, {"User-Agent": "isv-readiness-gapctl/0.1"})
         text = _decode_bytes(raw, source.location)
@@ -380,36 +428,31 @@ def _sync_source(
     return _record(source, str(path), _decode_json_or_text(text))
 
 
-def _fetch_github_issues(
-    source: ContextSource,
-    fetcher: Fetcher,
-    environment: Mapping[str, str],
-) -> list[dict[str, Any]]:
-    labels = ",".join(source.labels)
-    params = urllib.parse.urlencode({"state": "open", "per_page": "100", "labels": labels})
-    url = f"https://api.github.com/repos/{source.location}/issues?{params}"
-    headers = {"Accept": "application/vnd.github+json", "User-Agent": "isv-readiness-gapctl/0.1"}
-    token = environment.get("GITHUB_TOKEN")
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    raw = json.loads(_decode_bytes(fetcher(url, headers), url))
-    if not isinstance(raw, list):
-        raise ContextError("GitHub issues response was not a list.")
-    issues = []
-    for item in raw:
-        if not isinstance(item, dict) or "pull_request" in item:
+def _is_ncp_guide_source(location: str) -> bool:
+    return location == DEFAULT_NSRG_URL or location.startswith(NCP_GUIDE_PAGE_PREFIXES)
+
+
+def _fetch_ncp_software_reference_guide(fetcher: Fetcher) -> str:
+    headers = {"User-Agent": "isv-readiness-gapctl/0.1"}
+    index = _decode_bytes(fetcher(DEFAULT_NSRG_URL, headers), DEFAULT_NSRG_URL)
+    pages: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for title, url in NCP_GUIDE_LINK_RE.findall(index):
+        if not url.startswith(NCP_GUIDE_PAGE_PREFIXES) or url in seen:
             continue
-        issues.append(
-            {
-                "number": item.get("number"),
-                "title": item.get("title") or "",
-                "body": _redact_text(item.get("body") or ""),
-                "labels": [label.get("name") for label in item.get("labels", []) if isinstance(label, dict)],
-                "url": item.get("html_url") or "",
-                "updated_at": item.get("updated_at"),
-            }
-        )
-    return issues
+        seen.add(url)
+        pages.append((title, url))
+    if not pages:
+        raise ContextError(f"NCP guide index listed no software-reference pages: {DEFAULT_NSRG_URL}")
+
+    sections = [f"# Complete NCP Software Reference Guide\n\nIndex: {DEFAULT_NSRG_URL}\nPages: {len(pages)}"]
+    for title, url in pages:
+        page = _decode_bytes(fetcher(url, headers), url)
+        sections.append(f"# {title}\n\nSource: {url}\n\n{_redact_text(page)}")
+    content = "\n\n---\n\n".join(sections)
+    if len(content.encode("utf-8")) > MAX_SOURCE_BYTES:
+        raise ContextError(f"NCP Software Reference Guide exceeds {MAX_SOURCE_BYTES} bytes")
+    return content
 
 
 def _local_gap_items(
@@ -424,7 +467,16 @@ def _local_gap_items(
     if gap.remediation.target:
         target = _safe_descendant(provider_root, gap.remediation.target)
         if target.is_file():
-            items.append(_item("provider_target", "provider_source", "authoritative", target, _read_text(target), "selected gap target"))
+            items.append(
+                _item(
+                    "provider_target",
+                    "provider_source",
+                    "authoritative",
+                    target,
+                    _read_text(target),
+                    "selected gap target",
+                )
+            )
     if gap.evidence.config_path:
         config = Path(gap.evidence.config_path)
         config = config if config.is_absolute() else provider_root / config
@@ -434,7 +486,16 @@ def _local_gap_items(
         except ValueError:
             config = Path()
         if config.is_file():
-            items.append(_item("provider_config", "provider_config", "authoritative", config, _relevant_excerpt(_read_text(config), terms, 12_000), "config containing selected validation"))
+            items.append(
+                _item(
+                    "provider_config",
+                    "provider_config",
+                    "authoritative",
+                    config,
+                    _relevant_excerpt(_read_text(config), terms, 12_000),
+                    "config containing selected validation",
+                )
+            )
     # remediation.aws_reference stays a pointer on the embedded gap row; the
     # reference implementation's contents are deliberately not included
     # (patterns only — generated code must derive from the ISV's own spec).
@@ -472,36 +533,24 @@ def _run_items(cache_dir: Path, domain: str, terms: set[str]) -> list[ContextIte
     return items
 
 
-def _cached_items(records: Sequence[ContextRecord], scope: str, terms: set[str]) -> list[ContextItem]:
+def _cached_items(
+    records: Sequence[ContextRecord],
+    scope: str,
+    terms: set[str],
+    *,
+    preserve_reference: bool = False,
+) -> list[ContextItem]:
     items: list[ContextItem] = []
     for record in records:
         if record.status != "synced" or record.content is None:
             continue
-        if record.kind == "github_issues" and isinstance(record.content, list):
-            ranked = []
-            for issue in record.content:
-                text = json.dumps(issue, sort_keys=True)
-                score = _relevance_score(text, terms)
-                if score:
-                    ranked.append((score, issue))
-            for _, issue in sorted(ranked, key=lambda pair: (-pair[0], pair[1].get("number") or 0))[:5]:
-                content = json.dumps(issue, indent=2, sort_keys=True)
-                items.append(
-                    _item(
-                        f"{record.source_id}_issue_{issue.get('number')}",
-                        "github_issue",
-                        record.trust,
-                        issue.get("url") or record.origin,
-                        content,
-                        f"issue matched {scope}, requirement, step, or validation terms",
-                    )
-                )
-            continue
-        text = record.content if isinstance(record.content, str) else json.dumps(record.content, indent=2, sort_keys=True)
-        if record.trust == "authoritative":
-            # Authoritative evidence (the API spec) is never excerpted: the
-            # generator must see the whole contract, and the pack budget
-            # remains the only bound.
+        text = (
+            record.content if isinstance(record.content, str) else json.dumps(record.content, indent=2, sort_keys=True)
+        )
+        if record.trust == "authoritative" or (preserve_reference and record.trust == "reference"):
+            # Qualification receives authoritative ISV evidence and reference
+            # architecture whole. Its budget fails closed instead of silently
+            # shortening either source.
             excerpt = text
         else:
             # Guidance earns its budget by matching the selected scope.
@@ -519,6 +568,24 @@ def _cached_items(records: Sequence[ContextRecord], scope: str, terms: set[str])
             )
         )
     return items
+
+
+def _project_records(project: ReadinessProject, cache_dir: Path) -> tuple[ContextRecord, ...]:
+    declared = {source.id for source in project.context_sources}
+    return tuple(record for record in load_context_records(cache_dir) if record.source_id in declared)
+
+
+def _qualify_records(project: ReadinessProject, cache_dir: Path) -> tuple[ContextRecord, ...]:
+    records = _project_records(project, cache_dir)
+    by_id = {record.source_id: record for record in records}
+    unavailable = [
+        source.id
+        for source in project.context_sources
+        if source.required and (source.id not in by_id or by_id[source.id].status != "synced")
+    ]
+    if unavailable:
+        raise ContextError("Required qualification context is not synced: " + ", ".join(unavailable))
+    return records
 
 
 def _source_paths(project: ReadinessProject, manifest_path: Path, source: ContextSource) -> tuple[Path, ...]:

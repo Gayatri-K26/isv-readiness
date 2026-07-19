@@ -96,7 +96,7 @@
       "required": ["id", "kind", "location", "trust", "required", "domains", "labels", "query"],
       "properties": {
         "id": {"$ref": "#/$defs/identifier"},
-        "kind": {"enum": ["local_file", "local_tree", "api_spec", "web_url", "github_issues"]},
+        "kind": {"enum": ["local_file", "local_tree", "api_spec", "web_url"]},
         "location": {"type": "string", "minLength": 1},
         "trust": {"enum": ["authoritative", "reference", "advisory"]},
         "required": {"type": "boolean"},
