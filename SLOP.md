@@ -1463,3 +1463,29 @@ capability is enough to route an upstream test, but only a live run proves that
 the implementation works. Complete stable references plus explicit mapping
 rules are both simpler and more accurate than attempting to recover missing
 context with relevance-ranked issue snippets.
+
+## Step 30 - Default Partial Qualification Scope Conservatively
+
+### Decisions
+
+- A `covered/test` domain default is now permitted in generator instructions
+  only when supplied ISV evidence explicitly maps every check in the pinned
+  domain catalog.
+- Partial products use grouped `covered/test` capability entries for explicitly
+  mapped checks. They may use `out_of_scope/skip` as the unmatched default only
+  when the product evidence explicitly excludes every unmatched check;
+  otherwise the default remains `unknown/deferred` for SME resolution.
+- Scope exclusion is not inferred from missing lab hardware, credentials, or
+  runtime evidence. Provider script TODOs remain validate-phase implementation
+  gaps rather than qualification gaps.
+- The mapping rules are defined once and shared by the qualification pack and
+  the generator request so the two instruction surfaces cannot drift.
+
+### Rationale
+
+The first complete-context BCM draft marked bare-metal, Kubernetes, and
+observability as covered by default while naming only nine exceptions. That
+silently treated unmatched hardware-ingestion, governance, network telemetry,
+storage telemetry, and fabric checks as BCM capabilities. Conservative defaults
+make partial ISV scope explicit without creating one profile row per upstream
+check.

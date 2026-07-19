@@ -7,7 +7,12 @@ import unittest
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from isv_readiness.context import ContextError, build_qualify_pack, sync_context_sources
+from isv_readiness.context import (
+    QUALIFICATION_MAPPING_RULES,
+    ContextError,
+    build_qualify_pack,
+    sync_context_sources,
+)
 from isv_readiness.project import DEFAULT_NSRG_URL, build_bootstrap_plan, execute_bootstrap
 from isv_readiness.qualify import (
     QualifyError,
@@ -159,6 +164,8 @@ class QualifyPackTests(unittest.TestCase):
             self.assertEqual(source_ids[0], "latest_run_vm_junit")
             self.assertIn("catalog_vm", source_ids)
             self.assertIn("primary_api_spec", source_ids)
+            for rule in QUALIFICATION_MAPPING_RULES:
+                self.assertIn(rule, pack["constraints"])
             serialized = json.dumps(pack)
             self.assertIn("VM01-01", serialized)
             self.assertIn("launchVm", serialized)
@@ -240,6 +247,22 @@ class ProfileDraftTests(unittest.TestCase):
         declared = {source["id"]: source for source in raw["sources"]}
         self.assertIn("catalog_vm", declared)
         self.assertEqual(declared["catalog_vm"]["url"], "gapctl://catalog/vm")
+
+    def test_partial_domain_mapping_rules_are_shared_with_the_generator(self) -> None:
+        pack = {"project": {"declared_domains": ["vm"]}}
+        captured: dict = {}
+
+        def runner(command, cwd, request, env, timeout):
+            del cwd, env, timeout
+            captured.update(json.loads(request))
+            return subprocess.CompletedProcess(command, 0, json.dumps(_profile_payload()), "")
+
+        run_profile_draft(pack, command=["true"], cwd=Path("/tmp"), runner=runner)
+
+        for rule in QUALIFICATION_MAPPING_RULES:
+            self.assertIn(rule, captured["rules"])
+        self.assertTrue(any("every check" in rule for rule in captured["rules"]))
+        self.assertTrue(any("partially supported domain" in rule for rule in captured["rules"]))
 
     def test_draft_rejects_invented_or_missing_scope(self) -> None:
         pack = {"project": {"declared_domains": ["vm"]}}

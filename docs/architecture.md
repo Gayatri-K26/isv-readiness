@@ -74,8 +74,13 @@ GitHub issues are not a supported qualification source.
 
 The profile is deliberately small:
 
-- domain defaults describe the usual ownership and validation route;
-- capability entries exist only for exceptions;
+- a `covered/test` domain default is allowed only when ISV evidence maps every
+  check in that pinned domain catalog;
+- partial domains use grouped capability entries for explicitly mapped checks
+  instead of silently treating unmatched checks as covered;
+- an `out_of_scope/skip` partial-domain default requires evidence that every
+  unmatched check is outside the product claim; otherwise it remains an SME
+  decision;
 - `covered/test` means the capability exists and should be tested;
 - `out_of_scope/skip` is an explicit reviewed scope decision;
 - `unknown`, `gap`, `evidence`, and `deferred` block entry into validation.

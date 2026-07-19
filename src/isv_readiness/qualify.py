@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from isv_readiness.changes import canonical_sha256
+from isv_readiness.context import QUALIFICATION_MAPPING_RULES
 from isv_readiness.generation import GeneratorRunner, dispatch_generator
 from isv_readiness.runs import latest_run
 from isv_readiness.schema import load_schema
@@ -116,13 +117,8 @@ def run_profile_draft(
         "rules": [
             "Return one JSON object and no Markdown or commentary.",
             "Draft every declared domain and no others; never invent scope.",
-            "Match capabilities explicitly declared by the ISV's supplied interfaces and documentation to the closest applicable upstream checks.",
-            "Treat an API specification as authoritative for what interfaces the ISV declares, not as proof that they work in the target environment.",
-            "Use covered/test when a declared capability maps to an upstream check and should be validated; only runtime evidence proves that it passes.",
-            "Prefer domain-level defaults and add capability entries only for genuine exceptions.",
-            "Do not turn missing provider script implementations into product capability gaps; provider implementation is handled during validate.",
+            *QUALIFICATION_MAPPING_RULES,
             "Use unknown or deferred when the capability mapping is unclear, and use gap only when the supplied ISV evidence explicitly shows a required capability is absent.",
-            "Use 'gap' only for capabilities the ISV should close; a capability this environment can never provide is 'out_of_scope'.",
             "State the supporting evidence for each domain in its 'rationale'.",
             "Every id used in 'evidence_refs' must also be declared in the profile's 'sources' list.",
             "Model context_pack.project.provider as an actor of kind 'isv' and default both capability_owner_actor_id and provider_adapter_owner_actor_id to it for owned domains; add other actors only when the evidence names them.",

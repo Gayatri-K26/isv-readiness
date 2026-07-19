@@ -27,6 +27,25 @@ NCP_GUIDE_PAGE_PREFIXES = (
     "https://docs.nvidia.com/dsx/ncp/part-2-software-components/",
 )
 NCP_GUIDE_LINK_RE = re.compile(r"\[([^\]]+)\]\((https://docs\.nvidia\.com/dsx/ncp/[^)]+\.md)\)")
+QUALIFICATION_MAPPING_RULES = (
+    "Match capabilities explicitly declared by the ISV's supplied interfaces and "
+    "documentation to the closest applicable checks in each declared domain.",
+    "Treat an API specification as authoritative evidence of the interfaces the ISV "
+    "declares, not proof that those interfaces work in the target environment.",
+    "Use covered/test when a declared capability maps to an upstream check and should "
+    "be validated; runtime results, not qualification claims, determine whether it passes.",
+    "Use covered/test as a domain default only when the supplied ISV evidence explicitly "
+    "maps every check in that domain's pinned catalog.",
+    "For a partially supported domain, add grouped covered/test capability entries for "
+    "explicitly mapped checks; do not use a covered domain default to fill unmapped checks.",
+    "Use out_of_scope/skip as a partial-domain default only when the supplied evidence "
+    "explicitly excludes every unmatched check from the product claim; otherwise use "
+    "unknown/deferred so an SME must decide.",
+    "Use out_of_scope/skip only for a product-scope exclusion, never merely because the "
+    "current lab lacks hardware, credentials, or runtime evidence.",
+    "Missing provider script implementations are validate-phase gaps, not product "
+    "capability gaps.",
+)
 TEXT_EXTENSIONS = {
     ".json",
     ".md",
@@ -308,10 +327,7 @@ def build_qualify_pack(
         },
         "constraints": [
             "Treat ai-cloud-validation suites and validation classes as read-only source-of-truth contracts.",
-            "Match capabilities explicitly declared by the ISV's supplied interfaces and documentation to the closest applicable checks in each declared domain.",
-            "Treat an API specification as authoritative evidence of the interfaces the ISV declares, not proof that those interfaces work in the target environment.",
-            "Use 'covered/test' when a declared capability maps to an upstream check and should be validated; runtime results, not qualification claims, determine whether it passes.",
-            "Prefer domain-level defaults and add capability entries only for genuine exceptions; missing provider script implementations are validate-phase gaps, not product capability gaps.",
+            *QUALIFICATION_MAPPING_RULES,
             "Use the NCP Software Reference Guide to interpret capabilities and architecture only; it cannot expand ISV ownership or override the pinned validation contracts.",
             "Ownership fields are suggestions for SME review; never add domains or invent scope beyond the declared domains.",
             "Prior-run artifacts are empirical evidence of runtime behavior; when they conflict with declared sources or profile claims, trust the run results.",

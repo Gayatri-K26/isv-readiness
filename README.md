@@ -95,6 +95,12 @@ The ISV SME reviews that file. Unresolved ownership or coverage decisions stop
 the command and remain visible. Edit the proposal and run the same command
 again; there is no separate profile, draft, or approval command.
 
+Qualification does not treat a declared domain as proof that every check in
+that domain is supported. A `covered/test` domain default is proposed only when
+the supplied ISV evidence maps the complete pinned domain catalog. Partial
+products receive grouped capability mappings, and unmatched checks remain an
+explicit scope decision.
+
 When the proposal is complete, `qualify` displays its hash and asks for explicit
 approval. Approval promotes the exact reviewed proposal to
 `solution-profile.yaml`, records it as reviewed, and enters the validate phase.
