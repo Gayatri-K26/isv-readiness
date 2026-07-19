@@ -264,6 +264,7 @@ class ProfileDraftTests(unittest.TestCase):
         self.assertTrue(any("every check" in rule for rule in captured["rules"]))
         self.assertTrue(any("partially supported domain" in rule for rule in captured["rules"]))
         self.assertTrue(any("required behavior" in rule for rule in captured["rules"]))
+        self.assertTrue(any("step and validation-class pair" in rule for rule in captured["rules"]))
         self.assertTrue(any("target version" in rule for rule in captured["rules"]))
         self.assertTrue(any("numeric nsrg_layers" in rule for rule in captured["rules"]))
 

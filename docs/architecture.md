@@ -80,6 +80,9 @@ The profile is deliberately small:
   instead of silently treating unmatched checks as covered;
 - grouped selectors require evidence for every selected check's actual behavior;
   nearby terminology is not a capability match;
+- selectors account for both the provider step and validation class; a
+  class-only selector is valid only when every occurrence of that class is
+  supported;
 - an `out_of_scope/skip` partial-domain default requires evidence that every
   unmatched check is outside the product claim; otherwise it remains an SME
   decision;

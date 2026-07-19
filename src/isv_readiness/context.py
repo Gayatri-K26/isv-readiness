@@ -36,6 +36,9 @@ QUALIFICATION_MAPPING_RULES = (
     "Every validation class or step grouped under one capability selector must be "
     "independently supported by the cited evidence; split the group or leave a check "
     "unmatched when its behavior differs.",
+    "Treat each catalog requirement as its step and validation-class pair. A class-only "
+    "selector matches that class in every step; use one only when the evidence supports "
+    "every occurrence, otherwise constrain the selector by both steps and classes.",
     "Treat an API specification as authoritative evidence of the interfaces the ISV "
     "declares, not proof that those interfaces work in the target environment.",
     "Use covered/test when a declared capability maps to an upstream check and should "

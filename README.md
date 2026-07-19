@@ -100,7 +100,8 @@ that domain is supported. A `covered/test` domain default is proposed only when
 the supplied ISV evidence maps the complete pinned domain catalog. Partial
 products receive grouped capability mappings, and unmatched checks remain an
 explicit scope decision. Grouping is semantic rather than keyword-based: each
-selected check must be supported by the cited interface behavior.
+selected step-and-validation-class pair must be supported by the cited
+interface behavior.
 
 When the proposal is complete, `qualify` displays its hash and asks for explicit
 approval. Approval promotes the exact reviewed proposal to

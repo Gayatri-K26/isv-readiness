@@ -1481,6 +1481,9 @@ context with relevance-ranked issue snippets.
 - Capability matching is semantic: an inventory/read surface cannot stand in
   for undeclared placement, retention, policy, or mutation behavior, and every
   check in a grouped selector needs its own support in the cited evidence.
+- Catalog mappings use both step and validation class. A class-only selector
+  matches every lifecycle occurrence of that class and is allowed only when the
+  evidence supports all of them.
 - Unverified runtime behavior no longer justifies `unknown/deferred` when the
   supplied contract explicitly declares the capability. Numeric `nsrg_layers`
   are omitted unless a source supplies the exact numbering.
