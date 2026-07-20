@@ -139,11 +139,13 @@ For every owned domain, `validate`:
    to edit;
 3. gives the selected generator the complete declared runtime-input contract,
    every edit-eligible unresolved check sharing the same provider target, and
-   a compact provider-adapter checklist; the bounded per-gap pack fails rather
-   than silently truncating or omitting a selected source;
+   the exact pinned suite entries, step-output schemas, relevant validation
+   class implementations, and a compact provider-adapter checklist; the
+   bounded per-gap pack fails rather than silently truncating or omitting a
+   selected source;
 4. rejects undeclared runtime inputs, TLS-verification bypasses, raw
-   provider output in result JSON, and internal deadlines that exceed the
-   configured step timeout;
+   provider output in result JSON, required downstream outputs left provably
+   empty, and internal deadlines that exceed the configured step timeout;
 5. verifies the candidate statically in an isolated copy;
 6. writes one combined patch under `.gapctl/work/<domain>/`;
 7. displays the patch hash and asks for human approval;
@@ -164,7 +166,10 @@ gapctl validate --generator claude
 
 `validate` prints readiness after the run. Repeat the same command until every
 owned domain has no blocking gaps and a successful live test. Gaps that are not
-safe to generate are parked with a reason for SME or manual implementation.
+safe to generate are parked with a reason for SME or manual implementation. If
+the supplied provider interfaces cannot satisfy an exact upstream contract, the
+generator can park that contract with a specific blocker instead of inventing
+a passing implementation.
 
 Run artifacts are stored under:
 

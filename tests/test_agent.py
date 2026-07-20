@@ -21,6 +21,21 @@ COMMIT = "e" * 40
 
 
 class AgentWorkflowTests(unittest.TestCase):
+    def test_agent_blocks_on_an_evidence_grounded_refusal(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            project_path, _provider = _project(Path(tempdir))
+            state = run_agent_turn(
+                project_path,
+                domain="vm",
+                work_dir=Path(tempdir) / "work",
+                generator_command=["fixture-generator"],
+                generator_runner=_refusal_runner,
+            )
+
+            self.assertEqual(state.status, "blocked")
+            self.assertIn("direct node SSH", state.reason)
+            self.assertTrue(Path(state.artifacts["changes"]).exists())
+
     def test_agent_stops_for_generator_then_review(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             project_path, provider = _project(Path(tempdir))
@@ -189,6 +204,20 @@ def _generator_runner(command, cwd, request, environment, timeout):
                 "rationale": "Return the output required by the installed validation contract",
             }
         ],
+    }
+    return subprocess.CompletedProcess(command, 0, json.dumps(output), "")
+
+
+def _refusal_runner(command, cwd, request, environment, timeout):
+    del cwd, environment, timeout
+    payload = json.loads(request)
+    output = {
+        "schema_version": "0.1.0",
+        "gap_id": payload["context_pack"]["gap"]["id"],
+        "context_pack_sha256": payload["context_pack_sha256"],
+        "generator": {"adapter": "fixture", "model": "fixture-model"},
+        "summary": "The provider exposes only a jump host, but the pinned check requires direct node SSH.",
+        "changes": [],
     }
     return subprocess.CompletedProcess(command, 0, json.dumps(output), "")
 

@@ -134,6 +134,7 @@ def run_auto(
     staged: list[StagedFix] = []
     attempts_by_target: dict[str, int] = {}
     feedback_by_target: dict[str, tuple[str, ...]] = {}
+    blocked_by_target: dict[str, str] = {}
     max_attempts = project.execution.max_attempts
     allowed_environment = declared_provider_environment(project, canonical_domain)
 
@@ -170,6 +171,10 @@ def run_auto(
                     _feedback_for(attempts_by_target.get(remediation_unit, 0)),
                 ),
             )
+            if not change_set.changes:
+                attempts_by_target[remediation_unit] = max_attempts
+                blocked_by_target[remediation_unit] = change_set.summary
+                continue
             manifest = verify_change_set(
                 report,
                 provider_repo=scratch,
@@ -214,7 +219,14 @@ def run_auto(
         )
 
     final_report = _scan(scratch, project.validation_root(project_path), canonical_domain, profile)
-    parked = _park(final_report, canonical_domain, staged, attempts_by_target, max_attempts)
+    parked = _park(
+        final_report,
+        canonical_domain,
+        staged,
+        attempts_by_target,
+        max_attempts,
+        blocked_by_target=blocked_by_target,
+    )
     changed_files = _changed_files(provider_root, scratch)
     patch = _combined_patch(provider_root, scratch, changed_files)
     patch_sha256 = hashlib.sha256(patch.encode("utf-8")).hexdigest()
@@ -339,9 +351,12 @@ def _park(
     staged: Sequence[StagedFix],
     attempts_by_target: Mapping[str, int] | None = None,
     max_attempts: int = 0,
+    *,
+    blocked_by_target: Mapping[str, str] | None = None,
 ) -> list[ParkedGap]:
     staged_ids = {fix.gap_id for fix in staged}
     attempts_by_target = attempts_by_target or {}
+    blocked_by_target = blocked_by_target or {}
     parked: list[ParkedGap] = []
     for row in report.get("rows", []):
         decision = decide_gap(row)
@@ -351,8 +366,15 @@ def _park(
             continue
         action = decision.action
         if decision.edit_eligible:
-            attempts = attempts_by_target.get(_remediation_unit(row), 0)
-            if attempts == 0:
+            remediation_unit = _remediation_unit(row)
+            attempts = attempts_by_target.get(remediation_unit, 0)
+            blocker = blocked_by_target.get(remediation_unit)
+            if blocker:
+                reason = (
+                    "Generator reported no source-grounded provider-owned implementation: "
+                    f"{blocker}"
+                )
+            elif attempts == 0:
                 reason = "Not attempted within this run's iteration budget; apply the staged patch and re-run auto to continue."
             elif attempts < max_attempts:
                 reason = f"{attempts} failed attempt(s); retry budget remains — re-run auto after applying."

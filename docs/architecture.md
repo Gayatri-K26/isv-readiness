@@ -146,31 +146,37 @@ Application recomputes the patch and refuses any hash mismatch.
 
 Each generation pack includes the exact declared runtime environment names and
 the other edit-eligible unresolved validation rows that share the selected
-remediation target. Provider-neutral authoring rules require source-grounded
+remediation target. It also includes the exact relevant entries from the pinned
+suite, the step-output schemas, and the source of the validation classes that
+consume those outputs. Provider-neutral authoring rules require source-grounded
 interfaces, one canonical resource identifier across configured lifecycle
 steps, verified TLS, bounded timeouts, structured result fields, and no raw
 provider output in evidence. Retry accounting is per remediation target rather
 than per catalog row, so several checks backed by one script cannot multiply
-the model budget.
-The per-gap pack has a 120k-character bound and fails closed instead of
-truncating or omitting selected evidence; sibling rows are represented by their
-validation contract fields rather than duplicated scanner metadata.
+the model budget. The per-gap pack has a 180k-character bound and fails closed
+instead of truncating or omitting selected evidence; sibling rows are
+represented by their validation contract fields rather than duplicated scanner
+metadata.
 
 Deterministic candidate checks enforce what can be established without knowing
 the provider: environment references in each changed candidate must be declared,
 insecure TLS patterns are rejected, raw response/console fields cannot enter
-result JSON, and an explicit internal deadline cannot exceed its configured
-step timeout. Provider-specific semantics that cannot be inferred safely from
-code, such as which documented identifier an endpoint accepts, remain a
-source-grounded generation requirement and an explicit human-review concern.
-Static rescan success is therefore labeled as static verification, never as
-runtime proof.
+result JSON, a downstream-consumed output cannot remain provably empty, and an
+explicit internal deadline cannot exceed its configured step timeout.
+Provider-specific semantics that cannot be inferred safely from code, such as
+which documented identifier an endpoint accepts, remain a source-grounded
+generation requirement and an explicit human-review concern. When the supplied
+provider interfaces cannot satisfy the pinned contract within the edit boundary,
+the schema permits an empty change set carrying the exact blocker; the target is
+parked instead of forcing fabricated code. Static rescan success is therefore
+labeled as static verification, never as runtime proof.
 
 The shared generator boundary allows the built-in model adapter to finish or
-time out first. If the outer boundary times out, it terminates and reaps the
-adapter's complete subprocess group so no detached model process keeps running.
-Built-in adapter names resolve beside the running `gapctl` executable first,
-which prevents mixed tool versions when another installation is also on `PATH`.
+time out first. Timeout, Ctrl+C, and SIGTERM terminate and reap the adapter's
+process group; adapters forward termination through the same cleanup boundary
+to their nested model process. Built-in adapter names resolve beside the running
+`gapctl` executable first, which prevents mixed tool versions when another
+installation is also on `PATH`.
 
 `validate` invokes live execution one domain at a time internally, while the ISV
 runs one command for the entire owned scope. The explicit confirmation is the

@@ -271,6 +271,18 @@ def _prepare_next_change(
     )
     changes_path = work_dir / f"changes-{state.iteration:03d}-{gap_id}.json"
     _write_json(changes_path, change_set.to_dict())
+    if not change_set.changes:
+        return _transition(
+            state,
+            status="blocked",
+            gap_id=gap_id,
+            reason=(
+                "Generator reported no source-grounded provider-owned implementation: "
+                f"{change_set.summary}"
+            ),
+            artifacts={"report": str(report_path), "context": str(context_path), "changes": str(changes_path)},
+            attempts=state.attempts + 1,
+        )
     allowed_environment = declared_provider_environment(project, state.domain)
     proposal = build_change_proposal(
         report,

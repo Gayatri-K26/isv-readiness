@@ -98,6 +98,24 @@ class AutoWorkflowTests(unittest.TestCase):
 
 
 class AutoResilienceTests(unittest.TestCase):
+    def test_evidence_grounded_refusal_is_parked_with_the_exact_blocker(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            project_path, _provider = _project(Path(tempdir))
+            review = run_auto(
+                project_path,
+                domain="vm",
+                work_dir=Path(tempdir) / "work",
+                generator_command=["fixture-generator"],
+                generator_runner=_refusal_runner,
+            )
+
+        self.assertEqual(review.status, "no_changes")
+        self.assertTrue(review.parked)
+        self.assertTrue(
+            any("direct node SSH" in item.reason for item in review.parked),
+            review.parked,
+        )
+
     def test_malformed_generation_counts_as_attempt_and_run_continues(self) -> None:
         calls = {"n": 0}
         requests = []
@@ -228,6 +246,20 @@ def _generator_runner(command, cwd, request, environment, timeout):
                 "rationale": "Return the output required by the installed validation contract",
             }
         ],
+    }
+    return subprocess.CompletedProcess(command, 0, json.dumps(output), "")
+
+
+def _refusal_runner(command, cwd, request, environment, timeout):
+    del cwd, environment, timeout
+    payload = json.loads(request)
+    output = {
+        "schema_version": "0.1.0",
+        "gap_id": payload["context_pack"]["gap"]["id"],
+        "context_pack_sha256": payload["context_pack_sha256"],
+        "generator": {"adapter": "fixture", "model": "fixture-model"},
+        "summary": "The provider exposes only a jump host, but the pinned check requires direct node SSH.",
+        "changes": [],
     }
     return subprocess.CompletedProcess(command, 0, json.dumps(output), "")
 

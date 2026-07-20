@@ -1586,3 +1586,50 @@ ISV while enforcing the safety properties code can actually prove.
   required non-secret live inputs, and the generator rule set.
 - `uv run python -m unittest discover -s tests`: 131 tests passed.
 - Ruff, Python compilation, lock validation, and diff checks passed.
+
+## Step 33 - Bind Generation to Exact Upstream Consumer Contracts
+
+### Evidence
+
+The stopped bare-metal BCM rehearsal produced candidates that were mechanically
+valid but semantically wrong. One returned the BCM head address where the pinned
+validation class opens direct SSH to the test instance, one translated BCM `UP`
+to `up` while the suite expects `running`, and one left downstream-consumed
+connection and resource fields as empty strings. The prior context described the
+gap rows but did not include the code that consumes provider output. Ctrl+C also
+left the adapter and nested Codex process running after the parent CLI exited.
+
+### Decisions
+
+1. Include the exact relevant pinned suite entries, step-output schemas, and
+   validation class implementations in each selected-target context pack. Raise
+   the fail-closed per-gap budget from 120k to 180k characters so this contract
+   is not silently shortened.
+2. Derive downstream-required output fields from the provider's own
+   `steps.<step>.<field>` templates. Reject a Python candidate only when an
+   emitted result mapping leaves one of those fields provably `None` or an empty
+   string. Do not treat valid empty collections, un-emitted mappings, or unknown
+   dynamic assignments as failures.
+3. Permit a schema-valid empty change set with a non-empty summary. This is the
+   generator's structured refusal when no source-grounded provider-owned edit
+   can satisfy the pinned contract. Park the shared remediation target with the
+   exact blocker instead of consuming retries or fabricating a pass.
+4. Extend the captured-subprocess boundary to clean up on KeyboardInterrupt and
+   SIGTERM as well as timeout. A terminated adapter immediately stops and reaps
+   its nested model process before it exits.
+
+### Simplicity boundary
+
+Do not encode BCM state names, jump-host topology, or provider-specific API
+rules in the scanner. Exact upstream code gives the model and reviewer the
+semantic contract; deterministic checks remain limited to facts the syntax and
+configured data flow can prove. A genuine interface mismatch becomes one parked
+reason, not another profile type, command, or inference layer.
+
+### Verification
+
+- Focused tests cover exact upstream context, downstream-required empty outputs,
+  dynamic and unused mappings, structured generator refusal in both workflows,
+  and Ctrl+C process-group cleanup.
+- `uv run python -m unittest discover -s tests`: 137 tests passed.
+- Ruff, Python compilation, lock validation, and diff checks passed.

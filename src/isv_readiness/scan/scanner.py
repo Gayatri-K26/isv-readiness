@@ -4,6 +4,7 @@ import ast
 import copy
 import hashlib
 import json
+import re
 import shlex
 from collections import Counter
 from dataclasses import dataclass, replace
@@ -44,6 +45,7 @@ class StepRef:
     skipped: bool
     config_path: Path
     script_path: Path | None
+    required_outputs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -340,8 +342,35 @@ def _scan_check(
             enrichment=check.enrichment,
         )
 
-    output_samples = _static_json_outputs(step.script_path, text)
     schema_name = registry.schema_for_step(step.name)
+    empty_outputs = _definitely_empty_output_fields(
+        step.script_path,
+        text,
+        set(step.required_outputs),
+    )
+    if empty_outputs:
+        problems = [f"Required output field '{field}' is never populated." for field in empty_outputs]
+        return _row(
+            provider_repo=provider_repo,
+            domain=domain,
+            step_name=check.step_name,
+            validation_class=check.validation_class,
+            requirement_id=check.requirement_id,
+            status="fail",
+            stage="correctness",
+            message="Provider script leaves required step outputs definitely empty.",
+            config_path=step.config_path,
+            script_path=step.script_path,
+            target=_relative_or_str(step.script_path, provider_repo),
+            aws_reference=aws_reference,
+            schema_errors=problems,
+            missing_json_fields=[],
+            auto_fixable=_is_script_target(provider_repo, step.script_path),
+            rerun_config=rerun_config,
+            enrichment=check.enrichment,
+        )
+
+    output_samples = _static_json_outputs(step.script_path, text)
     if output_samples and schema_name:
         all_errors: list[str] = []
         all_missing: list[str] = []
@@ -696,6 +725,7 @@ def _steps_for_domain(provider_config: dict[str, Any], domain: str, config_path:
         else:
             entries.extend(entry for entry in commands.values() if isinstance(entry, dict))
 
+    output_references = _step_output_references(provider_config)
     steps: dict[str, StepRef] = {}
     for entry in entries:
         raw_steps = entry.get("steps") or []
@@ -713,8 +743,31 @@ def _steps_for_domain(provider_config: dict[str, Any], domain: str, config_path:
                 skipped=bool(raw_step.get("skip")),
                 config_path=config_path,
                 script_path=script_path,
+                required_outputs=tuple(sorted(output_references.get(raw_step["name"], set()))),
             )
     return steps
+
+
+def _step_output_references(raw: Any) -> dict[str, set[str]]:
+    """Return fields consumed through ``steps.<step>.<field>`` templates."""
+
+    references: dict[str, set[str]] = {}
+    pattern = re.compile(r"\{\{\s*steps\.([A-Za-z0-9_-]+)\.([A-Za-z_][A-Za-z0-9_]*)")
+    for value in _nested_strings(raw):
+        for step, field in pattern.findall(value):
+            references.setdefault(step, set()).add(field)
+    return references
+
+
+def _nested_strings(raw: Any):
+    if isinstance(raw, str):
+        yield raw
+    elif isinstance(raw, dict):
+        for value in raw.values():
+            yield from _nested_strings(value)
+    elif isinstance(raw, (list, tuple)):
+        for value in raw:
+            yield from _nested_strings(value)
 
 
 def _aws_steps_for_domain(validation_root: Path | None, domain: str) -> dict[str, StepRef]:
@@ -819,6 +872,111 @@ def _static_json_outputs(path: Path, text: str) -> list[dict[str, Any]]:
             if value is not None:
                 outputs.append(value)
     return outputs
+
+
+def _definitely_empty_output_fields(path: Path, text: str, required_fields: set[str]) -> list[str]:
+    """Find required fields that a recognized result mapping only assigns empty values."""
+
+    if path.suffix != ".py" or not required_fields:
+        return []
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+
+    mappings: dict[str, dict[str, list[ast.AST]]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and isinstance(node.value, ast.Dict):
+                    fields = mappings.setdefault(target.id, {})
+                    _record_dict_assignments(fields, node.value)
+                else:
+                    assigned = _named_subscript(target)
+                    if assigned is not None:
+                        name, field = assigned
+                        mappings.setdefault(name, {}).setdefault(field, []).append(node.value)
+        elif isinstance(node, ast.AnnAssign):
+            if isinstance(node.target, ast.Name) and isinstance(node.value, ast.Dict):
+                fields = mappings.setdefault(node.target.id, {})
+                _record_dict_assignments(fields, node.value)
+            elif node.value is not None:
+                assigned = _named_subscript(node.target)
+                if assigned is not None:
+                    name, field = assigned
+                    mappings.setdefault(name, {}).setdefault(field, []).append(node.value)
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.attr == "update"
+        ):
+            fields = mappings.setdefault(node.func.value.id, {})
+            if node.args and isinstance(node.args[0], ast.Dict):
+                _record_dict_assignments(fields, node.args[0])
+            for keyword in node.keywords:
+                if keyword.arg:
+                    fields.setdefault(keyword.arg, []).append(keyword.value)
+
+    emitted: list[dict[str, list[ast.AST]]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or _call_name(node.func) not in {"print", "write"}:
+            continue
+        for arg in node.args:
+            fields = _emitted_mapping(arg, mappings)
+            if fields is not None:
+                emitted.append(fields)
+
+    empty: set[str] = set()
+    for fields in emitted:
+        success_values = fields.get("success", [])
+        if success_values and all(_is_definitely_false(value) for value in success_values):
+            continue
+        for field in required_fields:
+            values = fields.get(field, [])
+            if values and all(_is_definitely_empty(value) for value in values):
+                empty.add(field)
+    return sorted(empty)
+
+
+def _record_dict_assignments(fields: dict[str, list[ast.AST]], node: ast.Dict) -> None:
+    for key, value in zip(node.keys, node.values, strict=True):
+        if isinstance(key, ast.Constant) and isinstance(key.value, str):
+            fields.setdefault(key.value, []).append(value)
+
+
+def _emitted_mapping(
+    node: ast.AST,
+    mappings: dict[str, dict[str, list[ast.AST]]],
+) -> dict[str, list[ast.AST]] | None:
+    if isinstance(node, ast.Call) and _call_name(node.func) in {"json.dumps", "dumps"} and node.args:
+        node = node.args[0]
+    if isinstance(node, ast.Name):
+        return mappings.get(node.id)
+    if isinstance(node, ast.Dict):
+        fields: dict[str, list[ast.AST]] = {}
+        _record_dict_assignments(fields, node)
+        return fields
+    return None
+
+
+def _named_subscript(node: ast.AST) -> tuple[str, str] | None:
+    if not isinstance(node, ast.Subscript) or not isinstance(node.value, ast.Name):
+        return None
+    key = node.slice
+    if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
+        return None
+    return node.value.id, key.value
+
+
+def _is_definitely_empty(node: ast.AST) -> bool:
+    if isinstance(node, ast.Constant):
+        return node.value is None or node.value == ""
+    return False
+
+
+def _is_definitely_false(node: ast.AST) -> bool:
+    return isinstance(node, ast.Constant) and node.value is False
 
 
 def _jsonish_arg(node: ast.AST, assignments: dict[str, dict[str, Any]]) -> dict[str, Any] | None:

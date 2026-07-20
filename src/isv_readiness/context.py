@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
@@ -12,6 +13,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import jsonschema
+import yaml
 
 from isv_readiness.decision import decide_gap
 from isv_readiness.project import (
@@ -23,6 +25,7 @@ from isv_readiness.project import (
 )
 from isv_readiness.runs import latest_run
 from isv_readiness.scan.models import Evidence, GapReport, GapRow, Remediation
+from isv_readiness.scan.schema_registry import SchemaRegistry
 from isv_readiness.schema import load_schema
 
 CONTEXT_PACK_SCHEMA_VERSION = "0.1.0"
@@ -227,7 +230,7 @@ def build_context_pack(
     gap_id: str,
     cache_dir: Path,
     environment: Mapping[str, str] | None = None,
-    max_chars: int = 120_000,
+    max_chars: int = 180_000,
     feedback: Sequence[str] = (),
 ) -> ContextPack:
     if max_chars < 4_000:
@@ -270,14 +273,15 @@ def build_context_pack(
             "complete runtime input contract; names only, never values",
         )
     )
-    related = [
-        _related_gap_contract(row)
+    related_rows = [
+        row
         for row in rows
         if row.id != gap.id
         and row.domain == gap.domain
         and row.remediation.target == gap.remediation.target
         and decide_gap(row.to_dict()).edit_eligible
     ]
+    related = [_related_gap_contract(row) for row in related_rows]
     if related:
         candidates.append(
             _item(
@@ -289,6 +293,14 @@ def build_context_pack(
                 "other edit-eligible unresolved validation rows sharing the selected remediation target",
             )
         )
+    upstream_contract = _upstream_target_contract(
+        project,
+        manifest_path,
+        gap,
+        related_rows,
+    )
+    if upstream_contract is not None:
+        candidates.append(upstream_contract)
     if feedback:
         candidates.append(
             _item(
@@ -500,6 +512,85 @@ def _related_gap_contract(row: GapRow) -> dict[str, Any]:
         },
         "labels": list(row.labels),
     }
+
+
+def _upstream_target_contract(
+    project: ReadinessProject,
+    manifest_path: Path,
+    gap: GapRow,
+    related_rows: Sequence[GapRow],
+) -> ContextItem | None:
+    """Pack the exact suite entries and validation classes for one adapter target."""
+
+    validation_root = project.validation_root(manifest_path)
+    if not validation_root.is_dir():
+        return None
+    rows = (gap, *related_rows)
+    steps = {row.step_name for row in rows if row.step_name and not row.step_name.startswith("<")}
+    classes = {
+        row.validation_class
+        for row in rows
+        if row.validation_class and row.validation_class not in {"StepOutputSchema"}
+    }
+    suite_name = "k8s.yaml" if gap.domain in {"k8s", "kubernetes"} else f"{gap.domain}.yaml"
+    suite_path = validation_root / "isvctl" / "configs" / "suites" / suite_name
+    suite_entries: dict[str, Any] = {}
+    if suite_path.is_file():
+        suite_raw = yaml.safe_load(_read_text(suite_path)) or {}
+        validations = ((suite_raw.get("tests") or {}).get("validations") or {})
+        if isinstance(validations, dict):
+            suite_entries = {
+                name: value
+                for name, value in validations.items()
+                if isinstance(value, dict)
+                and value.get("step") in steps
+                and isinstance(value.get("checks"), dict)
+                and classes.intersection(value["checks"])
+            }
+
+    class_sources: dict[str, dict[str, str]] = {}
+    source_root = validation_root / "isvtest" / "src" / "isvtest" / "validations"
+    if source_root.is_dir():
+        for path in sorted(source_root.rglob("*.py")):
+            text = _read_text(path)
+            try:
+                tree = ast.parse(text)
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ClassDef) or node.name not in classes or node.name in class_sources:
+                    continue
+                source = ast.get_source_segment(text, node)
+                if source:
+                    class_sources[node.name] = {
+                        "path": str(path.relative_to(validation_root)),
+                        "source": source,
+                    }
+
+    output_schemas: dict[str, Any] = {}
+    registry = SchemaRegistry(validation_root)
+    for step in sorted(steps):
+        schema_name = registry.schema_for_step(step)
+        schema = registry.schema(schema_name) if schema_name else None
+        output_schemas[step] = {"name": schema_name, "schema": schema}
+
+    payload = {
+        "suite_path": str(suite_path.relative_to(validation_root)) if suite_path.is_file() else None,
+        "suite_entries": suite_entries,
+        "output_schemas": output_schemas,
+        "validation_classes": class_sources,
+        "missing_validation_classes": sorted(classes.difference(class_sources)),
+    }
+    if not suite_entries and not class_sources and not output_schemas:
+        return None
+    return _item(
+        "upstream_target_contract",
+        "validation_contract",
+        "authoritative",
+        "gapctl://upstream/selected-target",
+        json.dumps(payload, indent=2, sort_keys=True),
+        "exact pinned suite entries, output schemas, and validation implementations for the selected target",
+    )
 
 
 def _sync_source(

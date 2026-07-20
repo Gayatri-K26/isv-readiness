@@ -109,6 +109,34 @@ class GeneratorAdapterTests(unittest.TestCase):
             with self.assertRaisesRegex(FixGuardrailError, "not bound"):
                 run_generator(_context_pack(), command=["fixture"], cwd=Path(tempdir), runner=mismatch_runner)
 
+    def test_accepts_an_evidence_grounded_refusal_without_fabricating_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            seen = {}
+
+            def runner(command, cwd, request, environment, timeout):
+                del cwd, environment, timeout
+                seen.update(json.loads(request))
+                output = {
+                    "schema_version": "0.1.0",
+                    "gap_id": "gap_0123456789ab",
+                    "context_pack_sha256": seen["context_pack_sha256"],
+                    "generator": {"adapter": "fixture", "model": "frontier-test"},
+                    "summary": "The provider exposes only a jump host, but the pinned check requires direct node SSH.",
+                    "changes": [],
+                }
+                return subprocess.CompletedProcess(command, 0, json.dumps(output), "")
+
+            change_set = run_generator(
+                _context_pack(),
+                command=["fixture-generator"],
+                cwd=Path(tempdir),
+                runner=runner,
+            )
+
+            self.assertEqual(change_set.changes, ())
+            self.assertIn("direct node SSH", change_set.summary)
+            self.assertIn("never fabricate", "\n".join(seen["rules"]))
+
 
 def _context_pack() -> dict:
     return {

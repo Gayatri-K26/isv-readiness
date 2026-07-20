@@ -83,8 +83,10 @@ def run_generator(
     request = {
         "schema_version": "0.1.0",
         "task": (
-            "Produce the smallest provider-owned change set that addresses the selected gap and the shared "
-            "adapter contract represented by any related_target_gaps."
+            "Produce the smallest source-grounded provider-owned change set that addresses the selected gap "
+            "and the shared adapter contract represented by any related_target_gaps. If the supplied provider "
+            "interfaces cannot satisfy the pinned validation contract within the allowed edit boundary, return "
+            "an empty changes array and explain the exact blocker in summary."
         ),
         "context_pack_sha256": context_sha256,
         "rules": [
@@ -93,6 +95,10 @@ def run_generator(
             "Do not include credentials, edit validation-suite contracts, or invent scope.",
             "Every content_sha256 must be the SHA-256 of the UTF-8 content field.",
             "Prefer the smallest change and preserve cleanup/error behavior required by the contract.",
+            (
+                "If no source-grounded provider-owned implementation can satisfy the pinned validation contract, "
+                "return an empty changes array with the exact blocker in summary; never fabricate a passing result."
+            ),
             *PROVIDER_IMPLEMENTATION_RULES,
         ],
         "output_schema": load_schema("change-set.schema.json"),

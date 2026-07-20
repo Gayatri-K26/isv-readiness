@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from isv_readiness.subprocesses import run_captured
+from isv_readiness.subprocesses import _TerminationRequested, run_captured
 
 
 class CapturedSubprocessTests(unittest.TestCase):
@@ -50,4 +50,45 @@ class CapturedSubprocessTests(unittest.TestCase):
 
         self.assertTrue(popen.call_args.kwargs["start_new_session"])
         killpg.assert_called_once_with(456, signal.SIGKILL)
+        self.assertEqual(process.communicate.call_count, 2)
+
+    @unittest.skipUnless(os.name == "posix", "process-group cleanup is POSIX-specific")
+    def test_keyboard_interrupt_terminates_and_reaps_the_process_group(self) -> None:
+        process = Mock(pid=789, returncode=-signal.SIGTERM)
+        process.communicate.side_effect = [KeyboardInterrupt(), ("", "")]
+
+        with (
+            patch("isv_readiness.subprocesses.subprocess.Popen", return_value=process),
+            patch("isv_readiness.subprocesses.os.killpg") as killpg,
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            run_captured(
+                ["fixture"],
+                cwd=Path("/tmp"),
+                input_text="request",
+                timeout_seconds=9,
+            )
+
+        killpg.assert_called_once_with(789, signal.SIGTERM)
+        self.assertEqual(process.communicate.call_count, 2)
+        process.communicate.assert_called_with(timeout=5)
+
+    @unittest.skipUnless(os.name == "posix", "process-group cleanup is POSIX-specific")
+    def test_forwarded_sigterm_kills_and_reaps_a_nested_process_group(self) -> None:
+        process = Mock(pid=987, returncode=-signal.SIGKILL)
+        process.communicate.side_effect = [_TerminationRequested(), ("", "")]
+
+        with (
+            patch("isv_readiness.subprocesses.subprocess.Popen", return_value=process),
+            patch("isv_readiness.subprocesses.os.killpg") as killpg,
+            self.assertRaises(_TerminationRequested),
+        ):
+            run_captured(
+                ["fixture"],
+                cwd=Path("/tmp"),
+                input_text="request",
+                timeout_seconds=9,
+            )
+
+        killpg.assert_called_once_with(987, signal.SIGKILL)
         self.assertEqual(process.communicate.call_count, 2)

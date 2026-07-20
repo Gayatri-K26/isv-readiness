@@ -61,6 +61,34 @@ class ContextTests(unittest.TestCase):
                 "steps:\n  - name: launch\n    command: scripts/vm/launch.py\n",
                 encoding="utf-8",
             )
+            suite = workspace / "ai-cloud-validation" / "isvctl" / "configs" / "suites" / "vm.yaml"
+            suite.parent.mkdir(parents=True)
+            suite.write_text(
+                "tests:\n"
+                "  validations:\n"
+                "    launch_contract:\n"
+                "      step: launch\n"
+                "      checks:\n"
+                "        VmLaunchCheck:\n"
+                "          expected_state: running\n",
+                encoding="utf-8",
+            )
+            validations = (
+                workspace
+                / "ai-cloud-validation"
+                / "isvtest"
+                / "src"
+                / "isvtest"
+                / "validations"
+            )
+            validations.mkdir(parents=True)
+            (validations / "vm.py").write_text(
+                "class VmLaunchCheck:\n"
+                "    def run(self):\n"
+                "        state = self.config['step_output'].get('state')\n"
+                "        return state == self.config.get('expected_state', 'running')\n",
+                encoding="utf-8",
+            )
             (workspace / "openapi.yaml").write_text(
                 "paths:\n  /vms:\n    post:\n      operationId: launchVm\n",
                 encoding="utf-8",
@@ -111,6 +139,9 @@ class ContextTests(unittest.TestCase):
             related_item = next(item for item in raw["items"] if item["source_id"] == "related_target_gaps")
             self.assertIn("VmConnectivityCheck", related_item["content"])
             self.assertNotIn("aws_reference", related_item["content"])
+            upstream = next(item for item in raw["items"] if item["source_id"] == "upstream_target_contract")
+            self.assertIn("expected_state", upstream["content"])
+            self.assertIn("step_output", upstream["content"])
             self.assertEqual(raw["budget"]["omitted_items"], 0)
             self.assertTrue(all(not item["truncated"] for item in raw["items"]))
             self.assertTrue(

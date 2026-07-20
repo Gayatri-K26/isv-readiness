@@ -108,6 +108,82 @@ class StaticScanTests(unittest.TestCase):
             self.assertIn("invalid Python syntax", row.evidence.message)
             self.assertTrue(row.remediation.auto_fixable)
 
+    def test_scan_rejects_required_downstream_outputs_left_definitely_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            provider = Path(tempdir) / "provider"
+            script = provider / "scripts" / "vm" / "launch_instance.py"
+            config = provider / "config" / "vm.yaml"
+            script.parent.mkdir(parents=True)
+            config.parent.mkdir()
+            config.write_text(
+                "import:\n"
+                "  - vm.yaml\n"
+                "commands:\n"
+                "  vm:\n"
+                "    steps:\n"
+                "      - name: launch_instance\n"
+                "        command: python ../scripts/vm/launch_instance.py\n"
+                "      - name: list_instances\n"
+                "        command: python ../scripts/vm/list_instances.py\n"
+                "        args:\n"
+                "          - '{{steps.launch_instance.public_ip}}'\n"
+                "          - '{{steps.launch_instance.key_file}}'\n",
+                encoding="utf-8",
+            )
+            (script.parent / "list_instances.py").write_text(
+                "print({'success': True, 'platform': 'fixture', 'instances': []})\n",
+                encoding="utf-8",
+            )
+            script.write_text(
+                "unused = {\n"
+                "    'success': True, 'platform': 'fixture',\n"
+                "    'public_ip': '', 'key_file': '',\n"
+                "}\n"
+                "result = {\n"
+                "    'success': True, 'platform': 'fixture', 'instance_id': 'vm-1',\n"
+                "    'public_ip': '', 'key_file': '',\n"
+                "}\n"
+                "print(result)\n",
+                encoding="utf-8",
+            )
+
+            report = scan_provider(
+                ScanOptions(
+                    provider_repo=provider,
+                    domains=["vm"],
+                    validation_root=FIXTURES / "ai-cloud-validation",
+                )
+            )
+            row = next(item for item in report.rows if item.step_name == "launch_instance")
+            self.assertEqual(row.status, "fail")
+            self.assertIn("definitely empty", row.evidence.message)
+            self.assertIn("public_ip", " ".join(row.evidence.schema_errors))
+            self.assertIn("key_file", " ".join(row.evidence.schema_errors))
+
+            script.write_text(
+                "unused = {\n"
+                "    'success': True, 'platform': 'fixture',\n"
+                "    'public_ip': '', 'key_file': '',\n"
+                "}\n"
+                "result = {\n"
+                "    'success': True, 'platform': 'fixture', 'instance_id': 'vm-1',\n"
+                "    'public_ip': '', 'key_file': '',\n"
+                "}\n"
+                "result['public_ip'] = resolve_host()\n"
+                "result['key_file'] = resolve_key()\n"
+                "print(result)\n",
+                encoding="utf-8",
+            )
+            report = scan_provider(
+                ScanOptions(
+                    provider_repo=provider,
+                    domains=["vm"],
+                    validation_root=FIXTURES / "ai-cloud-validation",
+                )
+            )
+            row = next(item for item in report.rows if item.step_name == "launch_instance")
+            self.assertEqual(row.status, "pass")
+
     def test_k8s_scan_finds_top_level_provider_wrapper(self) -> None:
         provider = FIXTURES / "ai-cloud-validation" / "isvctl" / "configs" / "providers" / "dsx-air"
         report = scan_provider(
