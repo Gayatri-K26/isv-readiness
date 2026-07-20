@@ -29,11 +29,21 @@ class ChangeProposalTests(unittest.TestCase):
             script.parent.mkdir(parents=True)
             config.parent.mkdir()
             script.write_text("raise NotImplementedError()\n", encoding="utf-8")
-            config.write_text("tests:\n  description: old\n", encoding="utf-8")
+            config.write_text(
+                "# keep this provider note\n"
+                "commands:\n"
+                "  vm:\n"
+                "    steps:\n"
+                "      - name: launch\n"
+                "        command: python ../scripts/vm/launch.py\n"
+                "        timeout: 60\n",
+                encoding="utf-8",
+            )
+            updated_config = config.read_text(encoding="utf-8").replace("timeout: 60", "timeout: 1200")
             changes = _change_set(
                 [
                     ("provider", "scripts/vm/launch.py", "replace", "print({'success': True})\n"),
-                    ("provider", "config/vm.yaml", "replace", "tests:\n  description: updated\n"),
+                    ("provider", "config/vm.yaml", "replace", updated_config),
                 ]
             )
 
@@ -45,6 +55,66 @@ class ChangeProposalTests(unittest.TestCase):
             self.assertEqual(script.read_text(encoding="utf-8"), "raise NotImplementedError()\n")
             schema = load_schema("change-proposal.schema.json")
             jsonschema.validate(proposal.to_dict(), schema)
+
+    def test_domain_config_change_may_only_touch_the_selected_step_block(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            provider = Path(tempdir) / "acme"
+            config = provider / "config" / "vm.yaml"
+            config.parent.mkdir(parents=True)
+            original = (
+                "# provider comments and formatting must survive\n"
+                "commands:\n"
+                "  vm:\n"
+                "    steps:\n"
+                "      - name: launch\n"
+                "        command: python ../scripts/vm/launch.py\n"
+                "        args:\n"
+                "          - --region\n"
+                "          - '{{region}}'\n"
+                "        timeout: 60\n"
+                "\n"
+                "      - name: describe\n"
+                "        command: python ../scripts/vm/describe.py\n"
+                "        timeout: 60\n"
+            )
+            config.write_text(original, encoding="utf-8")
+            selected_step = (
+                "      - name: query_health\n"
+                "        command: python ../scripts/vm/query_health.py\n"
+                "        timeout: 60\n"
+                "\n"
+            )
+            candidate = original.replace("      - name: describe\n", selected_step + "      - name: describe\n")
+            report = _report(target="config/vm.yaml", step_name="query_health")
+
+            proposal = build_change_proposal(
+                report,
+                provider_repo=provider,
+                change_set=_change_set([("provider", "config/vm.yaml", "replace", candidate)]),
+            )
+            self.assertEqual(len(proposal.files), 1)
+
+            reformatted = candidate.replace(
+                "        args:\n          - --region\n          - '{{region}}'\n",
+                "        args: [--region, '{{region}}']\n",
+            )
+            with self.assertRaisesRegex(FixGuardrailError, "outside that step block"):
+                build_change_proposal(
+                    report,
+                    provider_repo=provider,
+                    change_set=_change_set([("provider", "config/vm.yaml", "replace", reformatted)]),
+                )
+
+            unrelated = candidate.replace(
+                "      - name: describe\n        command: python ../scripts/vm/describe.py\n        timeout: 60\n",
+                "      - name: describe\n        command: python ../scripts/vm/describe.py\n        timeout: 120\n",
+            )
+            with self.assertRaisesRegex(FixGuardrailError, "outside that step block"):
+                build_change_proposal(
+                    report,
+                    provider_repo=provider,
+                    change_set=_change_set([("provider", "config/vm.yaml", "replace", unrelated)]),
+                )
 
     def test_rejects_unrelated_config_missing_primary_target_and_secrets(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
@@ -268,12 +338,18 @@ def _change_set(values: list[tuple[str, str, str, str]]) -> ChangeSet:
     )
 
 
-def _report(*, domain: str = "vm", target: str = "scripts/vm/launch.py") -> dict:
+def _report(
+    *,
+    domain: str = "vm",
+    target: str = "scripts/vm/launch.py",
+    step_name: str = "launch",
+) -> dict:
     return {
         "rows": [
             {
                 "id": "gap_0123456789ab",
                 "domain": domain,
+                "step_name": step_name,
                 "status": "not_implemented",
                 "detection": "static",
                 "remediation": {"auto_fixable": True, "target": target},

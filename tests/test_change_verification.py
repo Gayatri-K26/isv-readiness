@@ -63,7 +63,10 @@ class ChangeVerificationTests(unittest.TestCase):
 
             self.assertTrue(result.applied)
             self.assertNotEqual(script.read_text(encoding="utf-8"), script_before)
-            self.assertIn("readiness fixture", config.read_text(encoding="utf-8"))
+            self.assertIn(
+                "command: \"python ../scripts/vm/launch_instance.py\"\n        timeout: 61",
+                config.read_text(encoding="utf-8"),
+            )
             self.assertEqual(len(result.files), 2)
             self.assertTrue(all(item.backup_path for item in result.files))
             self.assertEqual(Path(result.files[0].backup_path).read_text(encoding="utf-8"), script_before)
@@ -156,7 +159,7 @@ def _change_set(gap_id: str, config_before: str) -> ChangeSet:
         "import json\n\n"
         'print(json.dumps({"success": True, "platform": "fixture", "instance_id": "vm-change-set"}))\n'
     )
-    config_content = config_before.replace("fixture provider config", "readiness fixture provider config")
+    config_content = config_before.replace("timeout: 60", "timeout: 61", 1)
     changes = tuple(
         Change(
             target_root="provider",
@@ -176,7 +179,7 @@ def _change_set(gap_id: str, config_before: str) -> ChangeSet:
         gap_id=gap_id,
         context_pack_sha256=canonical_sha256({"gap_id": gap_id}),
         generator={"adapter": "fixture", "model": None},
-        summary="Implement VM launch and update provider description",
+        summary="Implement VM launch and update its configured timeout",
         changes=changes,
     )
 

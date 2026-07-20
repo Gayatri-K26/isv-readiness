@@ -17,6 +17,7 @@ from isv_readiness.changes import (
     ChangeSet,
     ProposalFile,
     build_change_proposal,
+    canonical_sha256,
     resolve_change_target,
 )
 from isv_readiness.fixes import FixGuardrailError, select_gap
@@ -195,6 +196,20 @@ def apply_verified_change_set(
 ) -> ChangeApplicationResult:
     if not manifest.success or manifest.regressions:
         raise VerificationError("Change-set verification is not successful or contains regressions.")
+    provider_root = provider_repo.resolve()
+    if (
+        manifest.gap_id == change_set.gap_id
+        and manifest.change_set_sha256 == canonical_sha256(change_set.to_dict())
+    ):
+        manifest_files = {(item.target_root, item.path): item for item in manifest.files}
+        for change in change_set.changes:
+            file = manifest_files.get((change.target_root, change.path))
+            if file is None:
+                continue
+            target = resolve_change_target(provider_root, change, domain=manifest.domain)
+            current = _file_sha256(target) if target.exists() else None
+            if current != file.before_sha256:
+                raise VerificationError(f"Provider target changed after verification: {change.path}")
     proposal = build_change_proposal(
         report,
         provider_repo=provider_repo,
@@ -202,7 +217,6 @@ def apply_verified_change_set(
         allowed_environment=allowed_environment,
     )
     _match_manifest(proposal, manifest)
-    provider_root = provider_repo.resolve()
     file_by_key = {(item.target_root, item.path): item for item in proposal.files}
     targets: list[tuple[Any, Path, ProposalFile]] = []
     for change in change_set.changes:

@@ -154,18 +154,25 @@ the pinned suite, the step-output schemas, and the source of the validation
 classes that consume those outputs. Provider-neutral authoring rules require
 source-grounded interfaces, one canonical resource identifier across configured
 lifecycle steps, verified TLS, bounded timeouts, structured result fields, and
-no raw provider output in evidence. Retry accounting uses the same contract
-unit, so several checks backed by one adapter cannot multiply the model budget
-or consume another step's retries. The per-gap pack has a 180k-character bound
-and fails closed instead of truncating or omitting selected evidence; sibling
-rows are represented by their validation contract fields rather than duplicated
-scanner metadata.
+no raw provider output in evidence. The rules also require the documented
+semantic contract to be honored even when an executable assertion is weaker;
+provider-native concepts may be mapped to contract primitives only when the
+supplied evidence establishes that mapping. Retry accounting uses the same
+contract unit, so several checks backed by one adapter cannot multiply the
+model budget or consume another step's retries. The per-gap pack has a
+180k-character bound and fails closed instead of truncating or omitting
+selected evidence; sibling rows are represented by their validation contract
+fields rather than duplicated scanner metadata.
 
 Deterministic candidate checks enforce what can be established without knowing
 the provider: environment references in each changed candidate must be declared,
 insecure TLS patterns are rejected, raw response/console fields cannot enter
 result JSON, a downstream-consumed output cannot remain provably empty, and an
 explicit internal deadline cannot exceed its configured step timeout.
+For an existing domain YAML configuration, removing the selected step block
+from the original and candidate must leave the same surrounding text. This
+permits a coordinated step wiring or timeout change while rejecting whole-file
+formatting, comment deletion, and changes to unrelated steps.
 Provider-specific semantics that cannot be inferred safely from code, such as
 which documented identifier an endpoint accepts, remain a source-grounded
 generation requirement and an explicit human-review concern. When the supplied

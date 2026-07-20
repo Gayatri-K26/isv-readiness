@@ -1676,3 +1676,44 @@ definitions.
   changes.
 - `uv run python -m unittest discover -s tests`: 140 tests passed.
 - Ruff, Python compilation, lock validation, and diff checks passed.
+
+## Step 35 - Preserve Unrelated Domain Configuration
+
+### Evidence
+
+The next bare-metal rehearsal proposed one missing health step but also removed
+the domain configuration's license text and comments and reformatted every
+unrelated command argument. Static verification accepted the equivalent YAML
+structure because it checked the merged configuration rather than the intended
+edit scope. The health adapter also used a provider-native grouping label even
+though the pinned contract described deployment primitives, showing that a
+weak executable assertion must not replace the documented semantic contract.
+
+### Decisions
+
+1. For a replacement of an existing selected-domain YAML file, locate the
+   scanner-selected step as a block-list item. Removing that step block from
+   the original and candidate must leave the surrounding text unchanged.
+2. Require the candidate to contain exactly one selected step. This permits a
+   missing step to be added and an existing step's command, arguments, or
+   timeout to change, while rejecting whole-file formatting, comment deletion,
+   and edits to other steps.
+3. Tell every provider generator to honor documented semantics as well as
+   executable assertions. A provider-native concept may be relabeled as a
+   contract primitive only when supplied evidence establishes the mapping.
+
+### Simplicity boundary
+
+Do not build a general YAML-preserving editor or provider-specific semantic
+checker into `gapctl`. The deterministic rule compares text outside one step
+block; the source-grounded model and human review handle meanings that cannot
+be proven mechanically.
+
+### Verification
+
+- Focused tests cover a coordinated script/timeout change, insertion of one
+  missing step, rejection of unrelated formatting and timeout changes, and the
+  generic semantic-authoring rules.
+- `uv run python -m unittest discover -s tests`: 141 tests passed.
+- Ruff, Python compilation, lock validation, schema loading, and diff checks
+  passed.

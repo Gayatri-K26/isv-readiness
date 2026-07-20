@@ -146,7 +146,8 @@ For every owned domain, `validate`:
    source;
 4. rejects undeclared runtime inputs, TLS-verification bypasses, raw
    provider output in result JSON, required downstream outputs left provably
-   empty, and internal deadlines that exceed the configured step timeout;
+   empty, internal deadlines that exceed the configured step timeout, and
+   domain-config replacements that alter anything outside the selected step;
 5. verifies the candidate statically in an isolated copy;
 6. writes one combined patch under `.gapctl/work/<domain>/`;
 7. displays the patch hash and asks for human approval;

@@ -84,6 +84,11 @@ PROVIDER_IMPLEMENTATION_RULES = (
     "console output, stdout, stderr, or log excerpts in result JSON.",
     "Treat edit-eligible unresolved checks as one adapter contract only when they share a script target, or when "
     "they share both a configuration target and step name. Preserve the existing cross-step data flow.",
+    "Honor the documented semantic contract as well as the executable assertions. Do not exploit a missing "
+    "validation check or relabel a provider concept as a contract primitive unless supplied evidence establishes "
+    "that mapping.",
+    "When changing a domain configuration, edit only the selected step block. Preserve all comments, formatting, "
+    "and unrelated steps exactly.",
 )
 TEXT_EXTENSIONS = {
     ".json",

@@ -148,6 +148,12 @@ def build_change_proposal(
         if not target.parent.is_dir():
             raise FixGuardrailError(f"Change target parent directory does not exist: {target.parent}")
         original = target.read_text(encoding="utf-8") if exists else ""
+        _validate_domain_config_edit_scope(
+            row,
+            change,
+            original=original,
+            domain=domain,
+        )
         validate_candidate_content(
             relative,
             change.content,
@@ -269,6 +275,83 @@ def _require_primary_target(
             key = ("provider", normalized)
     if key not in changed_keys:
         raise FixGuardrailError(f"Change set does not include the selected gap target: {key[1]}")
+
+
+def _validate_domain_config_edit_scope(
+    row: dict[str, Any],
+    change: Change,
+    *,
+    original: str,
+    domain: str,
+) -> None:
+    """Require an existing domain config edit to stay inside one selected step."""
+
+    config_name = DOMAIN_CONFIG_FILES.get(domain)
+    if (
+        change.target_root != "provider"
+        or change.path != f"config/{config_name}"
+        or change.operation != "replace"
+    ):
+        return
+
+    step_name = row.get("step_name")
+    if not isinstance(step_name, str) or not step_name or step_name.startswith("<"):
+        raise FixGuardrailError("A domain config replacement requires one concrete selected step name.")
+
+    original_without_step, original_count = _without_yaml_step(original, step_name)
+    candidate_without_step, candidate_count = _without_yaml_step(change.content, step_name)
+    if original_count > 1 or candidate_count != 1:
+        raise FixGuardrailError(
+            f"Domain config must contain exactly one selected step named '{step_name}' after the change."
+        )
+    if _without_trailing_newlines(original_without_step) != _without_trailing_newlines(candidate_without_step):
+        raise FixGuardrailError(
+            f"Config change for step '{step_name}' modifies text outside that step block; "
+            "preserve comments, formatting, and unrelated steps exactly."
+        )
+
+
+def _without_yaml_step(source: str, step_name: str) -> tuple[str, int]:
+    """Remove one block-list step while leaving all surrounding text byte-for-byte."""
+
+    lines = source.splitlines(keepends=True)
+    matches: list[tuple[int, int]] = []
+    for index, line in enumerate(lines):
+        marker = _yaml_step_marker(line)
+        if marker is None or marker[1] != step_name:
+            continue
+        indent = marker[0]
+        end = len(lines)
+        for candidate_index in range(index + 1, len(lines)):
+            candidate = lines[candidate_index]
+            if len(candidate) - len(candidate.lstrip(" ")) == indent and candidate.lstrip(" ").startswith("- "):
+                end = candidate_index
+                break
+        matches.append((index, end))
+
+    if len(matches) != 1:
+        return source, len(matches)
+    start, end = matches[0]
+    return "".join((*lines[:start], *lines[end:])), 1
+
+
+def _yaml_step_marker(line: str) -> tuple[int, str] | None:
+    indent = len(line) - len(line.lstrip(" "))
+    stripped = line[indent:]
+    if not stripped.startswith("- "):
+        return None
+    try:
+        value = yaml.safe_load(stripped)
+    except yaml.YAMLError:
+        return None
+    if not isinstance(value, list) or len(value) != 1 or not isinstance(value[0], dict):
+        return None
+    name = value[0].get("name")
+    return (indent, name) if isinstance(name, str) and name else None
+
+
+def _without_trailing_newlines(value: str) -> str:
+    return value.rstrip("\r\n")
 
 
 def _validate_timeout_envelopes(
