@@ -1717,3 +1717,32 @@ be proven mechanically.
 - `uv run python -m unittest discover -s tests`: 141 tests passed.
 - Ruff, Python compilation, lock validation, schema loading, and diff checks
   passed.
+
+## Step 36 - Regenerate After Review Rejection
+
+### Evidence
+
+After the config-preservation fix was installed, rerunning `gapctl validate`
+continued to display the earlier unsafe patch. The pending-review resume path
+was behaving as designed, but declining the prompt left the review markers in
+place, so the operator had no simple way to request a new proposal.
+
+### Decisions
+
+1. A `no` response at the patch review gate removes only
+   `auto-review.json` and `auto-review.patch` for that domain.
+2. Leave the real provider untouched. On the next invocation, the normal auto
+   workflow recreates its scratch provider from the real provider before
+   generation, so no rejected candidate content is reused.
+3. Keep rejection and regeneration as two explicit operator actions. A
+   rejection exits instead of immediately starting another potentially long
+   model run.
+
+### Verification
+
+- The journey test builds a valid pending review, declines it, verifies that
+  only the review markers are removed, and proves the generator is not invoked
+  during rejection.
+- `uv run python -m unittest discover -s tests`: 142 tests passed.
+- Ruff, Python compilation, lock validation, schema loading, and diff checks
+  passed.

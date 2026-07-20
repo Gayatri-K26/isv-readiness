@@ -143,6 +143,9 @@ The generator never writes the provider directly. It returns a schema-valid
 change set bound to the context pack hash. Verification applies the change in a
 scratch copy and rescans it. The operator sees one combined patch per domain.
 Application recomputes the patch and refuses any hash mismatch.
+Declining the patch removes only its generated review markers; the next
+validation run replaces the scratch copy from the unchanged provider and
+generates a new candidate rather than resuming the rejected review.
 
 Each generation pack includes the exact declared runtime environment names and
 the other edit-eligible unresolved validation rows in the selected adapter

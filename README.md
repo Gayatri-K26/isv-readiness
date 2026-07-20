@@ -156,6 +156,10 @@ For every owned domain, `validate`:
 10. asks for explicit authorization before running the real cloud tests;
 11. records JUnit, logs, run metadata, and the full-scope gap scorecard.
 
+Rejecting a candidate discards its generated review markers. The next
+`gapctl validate` regenerates from the unchanged provider instead of repeatedly
+showing the rejected patch.
+
 If review or live execution is deferred, run `gapctl validate` again. It resumes
 an existing statically verified candidate patch instead of regenerating a
 different patch before approval.

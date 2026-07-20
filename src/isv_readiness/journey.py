@@ -201,7 +201,8 @@ def cmd_validate(*, generator: str = "codex", confirm: Confirm | None = None) ->
                 print(f"\nStatically verified {domain} candidate patch: {patch_path}")
                 print(f"Patch hash: {review.patch_sha256}")
                 if not ask(f"Apply this reviewed {domain} patch?"):
-                    print("Patch was not applied. Review it and run `gapctl validate` again.")
+                    _discard_pending_review(work_dir)
+                    print("Patch was rejected and discarded. Run `gapctl validate` again to regenerate it.")
                     return 1
                 try:
                     applied = run_auto(
@@ -294,6 +295,13 @@ def _pending_review(work_dir: Path, domain: str) -> AutoReview | None:
         )
     except (OSError, json.JSONDecodeError, KeyError, TypeError):
         return None
+
+
+def _discard_pending_review(work_dir: Path) -> None:
+    """Remove only generated review markers so the next run regenerates."""
+
+    for name in ("auto-review.json", "auto-review.patch"):
+        (work_dir / name).unlink(missing_ok=True)
 
 
 def _promoted_profile(path: Path) -> dict:

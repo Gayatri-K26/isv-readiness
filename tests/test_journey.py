@@ -145,6 +145,43 @@ class PublicJourneyTests(unittest.TestCase):
         test_domain.assert_called_once()
         status.assert_called_once_with(project_path=manifest)
 
+    def test_validate_discards_a_declined_review_before_returning(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            _, manifest = _project(Path(tempdir), allow_live=False)
+            work = manifest.parent / ".gapctl" / "work" / "vm"
+            (work / "scratch-provider").mkdir(parents=True)
+            patch_text = "--- a/file\n+++ b/file\n"
+            patch_hash = hashlib.sha256(patch_text.encode()).hexdigest()
+            (work / "auto-review.patch").write_text(patch_text, encoding="utf-8")
+            (work / "auto-review.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "0.1.0",
+                        "domain": "vm",
+                        "status": "awaiting_review",
+                        "patch": patch_text,
+                        "patch_sha256": patch_hash,
+                        "reason": "review",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+
+            with (
+                patch("isv_readiness.journey.find_project", return_value=manifest),
+                patch("isv_readiness.journey.run_auto") as auto,
+                redirect_stdout(output),
+            ):
+                exit_code = cmd_validate(confirm=lambda prompt: False)
+
+            self.assertEqual(exit_code, 1)
+            self.assertFalse((work / "auto-review.json").exists())
+            self.assertFalse((work / "auto-review.patch").exists())
+            self.assertTrue((work / "scratch-provider").is_dir())
+            self.assertIn("rejected and discarded", output.getvalue())
+            auto.assert_not_called()
+
     def test_pending_review_rejects_patch_file_drift(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             work = Path(tempdir)
