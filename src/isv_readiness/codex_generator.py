@@ -12,6 +12,8 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from isv_readiness.subprocesses import run_captured
+
 CodexRunner = Callable[[Sequence[str], Path, str, int], subprocess.CompletedProcess[str]]
 
 _UNSUPPORTED_OUTPUT_SCHEMA_KEYWORDS = frozenset(
@@ -269,14 +271,11 @@ def _default_runner(
     prompt: str,
     timeout_seconds: int,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        list(command),
+    return run_captured(
+        command,
         cwd=cwd,
-        input=prompt,
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=timeout_seconds,
+        input_text=prompt,
+        timeout_seconds=timeout_seconds,
     )
 
 

@@ -15,7 +15,7 @@ from typing import Any
 
 from isv_readiness.changes import canonical_sha256
 from isv_readiness.context import QUALIFICATION_MAPPING_RULES
-from isv_readiness.generation import GeneratorRunner, dispatch_generator
+from isv_readiness.generation import DEFAULT_GENERATOR_TIMEOUT_SECONDS, GeneratorRunner, dispatch_generator
 from isv_readiness.runs import latest_run
 from isv_readiness.schema import load_schema
 from isv_readiness.solution_profile import (
@@ -97,7 +97,7 @@ def run_profile_draft(
     command: Sequence[str],
     cwd: Path,
     pass_env: Sequence[str] = (),
-    timeout_seconds: int = 300,
+    timeout_seconds: int = DEFAULT_GENERATOR_TIMEOUT_SECONDS,
     runner: GeneratorRunner | None = None,
     environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:

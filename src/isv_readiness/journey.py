@@ -87,7 +87,6 @@ def cmd_qualify(*, generator: str = "codex", confirm: Confirm | None = None) -> 
                 pack,
                 command=[_resolve_generator(generator)],
                 cwd=project_path.parent,
-                timeout_seconds=600,
             )
             proposal_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
         except (
@@ -312,7 +311,11 @@ def _promoted_profile(path: Path) -> dict:
 
 
 def _resolve_generator(name: str) -> str:
-    return _GENERATOR_ALIASES.get(name, name)
+    executable = _GENERATOR_ALIASES.get(name)
+    if executable is None:
+        return name
+    sibling = Path(sys.executable).parent / executable
+    return str(sibling) if sibling.is_file() else executable
 
 
 def _file_sha256(path: Path) -> str:

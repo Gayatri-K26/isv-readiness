@@ -10,6 +10,9 @@ from typing import Any
 from isv_readiness.changes import ChangeSet, canonical_sha256, change_set_from_dict, validate_change_set
 from isv_readiness.fixes import FixGuardrailError
 from isv_readiness.schema import load_schema
+from isv_readiness.subprocesses import run_captured
+
+DEFAULT_GENERATOR_TIMEOUT_SECONDS = 900
 
 GeneratorRunner = Callable[
     [Sequence[str], Path, str, Mapping[str, str], int],
@@ -23,7 +26,7 @@ def dispatch_generator(
     command: Sequence[str],
     cwd: Path,
     pass_env: Sequence[str] = (),
-    timeout_seconds: int = 300,
+    timeout_seconds: int = DEFAULT_GENERATOR_TIMEOUT_SECONDS,
     runner: GeneratorRunner | None = None,
     environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -67,7 +70,7 @@ def run_generator(
     command: Sequence[str],
     cwd: Path,
     pass_env: Sequence[str] = (),
-    timeout_seconds: int = 300,
+    timeout_seconds: int = DEFAULT_GENERATOR_TIMEOUT_SECONDS,
     runner: GeneratorRunner | None = None,
     environment: Mapping[str, str] | None = None,
 ) -> ChangeSet:
@@ -114,13 +117,10 @@ def _default_runner(
     environment: Mapping[str, str],
     timeout_seconds: int,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        list(command),
+    return run_captured(
+        command,
         cwd=cwd,
-        input=request,
-        env=dict(environment),
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=timeout_seconds,
+        input_text=request,
+        environment=environment,
+        timeout_seconds=timeout_seconds,
     )

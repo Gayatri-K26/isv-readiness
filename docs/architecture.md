@@ -144,6 +144,12 @@ change set bound to the context pack hash. Verification applies the change in a
 scratch copy and rescans it. The operator sees one combined patch per domain.
 Application recomputes the patch and refuses any hash mismatch.
 
+The shared generator boundary allows the built-in model adapter to finish or
+time out first. If the outer boundary times out, it terminates and reaps the
+adapter's complete subprocess group so no detached model process keeps running.
+Built-in adapter names resolve beside the running `gapctl` executable first,
+which prevents mixed tool versions when another installation is also on `PATH`.
+
 `validate` invokes live execution one domain at a time internally, while the ISV
 runs one command for the entire owned scope. The explicit confirmation is the
 public live-run authorization. A transient authorized project is passed to the

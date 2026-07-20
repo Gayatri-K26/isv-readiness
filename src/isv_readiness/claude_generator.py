@@ -12,6 +12,8 @@ from typing import Any
 
 import jsonschema
 
+from isv_readiness.subprocesses import run_captured
+
 ClaudeRunner = Callable[[Sequence[str], Path, str, int], subprocess.CompletedProcess[str]]
 
 # Claude Code has no server-side constrained decoding, so the adapter enforces
@@ -185,14 +187,11 @@ def _default_runner(
     prompt: str,
     timeout_seconds: int,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        list(command),
+    return run_captured(
+        command,
         cwd=cwd,
-        input=prompt,
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=timeout_seconds,
+        input_text=prompt,
+        timeout_seconds=timeout_seconds,
     )
 
 

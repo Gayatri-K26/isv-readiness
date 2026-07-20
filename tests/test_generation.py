@@ -64,6 +64,7 @@ class GeneratorAdapterTests(unittest.TestCase):
 
             self.assertEqual(change_set.gap_id, "gap_0123456789ab")
             self.assertIn("output_schema", seen["request"])
+            self.assertEqual(seen["timeout"], 900)
             self.assertEqual(seen["environment"]["MODEL_API_KEY"], "available")
             self.assertNotIn("ACME_TOKEN", seen["environment"])
 

@@ -13,7 +13,7 @@ import yaml
 
 from isv_readiness.auto import AutoReview, AutoWorkflowError
 from isv_readiness.cli import main
-from isv_readiness.journey import _pending_review, cmd_qualify, cmd_validate
+from isv_readiness.journey import _pending_review, _resolve_generator, cmd_qualify, cmd_validate
 from isv_readiness.solution_profile import load_solution_profile
 from tests.test_live import _project
 
@@ -101,7 +101,22 @@ class PublicJourneyTests(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         self.assertTrue(proposal_exists)
         sync.assert_called_once()
-        self.assertEqual(generate.call_args.kwargs["command"], ["gapctl-claude-generator"])
+        self.assertEqual(Path(generate.call_args.kwargs["command"][0]).name, "gapctl-claude-generator")
+
+    def test_generator_alias_prefers_the_running_gapctl_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            bin_dir = Path(tempdir) / "bin"
+            bin_dir.mkdir()
+            python = bin_dir / "python"
+            generator = bin_dir / "gapctl-codex-generator"
+            python.touch()
+            generator.touch()
+
+            with patch("isv_readiness.journey.sys.executable", str(python)):
+                resolved = _resolve_generator("codex")
+
+        self.assertEqual(resolved, str(generator))
+        self.assertEqual(_resolve_generator("/opt/custom-generator"), "/opt/custom-generator")
 
     def test_validate_keeps_review_and_live_authorization_inside_one_command(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:

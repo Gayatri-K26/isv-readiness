@@ -1498,3 +1498,29 @@ silently treated unmatched hardware-ingestion, governance, network telemetry,
 storage telemetry, and fabric checks as BCM capabilities. Conservative defaults
 make partial ISV scope explicit without creating one profile row per upstream
 check.
+
+## Step 31 - Align Generator Timeouts and Clean Up Process Trees
+
+### Decisions
+
+- Raised the shared generator-adapter timeout from 300 to 900 seconds while
+  retaining the built-in Codex and Claude model timeout at 600 seconds. The
+  adapter must finish or report its own timeout before its caller expires.
+- Centralized captured subprocess execution for the shared boundary and both
+  built-in adapters. On timeout, POSIX runs terminate and reap the complete
+  subprocess group instead of killing only the immediate adapter and leaving a
+  detached model process behind.
+- Resolve built-in generator adapters beside the running `gapctl` executable
+  before falling back to `PATH`, so a development environment cannot silently
+  pair its CLI with an older globally installed adapter.
+- Kept timeout policy internal rather than adding another ISV-facing option.
+  A timeout is an execution failure, not a qualification or gap decision.
+
+### Rationale
+
+The first BCM `validate` rehearsal exposed a contradictory timeout stack: the
+outer generator boundary stopped after 300 seconds while the Codex adapter
+allowed its child 600 seconds. The parent exited during a valid long-running
+generation and left `codex exec` orphaned. A longer outer envelope plus one
+process-tree cleanup helper fixes the boundary without changing the four-command
+journey or weakening review gates.
