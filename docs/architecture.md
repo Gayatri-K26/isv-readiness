@@ -160,12 +160,15 @@ lifecycle steps, verified TLS, bounded timeouts, structured result fields, and
 no raw provider output in evidence. The rules also require the documented
 semantic contract to be honored even when an executable assertion is weaker;
 provider-native concepts may be mapped to contract primitives only when the
-supplied evidence establishes that mapping. Retry accounting uses the same
-contract unit, so several checks backed by one adapter cannot multiply the
-model budget or consume another step's retries. The per-gap pack has a
-180k-character bound and fails closed instead of truncating or omitting
-selected evidence; sibling rows are represented by their validation contract
-fields rather than duplicated scanner metadata.
+supplied evidence establishes that mapping. Provider-derived subprocess
+arguments are treated as untrusted, and absent optional response fields are not
+assigned semantics the contract does not define. Retry accounting uses the
+same contract unit, so several checks backed by one adapter cannot multiply the
+model budget or consume another step's retries. The final parked reason retains
+the last guardrail or static-verification feedback when that budget is
+exhausted. The per-gap pack has a 180k-character bound and fails closed instead
+of truncating or omitting selected evidence; sibling rows are represented by
+their validation contract fields rather than duplicated scanner metadata.
 
 Deterministic candidate checks enforce what can be established without knowing
 the provider: environment references in each changed candidate must be declared,

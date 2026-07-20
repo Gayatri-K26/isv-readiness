@@ -89,6 +89,11 @@ PROVIDER_IMPLEMENTATION_RULES = (
     "that mapping.",
     "When changing a domain configuration, edit only the selected step block. Preserve all comments, formatting, "
     "and unrelated steps exactly.",
+    "Treat environment, API, and configuration strings used as subprocess arguments as untrusted. Validate them "
+    "against a narrow source-backed syntax or use an explicit end-of-options boundary when supported; shell "
+    "quoting alone does not prevent a leading hyphen from becoming a command option.",
+    "Respect optional provider response fields. Do not interpret an absent optional boolean as true or false unless "
+    "the supplied contract defines that default; handle missing values explicitly and conservatively.",
 )
 TEXT_EXTENSIONS = {
     ".json",

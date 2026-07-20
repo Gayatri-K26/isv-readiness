@@ -1746,3 +1746,40 @@ place, so the operator had no simple way to request a new proposal.
 - `uv run python -m unittest discover -s tests`: 142 tests passed.
 - Ruff, Python compilation, lock validation, schema loading, and diff checks
   passed.
+
+## Step 37 - Preserve Input and Retry Semantics
+
+### Evidence
+
+The regenerated bare-metal review preserved unrelated YAML correctly, but its
+host-log adapter passed a provider-derived managed-node string to nested SSH
+without validating option-like values. Its health adapter interpreted absent
+optional failure booleans as failures; the permissive upstream aggregation
+check could still pass while reporting every healthy node as degraded. A
+lifecycle gap also ended with the generic reason "attempts exhausted," hiding
+the last deterministic rejection that would explain what to fix.
+
+### Decisions
+
+1. Require provider-derived subprocess arguments to be treated as untrusted.
+   Validate them against a narrow source-backed syntax or use a supported
+   end-of-options boundary; shell quoting alone is not option-injection safety.
+2. Require optional provider response fields to retain their declared
+   semantics. An absent optional boolean is not assigned a default unless the
+   supplied contract defines one.
+3. Carry the last per-contract-unit guardrail or static-verification feedback
+   into the parked reason when retries remain or are exhausted.
+
+### Simplicity boundary
+
+Do not add provider-specific hostname rules or a general-purpose taint analyzer
+to `gapctl`. These are generic authoring constraints; deterministic retry state
+only preserves the exact failure it already knows.
+
+### Verification
+
+- Focused tests cover the new generator rules and exact exhausted-retry
+  feedback shared across one adapter contract unit.
+- `uv run python -m unittest discover -s tests`: 142 tests passed.
+- Ruff, Python compilation, lock validation, schema loading, and diff checks
+  passed.

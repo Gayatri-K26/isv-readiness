@@ -160,6 +160,11 @@ Rejecting a candidate discards its generated review markers. The next
 `gapctl validate` regenerates from the unchanged provider instead of repeatedly
 showing the rejected patch.
 
+Generator guidance also treats provider-derived subprocess arguments as
+untrusted and preserves the declared meaning of optional response fields.
+When retries are exhausted, the parked gap retains the last deterministic
+guardrail or static-verification failure for review.
+
 If review or live execution is deferred, run `gapctl validate` again. It resumes
 an existing statically verified candidate patch instead of regenerating a
 different patch before approval.

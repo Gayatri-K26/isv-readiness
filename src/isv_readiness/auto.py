@@ -226,6 +226,7 @@ def run_auto(
         attempts_by_unit,
         max_attempts,
         blocked_by_unit=blocked_by_unit,
+        feedback_by_unit=feedback_by_unit,
     )
     changed_files = _changed_files(provider_root, scratch)
     patch = _combined_patch(provider_root, scratch, changed_files)
@@ -343,10 +344,12 @@ def _park(
     max_attempts: int = 0,
     *,
     blocked_by_unit: Mapping[str, str] | None = None,
+    feedback_by_unit: Mapping[str, Sequence[str]] | None = None,
 ) -> list[ParkedGap]:
     staged_ids = {fix.gap_id for fix in staged}
     attempts_by_unit = attempts_by_unit or {}
     blocked_by_unit = blocked_by_unit or {}
+    feedback_by_unit = feedback_by_unit or {}
     parked: list[ParkedGap] = []
     for row in report.get("rows", []):
         decision = decide_gap(row)
@@ -359,6 +362,7 @@ def _park(
             contract_unit = adapter_contract_unit(row)
             attempts = attempts_by_unit.get(contract_unit, 0)
             blocker = blocked_by_unit.get(contract_unit)
+            last_feedback = " ".join(feedback_by_unit.get(contract_unit, ()))
             if blocker:
                 reason = (
                     "Generator reported no source-grounded provider-owned implementation: "
@@ -368,8 +372,12 @@ def _park(
                 reason = "Not attempted within this run's iteration budget; apply the staged patch and re-run auto to continue."
             elif attempts < max_attempts:
                 reason = f"{attempts} failed attempt(s); retry budget remains — re-run auto after applying."
+                if last_feedback:
+                    reason += f" Last failure: {last_feedback}"
             else:
                 reason = "Auto-fix attempts were exhausted without a verified candidate."
+                if last_feedback:
+                    reason += f" Last failure: {last_feedback}"
         elif action == "implement_or_fix_adapter":
             # e.g. an unwired step: the fix is a config/scope decision, and the
             # deterministic scanner refuses to authorize an automatic edit.

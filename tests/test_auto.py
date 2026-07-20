@@ -176,10 +176,16 @@ class AutoResilienceTests(unittest.TestCase):
             [],
             {"scripts/vm/shared.py": 3},
             3,
+            feedback_by_unit={
+                "scripts/vm/shared.py": (
+                    "Previous candidate was rejected by a deterministic guardrail: config scope changed.",
+                )
+            },
         )
 
         self.assertEqual(len(parked), 2)
         self.assertTrue(all("exhausted" in item.reason for item in parked))
+        self.assertTrue(all("config scope changed" in item.reason for item in parked))
 
     def test_config_retry_budget_is_scoped_to_one_step(self) -> None:
         rows = _config_rows()
