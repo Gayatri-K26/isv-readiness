@@ -1524,3 +1524,65 @@ allowed its child 600 seconds. The parent exited during a valid long-running
 generation and left `codex exec` orphaned. A longer outer envelope plus one
 process-tree cleanup helper fixes the boundary without changing the four-command
 journey or weakening review gates.
+
+## Step 32 - Source-Grounded Provider Generation Guardrails
+
+### Evidence
+
+The second synthetic BCM rehearsal reached the review gate after a long
+bare-metal generation pass. Its patch passed schema, syntax, path, and static
+rescan checks but was not safe to apply: scripts introduced undeclared runtime
+inputs, mixed verified and unverified TLS, emitted a raw serial-console excerpt,
+used a UUID in setup while lifecycle paths assumed a hostname, and configured a
+60-second runner around a 900-second internal deadline. The review also called
+the patch "verified," which overstated what an isolated static rescan proves.
+
+### Decisions
+
+1. Add a compact provider-neutral authoring contract to every validate request:
+   use only declared runtime names and source-backed interface behavior;
+   preserve one configured resource identifier across lifecycle steps; keep TLS
+   verification enabled; keep internal deadlines inside the step timeout; emit
+   only required structured result fields; and treat edit-eligible checks
+   sharing one target as one adapter contract.
+2. Put the complete names-only runtime contract and related target gaps in the
+   context pack. Add optional repeatable `gapctl init --input NAME` arguments so
+   non-secret runtime requirements are declared during the existing init
+   command rather than through another workflow. Represent related rows with
+   only their validation contract fields, raise the per-gap bound to 120k
+   characters, and fail closed rather than silently truncating or omitting a
+   selected source.
+3. Reject undeclared environment references in every changed candidate, common TLS
+   verification bypasses, raw output/response fields in result mappings, and
+   explicit Python deadlines longer than the configured provider step. Unchanged
+   files remain outside the selected fix, but a generated replacement cannot
+   activate or preserve unsafe demo-only scaffold behavior.
+4. Return the exact guard or static-verification failure to the next model
+   attempt. Count retries by remediation target, not gap row, so multiple
+   validations backed by one script share one retry budget.
+5. Require declared non-secret runtime inputs as well as credentials before a
+   live run. Continue to pass only declared inputs, injected API endpoints, and
+   the minimal process environment. An explicitly supplied empty environment
+   remains empty instead of falling back to the parent process environment.
+6. Label review output "statically verified candidate". Only a successful live
+   NVIDIA validation run establishes provider behavior.
+
+### Simplicity boundary
+
+Do not add provider-name checks, BCM endpoint rules, or a universal identifier
+heuristic to `gapctl`. A deterministic layer cannot know whether an arbitrary
+provider accepts a hostname, UUID, URI, or numeric ID. The generic rule is to
+preserve the identifier established by the authoritative contract and
+configured step data flow; ambiguity must survive to model feedback and human
+review instead of being guessed. This keeps the guardrails reusable for every
+ISV while enforcing the safety properties code can actually prove.
+
+### Verification
+
+- Focused tests cover declared and undeclared inputs (including environment
+  helper functions), insecure TLS, raw evidence fields, timeout mismatches,
+  complete related-target context, fail-closed context budgets, exact retry
+  feedback, target-shared retry budgets,
+  required non-secret live inputs, and the generator rule set.
+- `uv run python -m unittest discover -s tests`: 131 tests passed.
+- Ruff, Python compilation, lock validation, and diff checks passed.

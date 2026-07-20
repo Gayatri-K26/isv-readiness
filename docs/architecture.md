@@ -144,6 +144,28 @@ change set bound to the context pack hash. Verification applies the change in a
 scratch copy and rescans it. The operator sees one combined patch per domain.
 Application recomputes the patch and refuses any hash mismatch.
 
+Each generation pack includes the exact declared runtime environment names and
+the other edit-eligible unresolved validation rows that share the selected
+remediation target. Provider-neutral authoring rules require source-grounded
+interfaces, one canonical resource identifier across configured lifecycle
+steps, verified TLS, bounded timeouts, structured result fields, and no raw
+provider output in evidence. Retry accounting is per remediation target rather
+than per catalog row, so several checks backed by one script cannot multiply
+the model budget.
+The per-gap pack has a 120k-character bound and fails closed instead of
+truncating or omitting selected evidence; sibling rows are represented by their
+validation contract fields rather than duplicated scanner metadata.
+
+Deterministic candidate checks enforce what can be established without knowing
+the provider: environment references in each changed candidate must be declared,
+insecure TLS patterns are rejected, raw response/console fields cannot enter
+result JSON, and an explicit internal deadline cannot exceed its configured
+step timeout. Provider-specific semantics that cannot be inferred safely from
+code, such as which documented identifier an endpoint accepts, remain a
+source-grounded generation requirement and an explicit human-review concern.
+Static rescan success is therefore labeled as static verification, never as
+runtime proof.
+
 The shared generator boundary allows the built-in model adapter to finish or
 time out first. If the outer boundary times out, it terminates and reaps the
 adapter's complete subprocess group so no detached model process keeps running.
@@ -199,11 +221,13 @@ runtime result.
 
 ## Credential boundary
 
-Durable project data contains environment-variable names only. At runtime,
-`validate` passes only the names declared by the project plus a small process
-allowlist. Publication uses a separate set of Lab Service environment
-variables. Generator requests, proposals, patches, and project files must never
-contain credential values.
+Durable project data contains environment-variable names only. `--auth`
+declares required credential inputs and `--input` declares required non-secret
+runtime inputs. At runtime, `validate` requires those names to be set and passes
+only them, injected API endpoint names, and a small process allowlist.
+Publication uses a separate set of Lab Service environment variables.
+Generator requests, proposals, patches, and project files must never contain
+credential values.
 
 ## Internal module map
 

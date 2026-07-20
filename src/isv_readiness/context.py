@@ -13,7 +13,14 @@ from typing import Any, ClassVar
 
 import jsonschema
 
-from isv_readiness.project import DEFAULT_NSRG_URL, ContextSource, ReadinessProject
+from isv_readiness.decision import decide_gap
+from isv_readiness.project import (
+    DEFAULT_NSRG_URL,
+    MINIMAL_PROCESS_ENV,
+    ContextSource,
+    ReadinessProject,
+    declared_provider_environment,
+)
 from isv_readiness.runs import latest_run
 from isv_readiness.scan.models import Evidence, GapReport, GapRow, Remediation
 from isv_readiness.schema import load_schema
@@ -59,6 +66,21 @@ QUALIFICATION_MAPPING_RULES = (
     "capability gaps.",
     "Do not assign numeric nsrg_layers unless a supplied source explicitly maps the "
     "component to those exact layer numbers.",
+)
+PROVIDER_IMPLEMENTATION_RULES = (
+    "Use only runtime environment names declared by the project; never invent a new input name in provider code.",
+    "Use only interface paths, methods, authentication, response fields, and lifecycle semantics established by "
+    "the supplied authoritative contract. If a required behavior is absent or ambiguous, do not guess.",
+    "Preserve one canonical resource identifier across setup output, configured step arguments, lifecycle API calls, "
+    "and result JSON. Do not silently replace a configured identifier with another environment-derived identifier.",
+    "Keep TLS peer verification enabled. Never add an unverified SSL context, CERT_NONE, verify=False, curl -k, "
+    "or an equivalent bypass.",
+    "Keep internal polling and subprocess deadlines inside the configured step timeout. Do not invent provider "
+    "recovery thresholds when the supplied contract does not establish them.",
+    "Emit only the structured fields required by the validation contract. Never place raw API bodies, headers, "
+    "console output, stdout, stderr, or log excerpts in result JSON.",
+    "Treat every edit-eligible unresolved check sharing the same remediation target as one adapter contract and "
+    "preserve the existing cross-step data flow.",
 )
 TEXT_EXTENSIONS = {
     ".json",
@@ -205,7 +227,7 @@ def build_context_pack(
     gap_id: str,
     cache_dir: Path,
     environment: Mapping[str, str] | None = None,
-    max_chars: int = 48_000,
+    max_chars: int = 120_000,
     feedback: Sequence[str] = (),
 ) -> ContextPack:
     if max_chars < 4_000:
@@ -217,11 +239,56 @@ def build_context_pack(
     if gap.domain not in project.assessment.domains:
         raise ContextError(f"Gap domain '{gap.domain}' is outside the selected project scope.")
 
-    env = environment or os.environ
+    env = environment if environment is not None else os.environ
     required_env = sorted(set(project.execution.credential_env))
     available_env = sorted(name for name in required_env if env.get(name))
     terms = _gap_terms(gap)
     candidates = _local_gap_items(project, manifest_path, gap, terms)
+    runtime_names = declared_provider_environment(project, gap.domain)
+    candidates.append(
+        _item(
+            "provider_runtime_contract",
+            "runtime_contract",
+            "authoritative",
+            "gapctl://project/runtime",
+            json.dumps(
+                {
+                    "credential_env": list(project.execution.credential_env),
+                    "pass_env": list(project.execution.pass_env),
+                    "injected_api_env": [
+                        api.base_url_env
+                        for api in project.apis
+                        if api.base_url and api.base_url_env and gap.domain in api.domains
+                    ],
+                    "minimal_process_env": list(MINIMAL_PROCESS_ENV),
+                    "allowed_provider_env": list(runtime_names),
+                    "available_env_names": [name for name in runtime_names if env.get(name)],
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            "complete runtime input contract; names only, never values",
+        )
+    )
+    related = [
+        _related_gap_contract(row)
+        for row in rows
+        if row.id != gap.id
+        and row.domain == gap.domain
+        and row.remediation.target == gap.remediation.target
+        and decide_gap(row.to_dict()).edit_eligible
+    ]
+    if related:
+        candidates.append(
+            _item(
+                "related_target_gaps",
+                "validation_contract",
+                "authoritative",
+                "gapctl://selected-target/related-gaps",
+                json.dumps(related, indent=2, sort_keys=True),
+                "other edit-eligible unresolved validation rows sharing the selected remediation target",
+            )
+        )
     if feedback:
         candidates.append(
             _item(
@@ -235,7 +302,7 @@ def build_context_pack(
         )
     candidates.extend(_run_items(cache_dir, gap.domain, terms))
     candidates.extend(_cached_items(_project_records(project, cache_dir), gap.domain, terms))
-    items, used, omitted = _fit_budget(candidates, max_chars)
+    items, used, omitted = _fit_budget(candidates, max_chars, allow_truncation=False)
 
     pack = ContextPack(
         schema_version=CONTEXT_PACK_SCHEMA_VERSION,
@@ -265,6 +332,7 @@ def build_context_pack(
             "Never place credential values in source, patches, prompts, reports, or logs.",
             "Prior-run artifacts are empirical evidence of runtime behavior; when they conflict with declared sources or profile claims, trust the run results.",
             "Results attest only to the ISV-owned scope; do not claim coverage of domains or layers the ISV does not own.",
+            *PROVIDER_IMPLEMENTATION_RULES,
         ),
         items=tuple(items),
         budget={"max_chars": max_chars, "used_chars": used, "omitted_items": omitted},
@@ -381,7 +449,7 @@ def _fit_budget(
         if remaining <= 0:
             if not allow_truncation:
                 raise ContextError(
-                    f"Qualification context exceeds {max_chars} characters before source '{item.source_id}'; "
+                    f"Context exceeds {max_chars} characters before source '{item.source_id}'; "
                     "refusing to omit evidence."
                 )
             omitted += 1
@@ -391,7 +459,7 @@ def _fit_budget(
         if len(content) > remaining:
             if not allow_truncation:
                 raise ContextError(
-                    f"Qualification context exceeds {max_chars} characters at source '{item.source_id}'; "
+                    f"Context exceeds {max_chars} characters at source '{item.source_id}'; "
                     "refusing to truncate evidence."
                 )
             if remaining < 256:
@@ -413,6 +481,25 @@ def _fit_budget(
         )
         used += len(content)
     return items, used, omitted
+
+
+def _related_gap_contract(row: GapRow) -> dict[str, Any]:
+    """Keep sibling requirements useful without repeating the full scan record."""
+    return {
+        "id": row.id,
+        "step_name": row.step_name,
+        "validation_class": row.validation_class,
+        "requirement_id": row.requirement_id,
+        "status": row.status,
+        "detection": row.detection,
+        "evidence": {
+            "message": row.evidence.message,
+            "validation_message": row.evidence.validation_message,
+            "schema_errors": list(row.evidence.schema_errors),
+            "missing_json_fields": list(row.evidence.missing_json_fields),
+        },
+        "labels": list(row.labels),
+    }
 
 
 def _sync_source(

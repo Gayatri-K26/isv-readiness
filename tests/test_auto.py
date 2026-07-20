@@ -10,7 +10,7 @@ from pathlib import Path
 
 import yaml
 
-from isv_readiness.auto import AutoWorkflowError, run_auto
+from isv_readiness.auto import AutoWorkflowError, _park, run_auto
 from isv_readiness.project import build_bootstrap_plan, execute_bootstrap
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -100,9 +100,11 @@ class AutoWorkflowTests(unittest.TestCase):
 class AutoResilienceTests(unittest.TestCase):
     def test_malformed_generation_counts_as_attempt_and_run_continues(self) -> None:
         calls = {"n": 0}
+        requests = []
 
         def flaky_runner(command, cwd, request, environment, timeout):
             calls["n"] += 1
+            requests.append(json.loads(request))
             if calls["n"] == 1:
                 return subprocess.CompletedProcess(command, 0, "prose, not json", "")
             return _generator_runner(command, cwd, request, environment, timeout)
@@ -121,6 +123,44 @@ class AutoResilienceTests(unittest.TestCase):
         self.assertEqual(review.status, "awaiting_review")
         self.assertTrue(review.staged)
         self.assertGreaterEqual(calls["n"], 2)
+        retry_items = requests[1]["context_pack"]["items"]
+        feedback = next(item for item in retry_items if item["source_id"] == "previous_attempt_feedback")
+        self.assertIn("deterministic guardrail", feedback["content"])
+        self.assertIn("one JSON object", feedback["content"])
+
+    def test_retry_budget_is_shared_by_rows_with_the_same_target(self) -> None:
+        rows = []
+        for index in range(2):
+            rows.append(
+                {
+                    "id": f"gap_shared{index:06d}",
+                    "domain": "vm",
+                    "status": "not_implemented",
+                    "remediation": {
+                        "auto_fixable": True,
+                        "target": "scripts/vm/shared.py",
+                    },
+                    "enrichment": {
+                        "solution_profile": {
+                            "action": "implement_or_fix_adapter",
+                            "owned": True,
+                            "profile_status": "reviewed",
+                            "journey_stage": "validate",
+                        }
+                    },
+                }
+            )
+
+        parked = _park(
+            {"rows": rows},
+            "vm",
+            [],
+            {"scripts/vm/shared.py": 3},
+            3,
+        )
+
+        self.assertEqual(len(parked), 2)
+        self.assertTrue(all("exhausted" in item.reason for item in parked))
 
 
 def _project(root: Path) -> tuple[Path, Path]:

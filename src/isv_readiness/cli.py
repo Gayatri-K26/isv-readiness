@@ -57,6 +57,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Credential environment-variable name; repeat when needed",
     )
     init_parser.add_argument(
+        "--input",
+        dest="input_envs",
+        action="append",
+        default=[],
+        help="Required non-secret runtime environment-variable name; repeat when needed",
+    )
+    init_parser.add_argument(
         "--validation-ref",
         default="main",
         help="ai-cloud-validation branch or tag to pin (default: main)",
@@ -106,6 +113,7 @@ def _init(args: argparse.Namespace) -> int:
         domains=domains,
         api_url=args.api_url,
         auth_envs=args.auth_envs,
+        input_envs=args.input_envs,
         api_spec=args.api_spec,
         validation_ref=args.validation_ref,
     )

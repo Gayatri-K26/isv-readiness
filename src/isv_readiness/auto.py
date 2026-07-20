@@ -14,7 +14,7 @@ from isv_readiness.context import build_context_pack
 from isv_readiness.decision import decide_gap, validation_profile_issues
 from isv_readiness.fixes import FixGuardrailError
 from isv_readiness.generation import GeneratorRunner, run_generator
-from isv_readiness.project import ReadinessProject, load_project
+from isv_readiness.project import ReadinessProject, declared_provider_environment, load_project
 from isv_readiness.scan.profile import enrich_report_with_profile
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
 from isv_readiness.solution_profile import canonicalize_domain, load_solution_profile
@@ -132,25 +132,26 @@ def run_auto(
     shutil.copytree(provider_root, scratch)
 
     staged: list[StagedFix] = []
-    attempts_by_gap: dict[str, int] = {}
+    attempts_by_target: dict[str, int] = {}
+    feedback_by_target: dict[str, tuple[str, ...]] = {}
     max_attempts = project.execution.max_attempts
+    allowed_environment = declared_provider_environment(project, canonical_domain)
 
     for _ in range(max_iterations):
         report = _scan(scratch, project.validation_root(project_path), canonical_domain, profile)
         fixable = _select_fixable(report, canonical_domain)
         # Drop gaps already staged (a re-scan should show them resolved; if it
         # does not, the retry budget below stops an infinite loop).
-        staged_ids = {fix.gap_id for fix in staged}
         pending = [
             row
             for row in fixable
-            if row["id"] not in staged_ids
-            and attempts_by_gap.get(row["id"], 0) < max_attempts
+            if attempts_by_target.get(_remediation_unit(row), 0) < max_attempts
         ]
         if not pending:
             break
         row = pending[0]
         gap_id = row["id"]
+        remediation_unit = _remediation_unit(row)
 
         try:
             change_set = _generate(
@@ -164,23 +165,35 @@ def run_auto(
                 generator_pass_env=generator_pass_env,
                 environment=environment,
                 generator_runner=generator_runner,
-                feedback=_feedback_for(attempts_by_gap.get(gap_id, 0)),
+                feedback=feedback_by_target.get(
+                    remediation_unit,
+                    _feedback_for(attempts_by_target.get(remediation_unit, 0)),
+                ),
             )
             manifest = verify_change_set(
                 report,
                 provider_repo=scratch,
                 change_set=change_set,
                 validation_root=project.validation_root(project_path),
+                allowed_environment=allowed_environment,
             )
-        except FixGuardrailError:
+        except FixGuardrailError as exc:
             # A malformed generation or guard violation is a failed attempt for
             # this gap, not a reason to abort every other gap in the run.
-            attempts_by_gap[gap_id] = attempts_by_gap.get(gap_id, 0) + 1
+            attempts_by_target[remediation_unit] = attempts_by_target.get(remediation_unit, 0) + 1
+            feedback_by_target[remediation_unit] = (
+                f"Previous candidate was rejected by a deterministic guardrail: {exc}",
+            )
             continue
-        attempts_by_gap[gap_id] = attempts_by_gap.get(gap_id, 0) + 1
+        attempts_by_target[remediation_unit] = attempts_by_target.get(remediation_unit, 0) + 1
         if not manifest.success:
             # Leave the gap for the next iteration's retry budget; a fresh scan
             # keeps selecting it until the budget is exhausted, then it parks.
+            feedback_by_target[remediation_unit] = (
+                "Previous candidate failed isolated static verification: "
+                f"selected status became {manifest.selected_status_after or 'missing'}.",
+                *(f"Regression: {item}" for item in manifest.regressions),
+            )
             continue
         apply_verified_change_set(
             report,
@@ -188,6 +201,7 @@ def run_auto(
             change_set=change_set,
             manifest=manifest,
             backup_dir=scratch_backups,
+            allowed_environment=allowed_environment,
         )
         staged.append(
             StagedFix(
@@ -195,12 +209,12 @@ def run_auto(
                 target=str(row.get("remediation", {}).get("target") or ""),
                 validation_class=row.get("validation_class"),
                 summary=change_set.summary,
-                attempts=attempts_by_gap[gap_id],
+                attempts=attempts_by_target[remediation_unit],
             )
         )
 
     final_report = _scan(scratch, project.validation_root(project_path), canonical_domain, profile)
-    parked = _park(final_report, canonical_domain, staged, attempts_by_gap, max_attempts)
+    parked = _park(final_report, canonical_domain, staged, attempts_by_target, max_attempts)
     changed_files = _changed_files(provider_root, scratch)
     patch = _combined_patch(provider_root, scratch, changed_files)
     patch_sha256 = hashlib.sha256(patch.encode("utf-8")).hexdigest()
@@ -230,7 +244,8 @@ def run_auto(
         parked=tuple(parked),
         changed_files=tuple(changed_files),
         reason=(
-            f"{len(staged)} verified fix(es) staged for one review; {len(parked)} gap(s) parked. "
+            f"{len(staged)} statically verified candidate(s) staged for one review; "
+            f"{len(parked)} gap(s) parked. "
             "Review the combined patch and re-run with --apply <patch-sha256>."
         ),
     )
@@ -308,15 +323,25 @@ def _select_fixable(report: dict[str, Any], domain: str) -> list[dict[str, Any]]
     return rows
 
 
+def _remediation_unit(row: Mapping[str, Any]) -> str:
+    """Group retry accounting by the provider target that must be corrected."""
+
+    remediation = row.get("remediation")
+    target = remediation.get("target") if isinstance(remediation, Mapping) else None
+    if isinstance(target, str) and target:
+        return target
+    return str(row.get("id") or "<unknown-gap>")
+
+
 def _park(
     report: dict[str, Any],
     domain: str,
     staged: Sequence[StagedFix],
-    attempts_by_gap: Mapping[str, int] | None = None,
+    attempts_by_target: Mapping[str, int] | None = None,
     max_attempts: int = 0,
 ) -> list[ParkedGap]:
     staged_ids = {fix.gap_id for fix in staged}
-    attempts_by_gap = attempts_by_gap or {}
+    attempts_by_target = attempts_by_target or {}
     parked: list[ParkedGap] = []
     for row in report.get("rows", []):
         decision = decide_gap(row)
@@ -326,7 +351,7 @@ def _park(
             continue
         action = decision.action
         if decision.edit_eligible:
-            attempts = attempts_by_gap.get(str(row.get("id")), 0)
+            attempts = attempts_by_target.get(_remediation_unit(row), 0)
             if attempts == 0:
                 reason = "Not attempted within this run's iteration budget; apply the staged patch and re-run auto to continue."
             elif attempts < max_attempts:

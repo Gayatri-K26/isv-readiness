@@ -152,6 +152,17 @@ class LiveRunTests(unittest.TestCase):
                     environment={"PATH": "/bin"},
                 )
 
+            with self.assertRaisesRegex(LiveRunError, "ACME_REGION"):
+                run_live_domain(
+                    project,
+                    manifest,
+                    domain="vm",
+                    artifacts_dir=Path(tempdir) / "artifacts",
+                    explicit_authorization=True,
+                    commit_resolver=lambda root: COMMIT,
+                    environment={"PATH": "/bin", "ACME_TOKEN": "set"},
+                )
+
 
 def _project(root: Path, *, allow_live: bool):
     workspace = root / "workspace"

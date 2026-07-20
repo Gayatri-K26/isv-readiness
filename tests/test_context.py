@@ -74,7 +74,18 @@ class ContextTests(unittest.TestCase):
                 return b"Infrastructure as a Service includes VM lifecycle operations."
 
             sync_context_sources(project, manifest, cache, fetcher=fetcher)
-            report = _gap_report(provider)
+            report = _gap_report(provider).to_dict()
+            profile_route = {
+                "action": "implement_or_fix_adapter",
+                "owned": True,
+                "profile_status": "reviewed",
+                "journey_stage": "validate",
+            }
+            report["rows"][0]["enrichment"]["solution_profile"] = profile_route
+            related = json.loads(json.dumps(report["rows"][0]))
+            related["id"] = "gap_abcdef012345"
+            related["validation_class"] = "VmConnectivityCheck"
+            report["rows"].append(related)
 
             pack = build_context_pack(
                 project,
@@ -94,6 +105,32 @@ class ContextTests(unittest.TestCase):
             self.assertNotIn("available-but-never-serialized", serialized)
             self.assertEqual(raw["credentials"]["available_env"], ["ACME_TOKEN"])
             self.assertEqual(raw["items"][0]["trust"], "authoritative")
+            runtime = next(item for item in raw["items"] if item["source_id"] == "provider_runtime_contract")
+            self.assertIn("ACME_API_BASE", runtime["content"])
+            self.assertIn("ACME_REGION", runtime["content"])
+            related_item = next(item for item in raw["items"] if item["source_id"] == "related_target_gaps")
+            self.assertIn("VmConnectivityCheck", related_item["content"])
+            self.assertNotIn("aws_reference", related_item["content"])
+            self.assertEqual(raw["budget"]["omitted_items"], 0)
+            self.assertTrue(all(not item["truncated"] for item in raw["items"]))
+            self.assertTrue(
+                any(
+                    "Use only runtime environment names declared by the project" in rule
+                    for rule in raw["constraints"]
+                )
+            )
+
+            with self.assertRaisesRegex(ValueError, "refusing to (?:omit|truncate) evidence"):
+                build_context_pack(
+                    project,
+                    manifest,
+                    report,
+                    gap_id="gap_0123456789ab",
+                    cache_dir=cache,
+                    environment={},
+                    max_chars=4_000,
+                    feedback=("x" * 5_000,),
+                )
 
     def test_latest_run_artifacts_enter_pack_as_top_ranked_empirical_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
@@ -137,6 +174,8 @@ class ContextTests(unittest.TestCase):
             jsonschema.validate(raw, schema)
             self.assertEqual(raw["items"][0]["trust"], "empirical")
             self.assertEqual(raw["items"][0]["source_id"], "latest_run_vm_junit")
+            runtime = next(item for item in raw["items"] if item["source_id"] == "provider_runtime_contract")
+            self.assertEqual(json.loads(runtime["content"])["available_env_names"], [])
             serialized = json.dumps(raw)
             self.assertIn("fresh VmLaunchCheck", serialized)
             self.assertNotIn("stale VmLaunchCheck", serialized)
@@ -217,8 +256,10 @@ def _project(root: Path, *, existing_provider: bool = False):
         domains=["vm"],
         validation_root=checkout,
         api_base_url="https://api.acme.invalid/v1",
+        api_base_url_env="ACME_API_BASE",
         api_spec="openapi.yaml",
         auth_env=["ACME_TOKEN"],
+        pass_env=["ACME_REGION"],
     )
     project = execute_bootstrap(plan, runner=_git_runner)
     return workspace, project, plan.manifest_path

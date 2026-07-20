@@ -64,6 +64,12 @@ class GeneratorAdapterTests(unittest.TestCase):
 
             self.assertEqual(change_set.gap_id, "gap_0123456789ab")
             self.assertIn("output_schema", seen["request"])
+            rules = "\n".join(seen["request"]["rules"])
+            self.assertIn("runtime environment names declared by the project", rules)
+            self.assertIn("canonical resource identifier", rules)
+            self.assertIn("TLS peer verification", rules)
+            self.assertIn("configured step timeout", rules)
+            self.assertIn("raw API bodies", rules)
             self.assertEqual(seen["timeout"], 900)
             self.assertEqual(seen["environment"]["MODEL_API_KEY"], "available")
             self.assertNotIn("ACME_TOKEN", seen["environment"])

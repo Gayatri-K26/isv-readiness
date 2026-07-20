@@ -5,6 +5,7 @@ import os
 import shutil
 import stat
 import tempfile
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -101,12 +102,18 @@ def verify_change_set(
     provider_repo: Path,
     change_set: ChangeSet,
     validation_root: Path | None,
+    allowed_environment: Sequence[str] | None = None,
 ) -> ChangeVerificationManifest:
     selected = select_gap(report, change_set.gap_id)
     detection = selected.get("detection")
     if detection not in {"static", "dynamic"}:
         raise VerificationError(f"Gap {change_set.gap_id} has no supported detection mode.")
-    proposal = build_change_proposal(report, provider_repo=provider_repo, change_set=change_set)
+    proposal = build_change_proposal(
+        report,
+        provider_repo=provider_repo,
+        change_set=change_set,
+        allowed_environment=allowed_environment,
+    )
     provider_root = provider_repo.resolve()
     with tempfile.TemporaryDirectory(prefix="gapctl-change-verify-") as tempdir:
         workspace = Path(tempdir) / "workspace"
@@ -184,10 +191,16 @@ def apply_verified_change_set(
     change_set: ChangeSet,
     manifest: ChangeVerificationManifest,
     backup_dir: Path,
+    allowed_environment: Sequence[str] | None = None,
 ) -> ChangeApplicationResult:
     if not manifest.success or manifest.regressions:
         raise VerificationError("Change-set verification is not successful or contains regressions.")
-    proposal = build_change_proposal(report, provider_repo=provider_repo, change_set=change_set)
+    proposal = build_change_proposal(
+        report,
+        provider_repo=provider_repo,
+        change_set=change_set,
+        allowed_environment=allowed_environment,
+    )
     _match_manifest(proposal, manifest)
     provider_root = provider_repo.resolve()
     file_by_key = {(item.target_root, item.path): item for item in proposal.files}

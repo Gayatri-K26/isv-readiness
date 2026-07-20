@@ -42,14 +42,15 @@ gapctl init acme-cloud \
   --api https://api.acme.example/v1 \
   --api-spec /absolute/path/to/openapi.yaml \
   --auth ACME_CLIENT_ID \
-  --auth ACME_CLIENT_SECRET
+  --auth ACME_CLIENT_SECRET \
+  --input ACME_REGION
 
 cd acme-readiness
 ```
 
 `init`:
 
-- validates the provider name, owned domains, and credential variable names;
+- validates the provider name, owned domains, and runtime environment-variable names;
 - clones the selected `ai-cloud-validation` branch or tag when absent;
 - records the exact validation commit in `isv-project.yaml`;
 - builds the NVIDIA check catalog for the declared domains;
@@ -71,6 +72,9 @@ Later commands never pull the checkout forward silently.
 
 Credential values are never command arguments or project data. `--auth`
 accepts names such as `ACME_CLIENT_SECRET`, not secret values.
+`--input` declares a required non-secret runtime environment-variable name.
+Repeat either option when the provider needs more than one input. Both are
+recorded as names only and must be set before live validation.
 
 ### 2. Qualify
 
@@ -117,12 +121,13 @@ gapctl qualify --generator claude
 
 ### 3. Validate
 
-Set the provider credential values in the current environment before live
-validation:
+Set the declared provider runtime values in the current environment before
+live validation:
 
 ```bash
 export ACME_CLIENT_ID="..."
 export ACME_CLIENT_SECRET="..."
+export ACME_REGION="us-west"
 
 gapctl validate
 ```
@@ -132,18 +137,24 @@ For every owned domain, `validate`:
 1. scans provider-owned files against the pinned NVIDIA contracts;
 2. selects only gaps that are both profile-approved and deterministically safe
    to edit;
-3. asks the selected generator for bounded provider changes;
-4. runs guardrails and verifies the candidate in an isolated copy;
-5. writes one combined patch under `.gapctl/work/<domain>/`;
-6. displays the patch hash and asks for human approval;
-7. applies only the exact reviewed patch;
-8. refuses to start live infrastructure while a known static blocker remains;
-9. asks for explicit authorization before running the real cloud tests;
-10. records JUnit, logs, run metadata, and the full-scope gap scorecard.
+3. gives the selected generator the complete declared runtime-input contract,
+   every edit-eligible unresolved check sharing the same provider target, and
+   a compact provider-adapter checklist; the bounded per-gap pack fails rather
+   than silently truncating or omitting a selected source;
+4. rejects undeclared runtime inputs, TLS-verification bypasses, raw
+   provider output in result JSON, and internal deadlines that exceed the
+   configured step timeout;
+5. verifies the candidate statically in an isolated copy;
+6. writes one combined patch under `.gapctl/work/<domain>/`;
+7. displays the patch hash and asks for human approval;
+8. applies only the exact reviewed patch;
+9. refuses to start live infrastructure while a known static blocker remains;
+10. asks for explicit authorization before running the real cloud tests;
+11. records JUnit, logs, run metadata, and the full-scope gap scorecard.
 
 If review or live execution is deferred, run `gapctl validate` again. It resumes
-an existing verified patch instead of regenerating a different patch before
-approval.
+an existing statically verified candidate patch instead of regenerating a
+different patch before approval.
 
 Claude can be selected with:
 
@@ -195,8 +206,10 @@ There is no bundle step.
 - The ISV declares ownership; the model cannot infer it from lab access.
 - A draft profile cannot authorize generation, application, live tests, or
   publication.
-- Every generated patch is schema-constrained, verified in isolation, and
-  bound to the bytes the human reviews.
+- Every generated patch is schema-constrained, statically verified in
+  isolation, and bound to the bytes the human reviews. Static verification is
+  not evidence that a provider API behaves correctly; only the live run proves
+  that.
 - Live cloud execution requires an explicit confirmation inside `validate`.
 - Credentials are represented in durable files only by environment-variable
   name.

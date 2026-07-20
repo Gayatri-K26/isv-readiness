@@ -78,6 +78,7 @@ class SimpleCommandTests(unittest.TestCase):
             def stop_before_clone(plan, *, overwrite):
                 self.assertEqual(plan.validation_ref, "release-1.2")
                 self.assertEqual(plan.api_base_url_env, "ISV_API_BASE_URL")
+                self.assertEqual(plan.pass_env, ("ACME_REGION",))
                 self.assertFalse(overwrite)
                 raise ProjectError("stop before clone")
 
@@ -93,6 +94,7 @@ class SimpleCommandTests(unittest.TestCase):
                         domains=["vm"],
                         api_url="https://api.acme.invalid/v1",
                         auth_envs=[],
+                        input_envs=["ACME_REGION"],
                         api_spec=None,
                         validation_ref="release-1.2",
                     ),

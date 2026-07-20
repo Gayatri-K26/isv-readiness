@@ -134,6 +134,101 @@ class ChangeProposalTests(unittest.TestCase):
                     ),
                 )
 
+    def test_provider_neutral_runtime_and_evidence_guardrails(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            provider = Path(tempdir) / "acme"
+            script = provider / "scripts" / "vm" / "launch.py"
+            script.parent.mkdir(parents=True)
+            script.write_text("import os\nraise NotImplementedError()\n", encoding="utf-8")
+
+            undeclared = (
+                "import os\n\n"
+                "def required_env(name):\n"
+                "    return os.environ.get(name)\n\n"
+                "print(required_env('NEW_PROVIDER_INPUT'))\n"
+            )
+            with self.assertRaisesRegex(FixGuardrailError, "NEW_PROVIDER_INPUT"):
+                build_change_proposal(
+                    _report(),
+                    provider_repo=provider,
+                    change_set=_change_set(
+                        [("provider", "scripts/vm/launch.py", "replace", undeclared)]
+                    ),
+                    allowed_environment=["ACME_TOKEN"],
+                )
+
+            declared = undeclared.replace("NEW_PROVIDER_INPUT", "ACME_TOKEN")
+            proposal = build_change_proposal(
+                _report(),
+                provider_repo=provider,
+                change_set=_change_set(
+                    [("provider", "scripts/vm/launch.py", "replace", declared)]
+                ),
+                allowed_environment=["ACME_TOKEN"],
+            )
+            self.assertEqual(len(proposal.files), 1)
+
+            response_reader = "payload = get_response()\nprint({'success': bool(payload['stdout'])})\n"
+            proposal = build_change_proposal(
+                _report(),
+                provider_repo=provider,
+                change_set=_change_set(
+                    [("provider", "scripts/vm/launch.py", "replace", response_reader)]
+                ),
+            )
+            self.assertEqual(len(proposal.files), 1)
+
+            insecure = "import ssl\ncontext = ssl._create_unverified_context()\n"
+            with self.assertRaisesRegex(FixGuardrailError, "insecure TLS"):
+                build_change_proposal(
+                    _report(),
+                    provider_repo=provider,
+                    change_set=_change_set(
+                        [("provider", "scripts/vm/launch.py", "replace", insecure)]
+                    ),
+                )
+
+            raw_output = "result = {'success': True}\nresult['output_snippet'] = 'raw console'\n"
+            with self.assertRaisesRegex(FixGuardrailError, "raw provider output"):
+                build_change_proposal(
+                    _report(),
+                    provider_repo=provider,
+                    change_set=_change_set(
+                        [("provider", "scripts/vm/launch.py", "replace", raw_output)]
+                    ),
+                )
+
+    def test_rejects_internal_deadline_beyond_configured_step_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            provider = Path(tempdir) / "acme"
+            script = provider / "scripts" / "vm" / "launch.py"
+            config = provider / "config" / "vm.yaml"
+            script.parent.mkdir(parents=True)
+            config.parent.mkdir()
+            script.write_text("raise NotImplementedError()\n", encoding="utf-8")
+            config.write_text(
+                "commands:\n"
+                "  vm:\n"
+                "    steps:\n"
+                "      - name: launch\n"
+                "        command: python ../scripts/vm/launch.py\n"
+                "        timeout: 60\n",
+                encoding="utf-8",
+            )
+            candidate = (
+                "import time\n"
+                "deadline = time.monotonic() + 900\n"
+                "print({'success': True, 'deadline': deadline})\n"
+            )
+            with self.assertRaisesRegex(FixGuardrailError, "900s exceeds configured timeout 60s"):
+                build_change_proposal(
+                    _report(),
+                    provider_repo=provider,
+                    change_set=_change_set(
+                        [("provider", "scripts/vm/launch.py", "replace", candidate)]
+                    ),
+                )
+
 
 def _change_set(values: list[tuple[str, str, str, str]]) -> ChangeSet:
     changes = tuple(

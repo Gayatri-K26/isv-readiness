@@ -24,7 +24,7 @@ from isv_readiness.generation import GeneratorRunner, run_generator
 from isv_readiness.live import CommitResolver, LiveRunner, run_live_domain
 from isv_readiness.loop import advance_loop
 from isv_readiness.onboarding import build_provider_onboarding_plan, execute_provider_onboarding
-from isv_readiness.project import ReadinessProject, load_project
+from isv_readiness.project import ReadinessProject, declared_provider_environment, load_project
 from isv_readiness.scan.models import GapReport
 from isv_readiness.scan.profile import enrich_report_with_profile
 from isv_readiness.scan.report import load_report
@@ -271,10 +271,12 @@ def _prepare_next_change(
     )
     changes_path = work_dir / f"changes-{state.iteration:03d}-{gap_id}.json"
     _write_json(changes_path, change_set.to_dict())
+    allowed_environment = declared_provider_environment(project, state.domain)
     proposal = build_change_proposal(
         report,
         provider_repo=project.provider_root(project_path),
         change_set=change_set,
+        allowed_environment=allowed_environment,
     )
     proposal_path = work_dir / f"proposal-{state.iteration:03d}-{gap_id}.json"
     patch_path = work_dir / f"proposal-{state.iteration:03d}-{gap_id}.patch"
@@ -285,6 +287,7 @@ def _prepare_next_change(
         provider_repo=project.provider_root(project_path),
         change_set=change_set,
         validation_root=project.validation_root(project_path),
+        allowed_environment=allowed_environment,
     )
     verification_path = work_dir / f"verification-{state.iteration:03d}-{gap_id}.json"
     _write_json(verification_path, verification.to_dict())
@@ -351,6 +354,7 @@ def _apply_reviewed_change(
         change_set=change_set,
         manifest=manifest,
         backup_dir=work_dir / "backups",
+        allowed_environment=declared_provider_environment(project, state.domain),
     )
     application_path = work_dir / f"application-{state.iteration:03d}-{state.selected_gap_id}.json"
     _write_json(application_path, result.to_dict())

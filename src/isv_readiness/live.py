@@ -13,7 +13,7 @@ import jsonschema
 from isv_readiness.context import redact_text
 from isv_readiness.decision import decide_gap, validation_profile_issues
 from isv_readiness.onboarding import DOMAIN_CONFIG_FILES
-from isv_readiness.project import ReadinessProject
+from isv_readiness.project import MINIMAL_PROCESS_ENV, ReadinessProject
 from isv_readiness.scan.dynamic import DynamicArtifacts, scan_dynamic_artifacts
 from isv_readiness.scan.k8s_dynamic import K8sDynamicArtifacts, scan_k8s_artifacts
 from isv_readiness.scan.k8s_scope import load_k8s_scope
@@ -101,13 +101,14 @@ def run_live_domain(
     if not config.is_file():
         raise LiveRunError(f"Runnable provider config not found: {config}")
 
-    source_env = environment or os.environ
-    missing = sorted(name for name in project.execution.credential_env if not source_env.get(name))
+    source_env = environment if environment is not None else os.environ
+    required_runtime = (*project.execution.credential_env, *project.execution.pass_env)
+    missing = sorted(name for name in required_runtime if not source_env.get(name))
     if missing:
-        raise LiveRunError("Required credential environment variables are unset: " + ", ".join(missing))
+        raise LiveRunError("Required runtime environment variables are unset: " + ", ".join(missing))
     child_env = {
         name: source_env[name]
-        for name in ("HOME", "PATH", "SSL_CERT_FILE", "TMPDIR")
+        for name in MINIMAL_PROCESS_ENV
         if source_env.get(name)
     }
     for name in (*project.execution.credential_env, *project.execution.pass_env):

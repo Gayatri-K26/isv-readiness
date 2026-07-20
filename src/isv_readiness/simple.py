@@ -56,6 +56,7 @@ def cmd_init(
     domains: list[str],
     api_url: str | None,
     auth_envs: list[str],
+    input_envs: list[str] | None = None,
     api_spec: str | None,
     validation_ref: str = "main",
 ) -> int:
@@ -82,6 +83,7 @@ def cmd_init(
             api_base_url=api_url,
             api_base_url_env="ISV_API_BASE_URL" if api_url else None,
             auth_env=auth_envs,
+            pass_env=input_envs or [],
             api_spec=resolved_api_spec,
         )
         project = execute_bootstrap(plan, overwrite=False)

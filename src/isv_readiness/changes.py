@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import ast
 import difflib
 import hashlib
 import json
+import shlex
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 import jsonschema
+import yaml
 
 from isv_readiness.decision import decide_gap
 from isv_readiness.fixes import (
@@ -115,6 +119,7 @@ def build_change_proposal(
     *,
     provider_repo: Path,
     change_set: ChangeSet,
+    allowed_environment: Sequence[str] | None = None,
 ) -> ChangeProposal:
     validate_change_set(change_set.to_dict())
     row = select_gap(report, change_set.gap_id)
@@ -142,8 +147,12 @@ def build_change_proposal(
             raise FixGuardrailError(f"Replace target does not exist: {change.path}")
         if not target.parent.is_dir():
             raise FixGuardrailError(f"Change target parent directory does not exist: {target.parent}")
-        validate_candidate_content(relative, change.content)
         original = target.read_text(encoding="utf-8") if exists else ""
+        validate_candidate_content(
+            relative,
+            change.content,
+            allowed_environment=allowed_environment,
+        )
         if original == change.content:
             raise FixGuardrailError(f"Change is identical to current target: {change.path}")
         logical = _logical_patch_path(provider_root, change)
@@ -170,6 +179,7 @@ def build_change_proposal(
         changed_keys.add((change.target_root, change.path))
 
     _require_primary_target(row, provider_root, domain, changed_keys)
+    _validate_timeout_envelopes(provider_root, domain, change_set)
     combined = "".join(patches)
     return ChangeProposal(
         schema_version=CHANGE_PROPOSAL_VERSION,
@@ -259,6 +269,131 @@ def _require_primary_target(
             key = ("provider", normalized)
     if key not in changed_keys:
         raise FixGuardrailError(f"Change set does not include the selected gap target: {key[1]}")
+
+
+def _validate_timeout_envelopes(
+    provider_root: Path,
+    domain: str,
+    change_set: ChangeSet,
+) -> None:
+    """Reject a script whose own deadline is longer than its runner step."""
+
+    config_name = DOMAIN_CONFIG_FILES.get(domain)
+    if not config_name:
+        return
+    config_path = provider_root / "config" / config_name
+    replacements = {
+        change.path: change.content
+        for change in change_set.changes
+        if change.target_root == "provider"
+    }
+    config_text = replacements.get(f"config/{config_name}")
+    if config_text is None:
+        if not config_path.is_file():
+            return
+        config_text = config_path.read_text(encoding="utf-8")
+    raw = yaml.safe_load(config_text)
+    if not isinstance(raw, dict):
+        return
+    command_groups = raw.get("commands")
+    if not isinstance(command_groups, dict):
+        return
+
+    for group in command_groups.values():
+        if not isinstance(group, dict):
+            continue
+        steps = group.get("steps")
+        if not isinstance(steps, list):
+            continue
+        for step in steps:
+            if not isinstance(step, dict) or not isinstance(step.get("timeout"), (int, float)):
+                continue
+            relative_script = _configured_python_script(config_path, step.get("command"))
+            if relative_script is None:
+                continue
+            script_text = replacements.get(relative_script.as_posix())
+            if script_text is None:
+                script_path = provider_root / relative_script
+                if not script_path.is_file():
+                    continue
+                script_text = script_path.read_text(encoding="utf-8")
+            internal_timeout = _max_internal_timeout(script_text)
+            runner_timeout = float(step["timeout"])
+            if internal_timeout is not None and internal_timeout > runner_timeout:
+                step_name = str(step.get("name") or relative_script)
+                raise FixGuardrailError(
+                    f"Candidate timeout mismatch for step {step_name}: internal deadline "
+                    f"{internal_timeout:g}s exceeds configured timeout {runner_timeout:g}s."
+                )
+
+
+def _configured_python_script(config_path: Path, command: Any) -> Path | None:
+    if not isinstance(command, str):
+        return None
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return None
+    script = next((token for token in tokens if token.endswith(".py")), None)
+    if script is None:
+        return None
+    resolved = (config_path.parent / script).resolve()
+    try:
+        return resolved.relative_to(config_path.parent.parent.resolve())
+    except ValueError:
+        return None
+
+
+def _max_internal_timeout(source: str) -> float | None:
+    """Return the largest explicit operation deadline visible in a Python script."""
+
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+    constants: dict[str, float] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            value = _numeric_value(node.value, constants)
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name) and value is not None:
+                    constants[target.id] = value
+
+    deadlines: list[float] = []
+    for name, value in constants.items():
+        if "TIMEOUT" in name.upper():
+            deadlines.append(value)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.BinOp) or not isinstance(node.op, ast.Add):
+            continue
+        if _is_clock_call(node.left):
+            value = _numeric_value(node.right, constants)
+            if value is not None:
+                deadlines.append(value)
+        elif _is_clock_call(node.right):
+            value = _numeric_value(node.left, constants)
+            if value is not None:
+                deadlines.append(value)
+    return max(deadlines) if deadlines else None
+
+
+def _numeric_value(node: ast.AST | None, constants: dict[str, float]) -> float | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
+        return float(node.value)
+    if isinstance(node, ast.Name):
+        return constants.get(node.id)
+    return None
+
+
+def _is_clock_call(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "time"
+        and node.func.attr in {"monotonic", "time"}
+    )
 
 
 def _logical_patch_path(provider_root: Path, change: Change) -> str:

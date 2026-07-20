@@ -198,7 +198,7 @@ def cmd_validate(*, generator: str = "codex", confirm: Confirm | None = None) ->
 
             if review.status == "awaiting_review":
                 patch_path = work_dir / "auto-review.patch"
-                print(f"\nVerified {domain} patch: {patch_path}")
+                print(f"\nStatically verified {domain} candidate patch: {patch_path}")
                 print(f"Patch hash: {review.patch_sha256}")
                 if not ask(f"Apply this reviewed {domain} patch?"):
                     print("Patch was not applied. Review it and run `gapctl validate` again.")

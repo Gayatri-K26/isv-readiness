@@ -25,6 +25,7 @@ PROJECT_SCHEMA_VERSION = "0.1.0"
 DEFAULT_VALIDATION_URL = "https://github.com/NVIDIA/ai-cloud-validation.git"
 DEFAULT_NSRG_URL = "https://docs.nvidia.com/dsx/ncp/llms.txt"
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+MINIMAL_PROCESS_ENV = ("HOME", "PATH", "SSL_CERT_FILE", "TMPDIR")
 
 ProviderState = Literal["new", "existing"]
 CommandRunner = Callable[[Sequence[str], Path, int], subprocess.CompletedProcess[str]]
@@ -111,6 +112,22 @@ class ReadinessProject:
 
     def provider_root(self, manifest_path: Path) -> Path:
         return self.resolve_path(manifest_path, self.provider.path)
+
+
+def declared_provider_environment(
+    project: ReadinessProject,
+    domain: str | None = None,
+) -> tuple[str, ...]:
+    """Return every environment name provider code may consume at runtime."""
+
+    names = [*project.execution.credential_env, *project.execution.pass_env]
+    names.extend(
+        api.base_url_env
+        for api in project.apis
+        if api.base_url and api.base_url_env and (domain is None or domain in api.domains)
+    )
+    names.extend(MINIMAL_PROCESS_ENV)
+    return tuple(dict.fromkeys(names))
 
 
 @dataclass(frozen=True)

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from isv_readiness.changes import ChangeSet, canonical_sha256, change_set_from_dict, validate_change_set
+from isv_readiness.context import PROVIDER_IMPLEMENTATION_RULES
 from isv_readiness.fixes import FixGuardrailError
 from isv_readiness.schema import load_schema
 from isv_readiness.subprocesses import run_captured
@@ -40,7 +41,7 @@ def dispatch_generator(
         raise FixGuardrailError("Generator command must contain at least one non-empty argument.")
     if timeout_seconds < 1 or timeout_seconds > 1800:
         raise FixGuardrailError("Generator timeout must be between 1 and 1800 seconds.")
-    source_env = environment or os.environ
+    source_env = environment if environment is not None else os.environ
     child_env = {name: source_env[name] for name in ("HOME", "PATH", "SSL_CERT_FILE", "TMPDIR") if source_env.get(name)}
     for name in pass_env:
         if "=" in name:
@@ -81,7 +82,10 @@ def run_generator(
     context_sha256 = canonical_sha256(context_pack)
     request = {
         "schema_version": "0.1.0",
-        "task": "Produce the smallest provider-owned change set that addresses the selected gap.",
+        "task": (
+            "Produce the smallest provider-owned change set that addresses the selected gap and the shared "
+            "adapter contract represented by any related_target_gaps."
+        ),
         "context_pack_sha256": context_sha256,
         "rules": [
             "Return one JSON object and no Markdown or commentary.",
@@ -89,6 +93,7 @@ def run_generator(
             "Do not include credentials, edit validation-suite contracts, or invent scope.",
             "Every content_sha256 must be the SHA-256 of the UTF-8 content field.",
             "Prefer the smallest change and preserve cleanup/error behavior required by the contract.",
+            *PROVIDER_IMPLEMENTATION_RULES,
         ],
         "output_schema": load_schema("change-set.schema.json"),
         "context_pack": context_pack,
