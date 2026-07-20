@@ -83,6 +83,25 @@ def decide_gap(row: Mapping[str, Any]) -> GapDecision:
     return GapDecision(blocking=blocking, edit_eligible=edit_eligible, action=action, reason=reason)
 
 
+def adapter_contract_unit(row: Mapping[str, Any]) -> str:
+    """Return the smallest provider edit unit that should share context and retries.
+
+    Checks backed by one script describe one adapter contract. Configuration
+    files are different: many unrelated steps live in the same YAML file, so
+    only checks for the same step belong to one contract unit.
+    """
+
+    remediation = row.get("remediation")
+    target = remediation.get("target") if isinstance(remediation, Mapping) else None
+    if not isinstance(target, str) or not target:
+        return str(row.get("id") or "<unknown-gap>")
+    if target.lower().endswith((".yaml", ".yml")):
+        step_name = row.get("step_name")
+        if isinstance(step_name, str) and step_name:
+            return f"{target}::step::{step_name}"
+    return target
+
+
 def blocking_rows(report: Mapping[str, Any], domain: str | None = None) -> list[dict[str, Any]]:
     rows = report.get("rows")
     if not isinstance(rows, list):

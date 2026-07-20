@@ -229,6 +229,22 @@ class ChangeProposalTests(unittest.TestCase):
                     ),
                 )
 
+            raised_timeout = config.read_text(encoding="utf-8").replace(
+                "timeout: 60",
+                "timeout: 1200",
+            )
+            proposal = build_change_proposal(
+                _report(),
+                provider_repo=provider,
+                change_set=_change_set(
+                    [
+                        ("provider", "scripts/vm/launch.py", "replace", candidate),
+                        ("provider", "config/vm.yaml", "replace", raised_timeout),
+                    ]
+                ),
+            )
+            self.assertEqual(len(proposal.files), 2)
+
 
 def _change_set(values: list[tuple[str, str, str, str]]) -> ChangeSet:
     changes = tuple(

@@ -151,6 +151,30 @@ class ContextTests(unittest.TestCase):
                 )
             )
 
+            selected_config = json.loads(json.dumps(report["rows"][0]))
+            selected_config["id"] = "gap_111111111111"
+            selected_config["remediation"]["target"] = "config/vm.yaml"
+            same_step = json.loads(json.dumps(selected_config))
+            same_step["id"] = "gap_222222222222"
+            same_step["validation_class"] = "VmLaunchSiblingCheck"
+            other_step = json.loads(json.dumps(selected_config))
+            other_step["id"] = "gap_333333333333"
+            other_step["step_name"] = "delete"
+            other_step["validation_class"] = "VmDeleteCheck"
+            config_pack = build_context_pack(
+                project,
+                manifest,
+                {"rows": [selected_config, same_step, other_step]},
+                gap_id=selected_config["id"],
+                cache_dir=cache,
+                environment={},
+            ).to_dict()
+            config_related = next(
+                item for item in config_pack["items"] if item["source_id"] == "related_target_gaps"
+            )
+            self.assertIn("VmLaunchSiblingCheck", config_related["content"])
+            self.assertNotIn("VmDeleteCheck", config_related["content"])
+
             with self.assertRaisesRegex(ValueError, "refusing to (?:omit|truncate) evidence"):
                 build_context_pack(
                     project,

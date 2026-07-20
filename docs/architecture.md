@@ -145,18 +145,21 @@ scratch copy and rescans it. The operator sees one combined patch per domain.
 Application recomputes the patch and refuses any hash mismatch.
 
 Each generation pack includes the exact declared runtime environment names and
-the other edit-eligible unresolved validation rows that share the selected
-remediation target. It also includes the exact relevant entries from the pinned
-suite, the step-output schemas, and the source of the validation classes that
-consume those outputs. Provider-neutral authoring rules require source-grounded
-interfaces, one canonical resource identifier across configured lifecycle
-steps, verified TLS, bounded timeouts, structured result fields, and no raw
-provider output in evidence. Retry accounting is per remediation target rather
-than per catalog row, so several checks backed by one script cannot multiply
-the model budget. The per-gap pack has a 180k-character bound and fails closed
-instead of truncating or omitting selected evidence; sibling rows are
-represented by their validation contract fields rather than duplicated scanner
-metadata.
+the other edit-eligible unresolved validation rows in the selected adapter
+contract unit. Checks share a unit when they use one script. Rows whose target
+is a YAML configuration file share a unit only when their step name also
+matches; unrelated steps commonly live in the same domain file and must remain
+independent decisions. The pack also includes the exact relevant entries from
+the pinned suite, the step-output schemas, and the source of the validation
+classes that consume those outputs. Provider-neutral authoring rules require
+source-grounded interfaces, one canonical resource identifier across configured
+lifecycle steps, verified TLS, bounded timeouts, structured result fields, and
+no raw provider output in evidence. Retry accounting uses the same contract
+unit, so several checks backed by one adapter cannot multiply the model budget
+or consume another step's retries. The per-gap pack has a 180k-character bound
+and fails closed instead of truncating or omitting selected evidence; sibling
+rows are represented by their validation contract fields rather than duplicated
+scanner metadata.
 
 Deterministic candidate checks enforce what can be established without knowing
 the provider: environment references in each changed candidate must be declared,
@@ -170,6 +173,13 @@ provider interfaces cannot satisfy the pinned contract within the edit boundary,
 the schema permits an empty change set carrying the exact blocker; the target is
 parked instead of forcing fabricated code. Static rescan success is therefore
 labeled as static verification, never as runtime proof.
+
+A non-empty change set must include the scanner-selected remediation target,
+but that target is not the whole edit boundary. The generator may also include
+other provider-owned scripts and the selected domain configuration when the
+same adapter contract requires coordinated wiring or timeout changes. The
+existing path, hash, candidate-content, and isolated-rescan guards apply to
+every included file.
 
 The shared generator boundary allows the built-in model adapter to finish or
 time out first. Timeout, Ctrl+C, and SIGTERM terminate and reap the adapter's

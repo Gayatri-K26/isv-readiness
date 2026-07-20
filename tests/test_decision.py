@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from isv_readiness.decision import decide_gap
+from isv_readiness.decision import adapter_contract_unit, decide_gap
 
 
 def _row(
@@ -13,6 +13,8 @@ def _row(
     profile_status: str = "reviewed",
     journey_stage: str = "validate",
     junit_reason: str | None = None,
+    step_name: str = "launch",
+    target: str = "scripts/vm/launch.py",
 ) -> dict:
     enrichment = {
         "solution_profile": {
@@ -25,16 +27,55 @@ def _row(
     if junit_reason:
         enrichment["junit_reason"] = junit_reason
     return {
+        "id": "gap_0123456789ab",
+        "step_name": step_name,
         "status": status,
         "remediation": {
             "auto_fixable": True,
-            "target": "scripts/vm/launch.py",
+            "target": target,
         },
         "enrichment": enrichment,
     }
 
 
 class GapDecisionTests(unittest.TestCase):
+    def test_adapter_contract_units_split_shared_config_by_step(self) -> None:
+        launch_config = _row(
+            status="not_implemented",
+            step_name="launch",
+            target="config/vm.yaml",
+        )
+        describe_config = _row(
+            status="not_implemented",
+            step_name="describe",
+            target="config/vm.yaml",
+        )
+        launch_config_sibling = {**launch_config, "id": "gap_abcdef012345"}
+
+        self.assertEqual(
+            adapter_contract_unit(launch_config),
+            adapter_contract_unit(launch_config_sibling),
+        )
+        self.assertNotEqual(
+            adapter_contract_unit(launch_config),
+            adapter_contract_unit(describe_config),
+        )
+
+        launch_script = _row(
+            status="not_implemented",
+            step_name="launch",
+            target="scripts/vm/shared.py",
+        )
+        describe_script = _row(
+            status="not_implemented",
+            step_name="describe",
+            target="scripts/vm/shared.py",
+        )
+        self.assertEqual(
+            adapter_contract_unit(launch_script),
+            adapter_contract_unit(describe_script),
+        )
+
     def test_reviewed_owned_failure_can_generate_but_draft_cannot(self) -> None:
         reviewed = decide_gap(_row(status="not_implemented"))
         self.assertTrue(reviewed.blocking)

@@ -70,6 +70,8 @@ class GeneratorAdapterTests(unittest.TestCase):
             self.assertIn("TLS peer verification", rules)
             self.assertIn("configured step timeout", rules)
             self.assertIn("raw API bodies", rules)
+            self.assertIn("selected domain configuration", rules)
+            self.assertIn("only authorized file", rules)
             self.assertEqual(seen["timeout"], 900)
             self.assertEqual(seen["environment"]["MODEL_API_KEY"], "available")
             self.assertNotIn("ACME_TOKEN", seen["environment"])

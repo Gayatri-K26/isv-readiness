@@ -15,7 +15,7 @@ from typing import Any, ClassVar
 import jsonschema
 import yaml
 
-from isv_readiness.decision import decide_gap
+from isv_readiness.decision import adapter_contract_unit, decide_gap
 from isv_readiness.project import (
     DEFAULT_NSRG_URL,
     MINIMAL_PROCESS_ENV,
@@ -82,8 +82,8 @@ PROVIDER_IMPLEMENTATION_RULES = (
     "recovery thresholds when the supplied contract does not establish them.",
     "Emit only the structured fields required by the validation contract. Never place raw API bodies, headers, "
     "console output, stdout, stderr, or log excerpts in result JSON.",
-    "Treat every edit-eligible unresolved check sharing the same remediation target as one adapter contract and "
-    "preserve the existing cross-step data flow.",
+    "Treat edit-eligible unresolved checks as one adapter contract only when they share a script target, or when "
+    "they share both a configuration target and step name. Preserve the existing cross-step data flow.",
 )
 TEXT_EXTENSIONS = {
     ".json",
@@ -273,12 +273,13 @@ def build_context_pack(
             "complete runtime input contract; names only, never values",
         )
     )
+    selected_unit = adapter_contract_unit(gap.to_dict())
     related_rows = [
         row
         for row in rows
         if row.id != gap.id
         and row.domain == gap.domain
-        and row.remediation.target == gap.remediation.target
+        and adapter_contract_unit(row.to_dict()) == selected_unit
         and decide_gap(row.to_dict()).edit_eligible
     ]
     related = [_related_gap_contract(row) for row in related_rows]
@@ -290,7 +291,7 @@ def build_context_pack(
                 "authoritative",
                 "gapctl://selected-target/related-gaps",
                 json.dumps(related, indent=2, sort_keys=True),
-                "other edit-eligible unresolved validation rows sharing the selected remediation target",
+                "other edit-eligible unresolved validation rows sharing the selected adapter contract unit",
             )
         )
     upstream_contract = _upstream_target_contract(
@@ -520,7 +521,7 @@ def _upstream_target_contract(
     gap: GapRow,
     related_rows: Sequence[GapRow],
 ) -> ContextItem | None:
-    """Pack the exact suite entries and validation classes for one adapter target."""
+    """Pack the exact suite entries and validation classes for one adapter contract unit."""
 
     validation_root = project.validation_root(manifest_path)
     if not validation_root.is_dir():
@@ -589,7 +590,7 @@ def _upstream_target_contract(
         "authoritative",
         "gapctl://upstream/selected-target",
         json.dumps(payload, indent=2, sort_keys=True),
-        "exact pinned suite entries, output schemas, and validation implementations for the selected target",
+        "exact pinned suite entries, output schemas, and validation implementations for the selected contract unit",
     )
 
 

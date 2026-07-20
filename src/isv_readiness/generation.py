@@ -96,6 +96,11 @@ def run_generator(
             "Every content_sha256 must be the SHA-256 of the UTF-8 content field.",
             "Prefer the smallest change and preserve cleanup/error behavior required by the contract.",
             (
+                "Every non-empty change set must include the selected remediation target. It may also include "
+                "other provider-owned scripts and the selected domain configuration when those edits are required "
+                "by the same adapter contract; do not assume the selected target is the only authorized file."
+            ),
+            (
                 "If no source-grounded provider-owned implementation can satisfy the pinned validation contract, "
                 "return an empty changes array with the exact blocker in summary; never fabricate a passing result."
             ),

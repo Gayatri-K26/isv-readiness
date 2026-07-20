@@ -11,6 +11,7 @@ from pathlib import Path
 import yaml
 
 from isv_readiness.auto import AutoWorkflowError, _park, run_auto
+from isv_readiness.decision import adapter_contract_unit
 from isv_readiness.project import build_bootstrap_plan, execute_bootstrap
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -180,6 +181,37 @@ class AutoResilienceTests(unittest.TestCase):
         self.assertEqual(len(parked), 2)
         self.assertTrue(all("exhausted" in item.reason for item in parked))
 
+    def test_config_retry_budget_is_scoped_to_one_step(self) -> None:
+        rows = _config_rows()
+
+        parked = _park(
+            {"rows": rows},
+            "vm",
+            [],
+            {adapter_contract_unit(rows[0]): 3},
+            3,
+        )
+
+        by_id = {item.gap_id: item for item in parked}
+        self.assertIn("exhausted", by_id[rows[0]["id"]].reason)
+        self.assertIn("Not attempted", by_id[rows[1]["id"]].reason)
+
+    def test_config_generator_refusal_is_scoped_to_one_step(self) -> None:
+        rows = _config_rows()
+        parked = _park(
+            {"rows": rows},
+            "vm",
+            [],
+            {adapter_contract_unit(rows[0]): 3},
+            3,
+            blocked_by_unit={adapter_contract_unit(rows[0]): "launch interface is unavailable"},
+        )
+
+        by_id = {item.gap_id: item for item in parked}
+        self.assertIn("launch interface is unavailable", by_id[rows[0]["id"]].reason)
+        self.assertNotIn("launch interface is unavailable", by_id[rows[1]["id"]].reason)
+        self.assertIn("Not attempted", by_id[rows[1]["id"]].reason)
+
 
 def _project(root: Path) -> tuple[Path, Path]:
     workspace = root / "workspace"
@@ -208,6 +240,32 @@ def _project(root: Path) -> tuple[Path, Path]:
     raw["provider"]["state"] = "existing"
     plan.manifest_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     return plan.manifest_path, provider
+
+
+def _config_rows() -> list[dict]:
+    rows = []
+    for index, step_name in enumerate(("launch", "describe")):
+        rows.append(
+            {
+                "id": f"gap_config{index:06d}",
+                "domain": "vm",
+                "step_name": step_name,
+                "status": "not_implemented",
+                "remediation": {
+                    "auto_fixable": True,
+                    "target": "config/vm.yaml",
+                },
+                "enrichment": {
+                    "solution_profile": {
+                        "action": "implement_or_fix_adapter",
+                        "owned": True,
+                        "profile_status": "reviewed",
+                        "journey_stage": "validate",
+                    }
+                },
+            }
+        )
+    return rows
 
 
 def _ratify_profile(path: Path) -> None:

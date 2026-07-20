@@ -11,7 +11,7 @@ from typing import Any
 
 from isv_readiness.change_verification import apply_verified_change_set, verify_change_set
 from isv_readiness.context import build_context_pack
-from isv_readiness.decision import decide_gap, validation_profile_issues
+from isv_readiness.decision import adapter_contract_unit, decide_gap, validation_profile_issues
 from isv_readiness.fixes import FixGuardrailError
 from isv_readiness.generation import GeneratorRunner, run_generator
 from isv_readiness.project import ReadinessProject, declared_provider_environment, load_project
@@ -132,9 +132,9 @@ def run_auto(
     shutil.copytree(provider_root, scratch)
 
     staged: list[StagedFix] = []
-    attempts_by_target: dict[str, int] = {}
-    feedback_by_target: dict[str, tuple[str, ...]] = {}
-    blocked_by_target: dict[str, str] = {}
+    attempts_by_unit: dict[str, int] = {}
+    feedback_by_unit: dict[str, tuple[str, ...]] = {}
+    blocked_by_unit: dict[str, str] = {}
     max_attempts = project.execution.max_attempts
     allowed_environment = declared_provider_environment(project, canonical_domain)
 
@@ -146,13 +146,13 @@ def run_auto(
         pending = [
             row
             for row in fixable
-            if attempts_by_target.get(_remediation_unit(row), 0) < max_attempts
+            if attempts_by_unit.get(adapter_contract_unit(row), 0) < max_attempts
         ]
         if not pending:
             break
         row = pending[0]
         gap_id = row["id"]
-        remediation_unit = _remediation_unit(row)
+        contract_unit = adapter_contract_unit(row)
 
         try:
             change_set = _generate(
@@ -166,14 +166,14 @@ def run_auto(
                 generator_pass_env=generator_pass_env,
                 environment=environment,
                 generator_runner=generator_runner,
-                feedback=feedback_by_target.get(
-                    remediation_unit,
-                    _feedback_for(attempts_by_target.get(remediation_unit, 0)),
+                feedback=feedback_by_unit.get(
+                    contract_unit,
+                    _feedback_for(attempts_by_unit.get(contract_unit, 0)),
                 ),
             )
             if not change_set.changes:
-                attempts_by_target[remediation_unit] = max_attempts
-                blocked_by_target[remediation_unit] = change_set.summary
+                attempts_by_unit[contract_unit] = max_attempts
+                blocked_by_unit[contract_unit] = change_set.summary
                 continue
             manifest = verify_change_set(
                 report,
@@ -185,16 +185,16 @@ def run_auto(
         except FixGuardrailError as exc:
             # A malformed generation or guard violation is a failed attempt for
             # this gap, not a reason to abort every other gap in the run.
-            attempts_by_target[remediation_unit] = attempts_by_target.get(remediation_unit, 0) + 1
-            feedback_by_target[remediation_unit] = (
+            attempts_by_unit[contract_unit] = attempts_by_unit.get(contract_unit, 0) + 1
+            feedback_by_unit[contract_unit] = (
                 f"Previous candidate was rejected by a deterministic guardrail: {exc}",
             )
             continue
-        attempts_by_target[remediation_unit] = attempts_by_target.get(remediation_unit, 0) + 1
+        attempts_by_unit[contract_unit] = attempts_by_unit.get(contract_unit, 0) + 1
         if not manifest.success:
             # Leave the gap for the next iteration's retry budget; a fresh scan
             # keeps selecting it until the budget is exhausted, then it parks.
-            feedback_by_target[remediation_unit] = (
+            feedback_by_unit[contract_unit] = (
                 "Previous candidate failed isolated static verification: "
                 f"selected status became {manifest.selected_status_after or 'missing'}.",
                 *(f"Regression: {item}" for item in manifest.regressions),
@@ -214,7 +214,7 @@ def run_auto(
                 target=str(row.get("remediation", {}).get("target") or ""),
                 validation_class=row.get("validation_class"),
                 summary=change_set.summary,
-                attempts=attempts_by_target[remediation_unit],
+                attempts=attempts_by_unit[contract_unit],
             )
         )
 
@@ -223,9 +223,9 @@ def run_auto(
         final_report,
         canonical_domain,
         staged,
-        attempts_by_target,
+        attempts_by_unit,
         max_attempts,
-        blocked_by_target=blocked_by_target,
+        blocked_by_unit=blocked_by_unit,
     )
     changed_files = _changed_files(provider_root, scratch)
     patch = _combined_patch(provider_root, scratch, changed_files)
@@ -335,28 +335,18 @@ def _select_fixable(report: dict[str, Any], domain: str) -> list[dict[str, Any]]
     return rows
 
 
-def _remediation_unit(row: Mapping[str, Any]) -> str:
-    """Group retry accounting by the provider target that must be corrected."""
-
-    remediation = row.get("remediation")
-    target = remediation.get("target") if isinstance(remediation, Mapping) else None
-    if isinstance(target, str) and target:
-        return target
-    return str(row.get("id") or "<unknown-gap>")
-
-
 def _park(
     report: dict[str, Any],
     domain: str,
     staged: Sequence[StagedFix],
-    attempts_by_target: Mapping[str, int] | None = None,
+    attempts_by_unit: Mapping[str, int] | None = None,
     max_attempts: int = 0,
     *,
-    blocked_by_target: Mapping[str, str] | None = None,
+    blocked_by_unit: Mapping[str, str] | None = None,
 ) -> list[ParkedGap]:
     staged_ids = {fix.gap_id for fix in staged}
-    attempts_by_target = attempts_by_target or {}
-    blocked_by_target = blocked_by_target or {}
+    attempts_by_unit = attempts_by_unit or {}
+    blocked_by_unit = blocked_by_unit or {}
     parked: list[ParkedGap] = []
     for row in report.get("rows", []):
         decision = decide_gap(row)
@@ -366,9 +356,9 @@ def _park(
             continue
         action = decision.action
         if decision.edit_eligible:
-            remediation_unit = _remediation_unit(row)
-            attempts = attempts_by_target.get(remediation_unit, 0)
-            blocker = blocked_by_target.get(remediation_unit)
+            contract_unit = adapter_contract_unit(row)
+            attempts = attempts_by_unit.get(contract_unit, 0)
+            blocker = blocked_by_unit.get(contract_unit)
             if blocker:
                 reason = (
                     "Generator reported no source-grounded provider-owned implementation: "

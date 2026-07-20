@@ -1633,3 +1633,46 @@ reason, not another profile type, command, or inference layer.
   and Ctrl+C process-group cleanup.
 - `uv run python -m unittest discover -s tests`: 137 tests passed.
 - Ruff, Python compilation, lock validation, and diff checks passed.
+
+## Step 34 - Scope Adapter Decisions by Script or Configured Step
+
+### Evidence
+
+The next BCM bare-metal review staged one sound `host_status_log.py` candidate
+but parked 68 rows. Seven edit-eligible unwired steps were collapsed into one
+contract because their scanner remediation target was the shared
+`config/bare_metal.yaml` file. The parked lifecycle-script reasons also claimed
+that a script-target candidate could not change that configuration, although
+the existing guarded multi-file boundary explicitly allows the selected domain
+config and requires only that the primary remediation target be included.
+
+### Decisions
+
+1. Define one reusable adapter contract unit in `decision.py`. Script-backed
+   rows group by script target because multiple validations genuinely consume
+   one implementation. YAML-backed rows group by target and step name because
+   a domain file contains many unrelated adapters.
+2. Use that same unit for related-gap context, retry accounting, verifier
+   feedback, structured generator blockers, and parking reasons. One failed or
+   refused config step can no longer consume another step's model budget.
+3. State the existing edit boundary directly in every generator request: a
+   non-empty change set must include the selected remediation target, and may
+   also include other provider-owned scripts plus the selected domain config
+   when the same adapter contract requires coordinated changes.
+
+### Simplicity boundary
+
+This adds no command, schema, profile concept, or provider-specific rule. The
+unit is derived from two facts already present on every gap row: remediation
+target and step name. The distinction is structural rather than semantic:
+scripts are adapter implementations; YAML files are containers for many step
+definitions.
+
+### Verification
+
+- Focused tests cover shared-script grouping, same-step config grouping,
+  different-step config isolation, retry isolation, context isolation,
+  generator edit-boundary wording, and coordinated script/config timeout
+  changes.
+- `uv run python -m unittest discover -s tests`: 140 tests passed.
+- Ruff, Python compilation, lock validation, and diff checks passed.

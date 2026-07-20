@@ -138,11 +138,12 @@ For every owned domain, `validate`:
 2. selects only gaps that are both profile-approved and deterministically safe
    to edit;
 3. gives the selected generator the complete declared runtime-input contract,
-   every edit-eligible unresolved check sharing the same provider target, and
+   every edit-eligible unresolved check in the same adapter contract unit, and
    the exact pinned suite entries, step-output schemas, relevant validation
-   class implementations, and a compact provider-adapter checklist; the
-   bounded per-gap pack fails rather than silently truncating or omitting a
-   selected source;
+   class implementations, and a compact provider-adapter checklist; checks
+   share a unit by script, or by configuration file plus step, and the bounded
+   per-gap pack fails rather than silently truncating or omitting a selected
+   source;
 4. rejects undeclared runtime inputs, TLS-verification bypasses, raw
    provider output in result JSON, required downstream outputs left provably
    empty, and internal deadlines that exceed the configured step timeout;
