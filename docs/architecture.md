@@ -208,6 +208,10 @@ process group; adapters forward termination through the same cleanup boundary
 to their nested model process. Built-in adapter names resolve beside the running
 `gapctl` executable first, which prevents mixed tool versions when another
 installation is also on `PATH`.
+Generator children receive only the minimal process environment, explicitly
+declared generator inputs, and the non-secret `USER` identity needed for macOS
+Keychain-backed CLI authentication. Authentication material itself is neither
+forwarded explicitly nor added to context.
 
 `validate` invokes live execution one domain at a time internally, while the ISV
 runs one command for the entire owned scope. The explicit confirmation is the

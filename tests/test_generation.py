@@ -59,7 +59,12 @@ class GeneratorAdapterTests(unittest.TestCase):
                 cwd=Path(tempdir),
                 pass_env=["MODEL_API_KEY"],
                 runner=runner,
-                environment={"PATH": "/bin", "MODEL_API_KEY": "available", "ACME_TOKEN": "provider-secret"},
+                environment={
+                    "PATH": "/bin",
+                    "USER": "operator",
+                    "MODEL_API_KEY": "available",
+                    "ACME_TOKEN": "provider-secret",
+                },
             )
 
             self.assertEqual(change_set.gap_id, "gap_0123456789ab")
@@ -87,6 +92,7 @@ class GeneratorAdapterTests(unittest.TestCase):
             self.assertIn("current remote SSH user", rules)
             self.assertIn("structurally incompatible", seen["request"]["task"])
             self.assertEqual(seen["timeout"], 900)
+            self.assertEqual(seen["environment"]["USER"], "operator")
             self.assertEqual(seen["environment"]["MODEL_API_KEY"], "available")
             self.assertNotIn("ACME_TOKEN", seen["environment"])
 

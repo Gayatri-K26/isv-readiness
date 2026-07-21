@@ -1130,6 +1130,17 @@ Also noted: on macOS the Claude CLI's Keychain lookup needs USER/LOGNAME,
 which the harness env allowlist strips - pass
 `--generator-env USER --generator-env LOGNAME`.
 
+### Amendment (macOS Keychain authentication)
+
+The manual generator-environment workaround was the wrong product boundary for
+the simplified workflow: `gapctl validate --generator claude` could report
+`Not logged in` even while `claude auth status` showed an active SSO session.
+The generator process allowlist now includes only the non-secret `USER`
+identity in addition to the existing minimal process variables. A direct
+minimal-environment reproduction confirmed that `USER` is sufficient for the
+Claude CLI to recover its Keychain-backed session; no credential value is
+forwarded, persisted, or added to model context.
+
 ## Step 21 - Simplified Context Sources, Empirical Runs Outrank Declared Claims
 
 ### Decision

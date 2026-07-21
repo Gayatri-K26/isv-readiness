@@ -180,6 +180,11 @@ Claude can be selected with:
 gapctl validate --generator claude
 ```
 
+On macOS, gapctl passes the non-secret `USER` process identity to generator
+adapters so Claude can retrieve an existing SSO session from Keychain. Claude
+credentials remain outside gapctl and are never copied into project files or
+generation context.
+
 `validate` prints readiness after the run. Repeat the same command until every
 owned domain has no blocking gaps and a successful live test. Gaps that are not
 safe to generate are parked with a reason for SME or manual implementation. If

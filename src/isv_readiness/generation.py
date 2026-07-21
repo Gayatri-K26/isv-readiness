@@ -14,10 +14,12 @@ from isv_readiness.context import (
     provider_contract_constraints,
 )
 from isv_readiness.fixes import FixGuardrailError
+from isv_readiness.project import MINIMAL_PROCESS_ENV
 from isv_readiness.schema import load_schema
 from isv_readiness.subprocesses import run_captured
 
 DEFAULT_GENERATOR_TIMEOUT_SECONDS = 900
+GENERATOR_PROCESS_ENV = (*MINIMAL_PROCESS_ENV, "USER")
 
 GeneratorRunner = Callable[
     [Sequence[str], Path, str, Mapping[str, str], int],
@@ -46,7 +48,11 @@ def dispatch_generator(
     if timeout_seconds < 1 or timeout_seconds > 1800:
         raise FixGuardrailError("Generator timeout must be between 1 and 1800 seconds.")
     source_env = environment if environment is not None else os.environ
-    child_env = {name: source_env[name] for name in ("HOME", "PATH", "SSL_CERT_FILE", "TMPDIR") if source_env.get(name)}
+    child_env = {
+        name: source_env[name]
+        for name in GENERATOR_PROCESS_ENV
+        if source_env.get(name)
+    }
     for name in pass_env:
         if "=" in name:
             raise FixGuardrailError("Generator environment inputs must be variable names, not assignments.")
