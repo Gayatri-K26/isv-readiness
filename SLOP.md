@@ -1969,3 +1969,83 @@ covers both built-in generators.
 - `uv run python -m unittest discover -s tests`: 152 tests passed.
 - Ruff, Python compilation, lock validation, schema parsing, and diff checks
   passed.
+
+## Step 42 - Localize Consumer Evidence and Bound Repeated Failures
+
+### Evidence
+
+The same BCM `describe_instance.py` adapter contract supplied 16 relevant
+validation classes as complete source bodies. Its serialized context pack was
+167,873 characters and the upstream-contract item alone was about 87,000
+characters. Three generations produced no statically verified change before
+the existing retry budget parked that contract. Whole consumer implementations
+mixed provider requirements with unrelated test mechanics and made every retry
+pay for the same material.
+
+The completed bare-metal review then exposed two false-positive static passes.
+The proposed launch adapter only inspected a pre-existing node and omitted five
+fields consumed by downstream configured steps. The proposed serial-console
+adapter waited for interactive `rconsole` to exit naturally and classified its
+expected continued session as a timeout failure.
+
+### Decisions
+
+1. Replace complete validation-class bodies in each generation request with a
+   deterministic AST interface projection. Preserve method signatures,
+   docstrings, class attributes, keyed lookups and defaults, branch conditions,
+   pass/fail outcomes, direct dependencies, caught exceptions, exact line
+   ranges, class-source hashes, and explicit dynamic-call uncertainty.
+2. Keep exact selected suite entries and step-output schemas unchanged. The
+   pinned consumer file remains the source of truth at the recorded path and
+   hash; the projection does not authorize edits to that source.
+3. Resolve one source hop for uniquely named local helper functions called by
+   the selected consumers. Include at most 4,000 characters per helper and do
+   not recursively expand the call graph.
+4. Represent candidate failures as structured records containing attempt,
+   category, stable fingerprint, summary, and details. Send the latest record
+   in full plus a compact ledger instead of concatenated prose.
+5. Park one adapter contract when the same deterministic failure fingerprint
+   occurs twice. Different failures may still use the configured three-attempt
+   budget. Model and adapter infrastructure errors remain fail-fast and outside
+   the repair ledger.
+6. Retain the current model-neutral character ceiling. Codex and Claude do not
+   share one tokenizer, so adding an approximate universal token gate would
+   create false precision; structural localization is the immediate safe gain.
+7. Treat interactive consoles and shells as sessions. Generated probes must
+   use source-backed readiness evidence and terminate cleanly instead of
+   interpreting a healthy session that stays open as a timeout failure.
+8. Keep provider-authoring rules once at the generator task boundary. Do not
+   serialize the identical rule set again inside the evidence pack.
+9. Reject a recognizable literal result mapping when it omits a field consumed
+   by a later configured step, not only when that field is present but empty.
+   Defer when dynamic result construction prevents a deterministic conclusion.
+10. Preserve lifecycle verbs explicitly: create, launch, provision, delete, and
+   teardown steps cannot be satisfied by observing a pre-existing resource.
+
+### Simplicity boundary
+
+Do not add embeddings, a vector database, a retrieval service, an ISV-facing
+advanced mode, or provider-specific extraction. The one-shot generator receives
+the smallest deterministic evidence already available locally and parks when
+that evidence cannot support a safe implementation.
+
+### Verification
+
+- Focused tests cover source provenance, keyed inputs, explicit dynamic
+  uncertainty, structured retry feedback, and the two-identical-failure stop
+  rule across independent adapter contracts.
+- Replaying the BCM contract retained all 13 selected suite entries, the output
+  schema, and all 16 validation interfaces with zero missing, omitted, or
+  truncated items. After adding 11 exact one-hop helper sources, the serialized
+  pack is 154,812 characters versus the prior 167,873; the upstream-contract
+  item is 74,209 characters while also adding explicit return-expression and
+  helper-behavior coverage.
+- Replaying all 13 current BCM adapter contract units produced no packing
+  failures, missing validation classes, omissions, or truncation. The
+  16-interface `describe_instance.py` contract remained the largest pack.
+- Rescanning the rejected BCM launch candidate now reports `key_file`,
+  `key_name`, `public_ip`, `security_group_id`, and `vpc_id` as unpopulated
+  downstream outputs for both launch-step validation rows.
+- `uv run python -m unittest discover -s tests`: 154 tests passed.
+- Ruff, Python compilation, lock validation, schema parsing, and diff checks
+  passed.

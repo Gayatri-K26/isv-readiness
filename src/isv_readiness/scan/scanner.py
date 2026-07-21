@@ -875,7 +875,7 @@ def _static_json_outputs(path: Path, text: str) -> list[dict[str, Any]]:
 
 
 def _definitely_empty_output_fields(path: Path, text: str, required_fields: set[str]) -> list[str]:
-    """Find required fields that a recognized result mapping only assigns empty values."""
+    """Find downstream fields a recognizable result mapping omits or leaves empty."""
 
     if path.suffix != ".py" or not required_fields:
         return []
@@ -927,7 +927,10 @@ def _definitely_empty_output_fields(path: Path, text: str, required_fields: set[
             if fields is not None:
                 emitted.append(fields)
 
+    declared_fields, dynamic_shape = _declared_result_fields(tree, mappings)
     empty: set[str] = set()
+    if declared_fields and not dynamic_shape:
+        empty.update(required_fields.difference(declared_fields))
     for fields in emitted:
         success_values = fields.get("success", [])
         if success_values and all(_is_definitely_false(value) for value in success_values):
@@ -937,6 +940,69 @@ def _definitely_empty_output_fields(path: Path, text: str, required_fields: set[
             if values and all(_is_definitely_empty(value) for value in values):
                 empty.add(field)
     return sorted(empty)
+
+
+def _declared_result_fields(
+    tree: ast.AST,
+    mappings: dict[str, dict[str, list[ast.AST]]],
+) -> tuple[set[str], bool]:
+    """Return literal result fields and whether dynamic construction prevents proof."""
+
+    markers = {"success", "platform"}
+    candidate_names = {
+        name
+        for name, fields in mappings.items()
+        if markers.intersection(fields)
+    }
+    declared = {
+        field
+        for name in candidate_names
+        for field in mappings[name]
+    }
+    dynamic = False
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict):
+            keys = {
+                key.value
+                for key in node.keys
+                if isinstance(key, ast.Constant) and isinstance(key.value, str)
+            }
+            if markers.intersection(keys):
+                declared.update(keys)
+                dynamic = dynamic or any(
+                    not isinstance(key, ast.Constant) or not isinstance(key.value, str)
+                    for key in node.keys
+                )
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if not isinstance(target, ast.Subscript) or not isinstance(target.value, ast.Name):
+                    continue
+                if target.value.id in candidate_names and _constant_string(target.slice) is None:
+                    dynamic = True
+        elif isinstance(node, ast.Call):
+            call_name = _call_name(node.func)
+            if call_name in {"asdict", "model_dump", "to_dict", "vars"}:
+                dynamic = True
+            if (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in candidate_names
+                and node.func.attr == "update"
+                and (
+                    any(not isinstance(argument, ast.Dict) for argument in node.args)
+                    or any(keyword.arg is None for keyword in node.keywords)
+                )
+            ):
+                dynamic = True
+    return declared, dynamic
+
+
+def _constant_string(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
 
 
 def _record_dict_assignments(fields: dict[str, list[ast.AST]], node: ast.Dict) -> None:

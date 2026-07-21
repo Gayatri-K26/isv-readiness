@@ -161,6 +161,43 @@ class StaticScanTests(unittest.TestCase):
             self.assertIn("key_file", " ".join(row.evidence.schema_errors))
 
             script.write_text(
+                "result = {\n"
+                "    'success': True, 'platform': 'fixture', 'instance_id': 'vm-1',\n"
+                "}\n"
+                "print(result)\n",
+                encoding="utf-8",
+            )
+            report = scan_provider(
+                ScanOptions(
+                    provider_repo=provider,
+                    domains=["vm"],
+                    validation_root=FIXTURES / "ai-cloud-validation",
+                )
+            )
+            row = next(item for item in report.rows if item.step_name == "launch_instance")
+            self.assertEqual(row.status, "fail")
+            self.assertIn("public_ip", " ".join(row.evidence.schema_errors))
+            self.assertIn("key_file", " ".join(row.evidence.schema_errors))
+
+            script.write_text(
+                "result = {\n"
+                "    'success': True, 'platform': 'fixture', 'instance_id': 'vm-1',\n"
+                "}\n"
+                "result.update(resolve_runtime_fields())\n"
+                "print(result)\n",
+                encoding="utf-8",
+            )
+            report = scan_provider(
+                ScanOptions(
+                    provider_repo=provider,
+                    domains=["vm"],
+                    validation_root=FIXTURES / "ai-cloud-validation",
+                )
+            )
+            row = next(item for item in report.rows if item.step_name == "launch_instance")
+            self.assertEqual(row.status, "pass")
+
+            script.write_text(
                 "unused = {\n"
                 "    'success': True, 'platform': 'fixture',\n"
                 "    'public_ip': '', 'key_file': '',\n"

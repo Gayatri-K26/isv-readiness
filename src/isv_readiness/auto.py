@@ -21,6 +21,9 @@ from isv_readiness.scan.scanner import ScanOptions, scan_provider
 from isv_readiness.solution_profile import canonicalize_domain, load_solution_profile
 
 AUTO_REVIEW_VERSION = "0.1.0"
+MAX_FAILURE_SUMMARY_CHARS = 1_000
+MAX_FAILURE_DETAIL_CHARS = 2_000
+MAX_FAILURE_DETAILS = 10
 
 
 class AutoWorkflowError(ValueError):
@@ -34,6 +37,18 @@ class StagedFix:
     validation_class: str | None
     summary: str
     attempts: int
+
+
+@dataclass(frozen=True)
+class AttemptFailure:
+    attempt: int
+    category: str
+    fingerprint: str
+    summary: str
+    details: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass(frozen=True)
@@ -134,7 +149,7 @@ def run_auto(
 
     staged: list[StagedFix] = []
     attempts_by_unit: dict[str, int] = {}
-    feedback_by_unit: dict[str, tuple[str, ...]] = {}
+    feedback_by_unit: dict[str, list[AttemptFailure]] = {}
     blocked_by_unit: dict[str, str] = {}
     max_attempts = project.execution.max_attempts
     allowed_environment = declared_provider_environment(project, canonical_domain)
@@ -167,14 +182,14 @@ def run_auto(
                 generator_pass_env=generator_pass_env,
                 environment=environment,
                 generator_runner=generator_runner,
-                feedback=feedback_by_unit.get(
-                    contract_unit,
-                    _feedback_for(attempts_by_unit.get(contract_unit, 0)),
-                ),
+                feedback=feedback_by_unit.get(contract_unit, ()),
             )
             if not change_set.changes:
                 attempts_by_unit[contract_unit] = max_attempts
-                blocked_by_unit[contract_unit] = change_set.summary
+                blocked_by_unit[contract_unit] = (
+                    "Generator reported no source-grounded provider-owned implementation: "
+                    f"{change_set.summary}"
+                )
                 continue
             manifest = verify_change_set(
                 report,
@@ -193,19 +208,36 @@ def run_auto(
             # A malformed generation or guard violation is a failed attempt for
             # this gap, not a reason to abort every other gap in the run.
             attempts_by_unit[contract_unit] = attempts_by_unit.get(contract_unit, 0) + 1
-            feedback_by_unit[contract_unit] = (
-                f"Previous candidate was rejected by a deterministic guardrail: {exc}",
+            repeated = _record_failure(
+                feedback_by_unit,
+                contract_unit,
+                attempt=attempts_by_unit[contract_unit],
+                category="guardrail",
+                summary="Candidate was rejected by a deterministic guardrail.",
+                details=(str(exc),),
             )
+            if repeated:
+                attempts_by_unit[contract_unit] = max_attempts
+                blocked_by_unit[contract_unit] = _repeated_failure_reason(feedback_by_unit[contract_unit][-1])
             continue
         attempts_by_unit[contract_unit] = attempts_by_unit.get(contract_unit, 0) + 1
         if not manifest.success:
             # Leave the gap for the next iteration's retry budget; a fresh scan
             # keeps selecting it until the budget is exhausted, then it parks.
-            feedback_by_unit[contract_unit] = (
-                "Previous candidate failed isolated static verification: "
-                f"selected status became {manifest.selected_status_after or 'missing'}.",
-                *(f"Regression: {item}" for item in manifest.regressions),
+            repeated = _record_failure(
+                feedback_by_unit,
+                contract_unit,
+                attempt=attempts_by_unit[contract_unit],
+                category="static_verification",
+                summary=(
+                    "Candidate failed isolated static verification; selected status became "
+                    f"{manifest.selected_status_after or 'missing'}."
+                ),
+                details=tuple(f"Regression: {item}" for item in manifest.regressions),
             )
+            if repeated:
+                attempts_by_unit[contract_unit] = max_attempts
+                blocked_by_unit[contract_unit] = _repeated_failure_reason(feedback_by_unit[contract_unit][-1])
             continue
         apply_verified_change_set(
             report,
@@ -351,7 +383,7 @@ def _park(
     max_attempts: int = 0,
     *,
     blocked_by_unit: Mapping[str, str] | None = None,
-    feedback_by_unit: Mapping[str, Sequence[str]] | None = None,
+    feedback_by_unit: Mapping[str, Sequence[AttemptFailure | str]] | None = None,
 ) -> list[ParkedGap]:
     staged_ids = {fix.gap_id for fix in staged}
     attempts_by_unit = attempts_by_unit or {}
@@ -369,12 +401,9 @@ def _park(
             contract_unit = adapter_contract_unit(row)
             attempts = attempts_by_unit.get(contract_unit, 0)
             blocker = blocked_by_unit.get(contract_unit)
-            last_feedback = " ".join(feedback_by_unit.get(contract_unit, ()))
+            last_feedback = _latest_failure_text(feedback_by_unit.get(contract_unit, ()))
             if blocker:
-                reason = (
-                    "Generator reported no source-grounded provider-owned implementation: "
-                    f"{blocker}"
-                )
+                reason = blocker
             elif attempts == 0:
                 reason = "Not attempted within this run's iteration budget; apply the staged patch and re-run auto to continue."
             elif attempts < max_attempts:
@@ -422,7 +451,7 @@ def _generate(
     generator_pass_env: Sequence[str],
     environment: Mapping[str, str] | None,
     generator_runner: GeneratorRunner | None,
-    feedback: Sequence[str],
+    feedback: Sequence[AttemptFailure],
 ) -> tuple[ChangeSet, dict[str, float]]:
     context_pack = build_context_pack(
         project,
@@ -431,7 +460,7 @@ def _generate(
         gap_id=gap_id,
         cache_dir=project_path.parent / ".gapctl" / "context-cache",
         environment=environment,
-        feedback=feedback,
+        feedback=[failure.to_dict() for failure in feedback],
     )
     raw_context_pack = context_pack.to_dict()
     return run_generator(
@@ -444,10 +473,70 @@ def _generate(
     ), provider_contract_constraints(raw_context_pack)
 
 
-def _feedback_for(prior_attempts: int) -> tuple[str, ...]:
-    if prior_attempts == 0:
-        return ()
-    return (f"Previous {prior_attempts} candidate(s) failed isolated verification; revise the approach.",)
+def _record_failure(
+    failures_by_unit: dict[str, list[AttemptFailure]],
+    contract_unit: str,
+    *,
+    attempt: int,
+    category: str,
+    summary: str,
+    details: tuple[str, ...],
+) -> bool:
+    normalized_summary = " ".join(summary.split())
+    normalized_details = tuple(" ".join(detail.split()) for detail in details)
+    canonical = json.dumps(
+        {
+            "category": category,
+            "summary": normalized_summary,
+            "details": normalized_details,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    bounded_details = tuple(
+        _bounded_failure_text(detail, MAX_FAILURE_DETAIL_CHARS)
+        for detail in normalized_details[:MAX_FAILURE_DETAILS]
+    )
+    if len(normalized_details) > MAX_FAILURE_DETAILS:
+        omitted = json.dumps(normalized_details[MAX_FAILURE_DETAILS:], separators=(",", ":"))
+        bounded_details += (
+            f"{len(normalized_details) - MAX_FAILURE_DETAILS} additional detail(s) omitted "
+            f"(sha256 {hashlib.sha256(omitted.encode('utf-8')).hexdigest()}).",
+        )
+    failure = AttemptFailure(
+        attempt=attempt,
+        category=category,
+        fingerprint=hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16],
+        summary=_bounded_failure_text(normalized_summary, MAX_FAILURE_SUMMARY_CHARS),
+        details=bounded_details,
+    )
+    history = failures_by_unit.setdefault(contract_unit, [])
+    history.append(failure)
+    return sum(item.fingerprint == failure.fingerprint for item in history) >= 2
+
+
+def _repeated_failure_reason(failure: AttemptFailure) -> str:
+    return (
+        "Stopped generation after the same deterministic failure repeated twice "
+        f"({failure.category}, fingerprint {failure.fingerprint}). "
+        f"Last failure: {_latest_failure_text((failure,))}"
+    )
+
+
+def _latest_failure_text(feedback: Sequence[AttemptFailure | str]) -> str:
+    if not feedback:
+        return ""
+    latest = feedback[-1]
+    if isinstance(latest, str):
+        return latest
+    return " ".join((latest.summary, *latest.details)).strip()
+
+
+def _bounded_failure_text(value: str, max_chars: int) -> str:
+    if len(value) <= max_chars:
+        return value
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+    return f"{value[:max_chars]}... [truncated; sha256 {digest}]"
 
 
 def _scan(provider_repo: Path, validation_root: Path, domain: str, profile) -> dict[str, Any]:

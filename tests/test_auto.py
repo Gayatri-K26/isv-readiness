@@ -168,6 +168,73 @@ class AutoResilienceTests(unittest.TestCase):
         feedback = next(item for item in retry_items if item["source_id"] == "previous_attempt_feedback")
         self.assertIn("deterministic guardrail", feedback["content"])
         self.assertIn("one JSON object", feedback["content"])
+        digest = json.loads(feedback["content"])
+        self.assertEqual(digest["latest"]["category"], "guardrail")
+        self.assertEqual(len(digest["ledger"]), 1)
+        self.assertEqual(digest["latest"]["fingerprint"], digest["ledger"][0]["fingerprint"])
+
+    def test_same_deterministic_failure_twice_parks_without_a_third_generation(self) -> None:
+        calls_by_target: dict[str, int] = {}
+
+        def always_malformed(command, cwd, request, environment, timeout):
+            del cwd, environment, timeout
+            payload = json.loads(request)
+            target = payload["context_pack"]["gap"]["remediation"]["target"]
+            calls_by_target[target] = calls_by_target.get(target, 0) + 1
+            return subprocess.CompletedProcess(command, 0, "prose, not json", "")
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            project_path, _provider = _project(Path(tempdir))
+            review = run_auto(
+                project_path,
+                domain="vm",
+                work_dir=Path(tempdir) / "work",
+                generator_command=["fixture-generator"],
+                generator_runner=always_malformed,
+            )
+
+        self.assertTrue(calls_by_target)
+        self.assertTrue(all(count == 2 for count in calls_by_target.values()))
+        self.assertEqual(review.status, "no_changes")
+        self.assertTrue(review.parked)
+        self.assertTrue(any("repeated twice" in item.reason for item in review.parked))
+
+    def test_different_failures_reach_third_attempt_with_a_compact_ledger(self) -> None:
+        calls = {"n": 0}
+        requests: list[dict] = []
+
+        def evolving_runner(command, cwd, request, environment, timeout):
+            calls["n"] += 1
+            requests.append(json.loads(request))
+            if calls["n"] == 1:
+                return subprocess.CompletedProcess(command, 0, "prose, not json", "")
+            if calls["n"] == 2:
+                result = _generator_runner(command, cwd, request, environment, timeout)
+                output = json.loads(result.stdout)
+                output["gap_id"] = "gap_ffffffffffff"
+                return subprocess.CompletedProcess(command, 0, json.dumps(output), "")
+            return _generator_runner(command, cwd, request, environment, timeout)
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            project_path, _provider = _project(Path(tempdir))
+            review = run_auto(
+                project_path,
+                domain="vm",
+                work_dir=Path(tempdir) / "work",
+                generator_command=["fixture-generator"],
+                generator_runner=evolving_runner,
+            )
+
+        self.assertEqual(review.status, "awaiting_review")
+        third_feedback = next(
+            item
+            for item in requests[2]["context_pack"]["items"]
+            if item["source_id"] == "previous_attempt_feedback"
+        )
+        digest = json.loads(third_feedback["content"])
+        self.assertEqual(len(digest["ledger"]), 2)
+        self.assertNotEqual(digest["ledger"][0]["fingerprint"], digest["ledger"][1]["fingerprint"])
+        self.assertIn("expected", " ".join(digest["latest"]["details"]))
 
     def test_retry_budget_is_shared_by_rows_with_the_same_target(self) -> None:
         rows = []

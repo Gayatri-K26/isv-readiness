@@ -139,16 +139,18 @@ For every owned domain, `validate`:
    to edit;
 3. gives the selected generator the complete declared runtime-input contract,
    every edit-eligible unresolved check in the same adapter contract unit, and
-   the exact pinned suite entries, step-output schemas, relevant validation
-   class implementations, and a compact provider-adapter checklist; checks
+   the exact pinned suite entries and step-output schemas plus a deterministic,
+   source-hashed interface projection of the relevant validation consumers and
+   one bounded source hop for uniquely resolved local helpers they call; checks
    share a unit by script, or by configuration file plus step, and the bounded
    per-gap pack fails rather than silently truncating or omitting a selected
    source;
 4. rejects undeclared runtime inputs, TLS-verification bypasses, raw
    provider output in result JSON, required downstream outputs left provably
-   empty, lifecycle timeouts below an explicit authoritative source threshold,
-   internal deadlines that exceed the configured step timeout, and domain-config
-   replacements that alter anything outside the selected step;
+   empty or omitted from a recognizable result mapping, lifecycle timeouts below
+   an explicit authoritative source threshold, internal deadlines that exceed
+   the configured step timeout, and domain-config replacements that alter
+   anything outside the selected step;
 5. verifies the candidate statically in an isolated copy;
 6. writes one combined patch under `.gapctl/work/<domain>/`;
 7. displays the patch hash and asks for human approval;
@@ -162,8 +164,15 @@ Rejecting a candidate discards its generated review markers. The next
 showing the rejected patch.
 
 Generator guidance also treats provider-derived subprocess arguments as
-untrusted and preserves the declared meaning of optional response fields.
-When retries are exhausted, the parked gap retains the last deterministic
+untrusted, preserves the declared meaning of optional response fields, and
+requires interactive console or shell probes to terminate cleanly rather than
+misclassifying a healthy continuing session as a timeout.
+Lifecycle verbs also remain literal: a launch or create step cannot be replaced
+with a read-only check of a pre-existing resource.
+Retry requests contain the latest deterministic failure plus a compact attempt
+ledger, not prior candidates or an accumulated transcript. If the same failure
+fingerprint appears twice, the contract is parked without a third identical
+generation. When retries stop, the parked gap retains the last deterministic
 guardrail or static-verification failure for review.
 The reviewed qualification mapping is an implementation premise during
 `validate`: runtime uncertainty is handled by response validation and explicit

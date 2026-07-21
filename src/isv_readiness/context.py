@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import builtins
 import hashlib
 import json
 import math
@@ -82,6 +83,9 @@ PROVIDER_IMPLEMENTATION_RULES = (
     "not by itself a reason to refuse implementation.",
     "Preserve one canonical resource identifier across setup output, configured step arguments, lifecycle API calls, "
     "and result JSON. Do not silently replace a configured identifier with another environment-derived identifier.",
+    "Preserve lifecycle verbs. A create, launch, provision, delete, or teardown step must perform that source-backed "
+    "operation; observing or validating a pre-existing resource does not satisfy a mutating lifecycle contract. "
+    "Return an empty change set when the declared interface lacks the required operation.",
     "Keep TLS peer verification enabled. Never add an unverified SSL context, CERT_NONE, verify=False, curl -k, "
     "or an equivalent bypass.",
     "Keep internal polling and subprocess deadlines inside the configured step timeout. A runner timeout may include "
@@ -108,6 +112,9 @@ PROVIDER_IMPLEMENTATION_RULES = (
     "Standard client behavior such as verified TLS defaults, the current remote SSH user, and host-side SSH "
     "configuration may be used when the reviewed interface explicitly establishes that access flow. Do not "
     "fabricate credentials or claim reachability; return a runtime failure when the environment is not configured.",
+    "Treat an interactive console or shell as a session, not a batch command that must exit naturally. Establish "
+    "success only from source-backed readiness evidence, terminate the probe cleanly within its deadline, and do "
+    "not turn the expected continued session into a timeout failure.",
     "Treat connection topology as part of the structural contract. If provider evidence requires a jump host, "
     "proxy, gateway, or equivalent intermediate hop but the pinned validation consumer accepts only a direct "
     "endpoint and credential with no compatible proxy input, return an empty change set with that exact blocker. "
@@ -136,6 +143,10 @@ PRIVATE_KEY_RE = re.compile(
 )
 
 Fetcher = Callable[[str, Mapping[str, str]], bytes]
+OUTCOME_CALLS = frozenset({"report_subtest", "set_failed", "set_passed"})
+DYNAMIC_CALLS = frozenset({"__import__", "eval", "exec", "getattr", "globals", "locals"})
+BUILTIN_CALLS = frozenset(dir(builtins))
+MAX_DEPENDENCY_SOURCE_CHARS = 4_000
 
 
 class ContextError(ValueError):
@@ -260,7 +271,7 @@ def build_context_pack(
     cache_dir: Path,
     environment: Mapping[str, str] | None = None,
     max_chars: int = 180_000,
-    feedback: Sequence[str] = (),
+    feedback: Sequence[Mapping[str, Any] | str] = (),
 ) -> ContextPack:
     if max_chars < 4_000:
         raise ContextError("Context budget must be at least 4000 characters.")
@@ -338,8 +349,8 @@ def build_context_pack(
                 "verifier_feedback",
                 "authoritative",
                 "gapctl://previous-attempt",
-                "\n\n".join(feedback),
-                "feedback from the prior static or live verification attempt",
+                json.dumps(_bounded_failure_feedback(feedback), indent=2, sort_keys=True),
+                "latest deterministic failure plus a compact attempt ledger",
             )
         )
     candidates.extend(_run_items(cache_dir, gap.domain, terms))
@@ -370,17 +381,59 @@ def build_context_pack(
         credentials={"required_env": required_env, "available_env": available_env},
         constraints=(
             "Treat ai-cloud-validation suites and validation classes as read-only source-of-truth contracts.",
+            "Treat each validation_interfaces entry as a deterministic projection of the pinned consumer source: "
+            "use only its documented inputs, keyed data access, conditions, outcomes, dependencies, and provenance; "
+            "never infer behavior hidden by an explicit uncertainty or omitted full source.",
+            "Treat direct_dependency_sources as exact, read-only one-hop helper evidence from the selected checkout; "
+            "do not infer unprovided transitive helper behavior.",
             "Change only provider-owned files authorized by the selected scope and change-set policy.",
             "Never place credential values in source, patches, prompts, reports, or logs.",
             "Prior-run artifacts are empirical evidence of runtime behavior; when they conflict with declared sources or profile claims, trust the run results.",
             "Results attest only to the ISV-owned scope; do not claim coverage of domains or layers the ISV does not own.",
-            *PROVIDER_IMPLEMENTATION_RULES,
         ),
         items=tuple(items),
         budget={"max_chars": max_chars, "used_chars": used, "omitted_items": omitted},
     )
     validate_context_pack(pack.to_dict())
     return pack
+
+
+def _bounded_failure_feedback(feedback: Sequence[Mapping[str, Any] | str]) -> dict[str, Any]:
+    normalized: list[dict[str, Any]] = []
+    for index, item in enumerate(feedback, start=1):
+        if isinstance(item, str):
+            normalized.append(
+                {
+                    "attempt": index,
+                    "category": "legacy",
+                    "fingerprint": _sha256_text(" ".join(item.split()))[:16],
+                    "summary": item,
+                    "details": [],
+                }
+            )
+            continue
+        normalized.append(
+            {
+                "attempt": item.get("attempt", index),
+                "category": item.get("category", "verification"),
+                "fingerprint": item.get("fingerprint"),
+                "summary": item.get("summary", "Candidate verification failed."),
+                "details": list(item.get("details") or ()),
+            }
+        )
+    latest = normalized[-1]
+    return {
+        "latest": latest,
+        "ledger": [
+            {
+                "attempt": item["attempt"],
+                "category": item["category"],
+                "fingerprint": item["fingerprint"],
+                "summary": item["summary"],
+            }
+            for item in normalized
+        ],
+    }
 
 
 def build_qualify_pack(
@@ -616,7 +669,7 @@ def _upstream_target_contract(
                 and classes.intersection(value["checks"])
             }
 
-    class_sources: dict[str, dict[str, str]] = {}
+    class_interfaces: dict[str, dict[str, Any]] = {}
     source_root = validation_root / "isvtest" / "src" / "isvtest" / "validations"
     if source_root.is_dir():
         for path in sorted(source_root.rglob("*.py")):
@@ -626,14 +679,16 @@ def _upstream_target_contract(
             except SyntaxError:
                 continue
             for node in ast.walk(tree):
-                if not isinstance(node, ast.ClassDef) or node.name not in classes or node.name in class_sources:
+                if not isinstance(node, ast.ClassDef) or node.name not in classes or node.name in class_interfaces:
                     continue
                 source = ast.get_source_segment(text, node)
                 if source:
-                    class_sources[node.name] = {
-                        "path": str(path.relative_to(validation_root)),
-                        "source": source,
-                    }
+                    class_interfaces[node.name] = _validation_class_interface(
+                        node,
+                        text,
+                        path=str(path.relative_to(validation_root)),
+                        source_sha256=_sha256_text(source),
+                    )
 
     output_schemas: dict[str, Any] = {}
     registry = SchemaRegistry(validation_root)
@@ -642,23 +697,327 @@ def _upstream_target_contract(
         schema = registry.schema(schema_name) if schema_name else None
         output_schemas[step] = {"name": schema_name, "schema": schema}
 
+    dependency_sources = _direct_dependency_sources(validation_root, class_interfaces)
+
     payload = {
         "suite_path": str(suite_path.relative_to(validation_root)) if suite_path.is_file() else None,
         "suite_entries": suite_entries,
         "output_schemas": output_schemas,
-        "validation_classes": class_sources,
-        "missing_validation_classes": sorted(classes.difference(class_sources)),
+        "validation_interface_projection": {
+            "version": "python_ast_v1",
+            "captures": [
+                "class and method signatures",
+                "docstrings and class attributes",
+                "constant-string mapping lookups",
+                "if, while, and assert conditions",
+                "return expressions",
+                "validation outcome calls",
+                "direct call dependencies and caught exceptions",
+                "one bounded source hop for uniquely resolved local helper calls",
+                "dynamic-call uncertainty",
+            ],
+            "full_source_in_pack": False,
+        },
+        "validation_interfaces": class_interfaces,
+        "direct_dependency_sources": dependency_sources,
+        "missing_validation_classes": sorted(classes.difference(class_interfaces)),
     }
-    if not suite_entries and not class_sources and not output_schemas:
+    if not suite_entries and not class_interfaces and not output_schemas:
         return None
     return _item(
         "upstream_target_contract",
         "validation_contract",
         "authoritative",
         "gapctl://upstream/selected-target",
-        json.dumps(payload, indent=2, sort_keys=True),
-        "exact pinned suite entries, output schemas, and validation implementations for the selected contract unit",
+        json.dumps(payload, sort_keys=True, separators=(",", ":")),
+        "exact pinned suite entries and output schemas plus provenance-backed interfaces extracted from validation consumers",
     )
+
+
+def _validation_class_interface(
+    node: ast.ClassDef,
+    text: str,
+    *,
+    path: str,
+    source_sha256: str,
+) -> dict[str, Any]:
+    """Project one validation class into deterministic, provenance-backed facts.
+
+    Full consumer source remains authoritative at ``path`` and ``source_sha256``.
+    The model receives only the interface facts needed to implement a provider
+    adapter, which avoids treating unrelated consumer implementation details as
+    provider requirements.
+    """
+
+    methods = [
+        _method_interface(child, text)
+        for child in node.body
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    lookups: list[dict[str, Any]] = []
+    calls: dict[str, set[int]] = {}
+    conditions: list[dict[str, Any]] = []
+    returns: list[dict[str, Any]] = []
+    outcomes: list[dict[str, Any]] = []
+    uncertainties: list[dict[str, Any]] = []
+
+    for child in ast.walk(node):
+        if isinstance(child, ast.Call):
+            callee = _call_name(child.func)
+            if _is_direct_dependency(callee):
+                calls.setdefault(callee or "<dynamic>", set()).add(child.lineno)
+            if callee and callee.rsplit(".", 1)[-1] in OUTCOME_CALLS:
+                outcome: dict[str, Any] = {
+                    "line": child.lineno,
+                    "callee": callee,
+                }
+                if callee.endswith("report_subtest") and child.args:
+                    outcome["subtest"] = _bounded_expression(text, child.args[0])
+                outcomes.append(outcome)
+            if not callee or callee.rsplit(".", 1)[-1] in DYNAMIC_CALLS:
+                uncertainties.append(
+                    {
+                        "line": child.lineno,
+                        "reason": "dynamic call cannot be resolved statically",
+                        "expression": _source_expression(text, child.func),
+                    }
+                )
+            if (
+                isinstance(child.func, ast.Attribute)
+                and child.func.attr == "get"
+                and child.args
+                and isinstance(child.args[0], ast.Constant)
+                and isinstance(child.args[0].value, str)
+            ):
+                lookups.append(
+                    {
+                        "line": child.lineno,
+                        "receiver": _source_expression(text, child.func.value),
+                        "key": child.args[0].value,
+                        "access": "get",
+                        "default_supplied": len(child.args) > 1,
+                        "default": _source_expression(text, child.args[1]) if len(child.args) > 1 else None,
+                    }
+                )
+        elif isinstance(child, ast.Subscript):
+            key = _constant_string(child.slice)
+            if key is not None:
+                lookups.append(
+                    {
+                        "line": child.lineno,
+                        "receiver": _source_expression(text, child.value),
+                        "key": key,
+                        "access": "index",
+                        "default_supplied": False,
+                        "default": None,
+                    }
+                )
+        elif isinstance(child, (ast.If, ast.While, ast.Assert)):
+            test = child.test
+            conditions.append(
+                {
+                    "line": child.lineno,
+                    "kind": type(child).__name__.lower(),
+                    "expression": _source_expression(text, test),
+                }
+            )
+        elif isinstance(child, ast.Return) and child.value is not None:
+            returns.append(
+                {
+                    "line": child.lineno,
+                    "expression": _bounded_expression(text, child.value),
+                }
+            )
+    class_attributes: list[dict[str, Any]] = []
+    for child in node.body:
+        if isinstance(child, (ast.Assign, ast.AnnAssign)) and child.value is not None:
+            targets = child.targets if isinstance(child, ast.Assign) else [child.target]
+            class_attributes.append(
+                {
+                    "line": child.lineno,
+                    "targets": [_source_expression(text, target) for target in targets],
+                    "value": _source_expression(text, child.value),
+                }
+            )
+
+    return {
+        "source": {
+            "path": path,
+            "start_line": node.lineno,
+            "end_line": node.end_lineno,
+            "class_sha256": source_sha256,
+            "complete_source_in_pack": False,
+        },
+        "bases": [_source_expression(text, base) for base in node.bases],
+        "decorators": [_source_expression(text, decorator) for decorator in node.decorator_list],
+        "docstring": ast.get_docstring(node, clean=True),
+        "class_attributes": class_attributes,
+        "methods": methods,
+        "data_lookups": _group_records(
+            lookups,
+            ("receiver", "key", "access", "default_supplied", "default"),
+        ),
+        "conditions": _group_records(conditions, ("kind", "expression")),
+        "returns": _group_records(returns, ("expression",)),
+        "outcomes": _group_records(outcomes, ("callee", "subtest")),
+        "direct_dependencies": [
+            {
+                "callee": callee,
+                "lines": sorted(lines),
+            }
+            for callee, lines in sorted(calls.items())
+        ],
+        "exceptions_caught": _caught_exceptions(node, text),
+        "uncertainties": _deduplicate_records(uncertainties),
+    }
+
+
+def _direct_dependency_sources(
+    validation_root: Path,
+    interfaces: Mapping[str, Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Retrieve one bounded source hop for uniquely resolved local helper calls."""
+
+    names = {
+        str(dependency["callee"])
+        for interface in interfaces.values()
+        for dependency in interface.get("direct_dependencies", [])
+        if "." not in str(dependency.get("callee", ""))
+    }
+    if not names:
+        return {}
+
+    package_root = validation_root / "isvtest" / "src" / "isvtest"
+    matches: dict[str, list[tuple[Path, ast.FunctionDef | ast.AsyncFunctionDef, str]]] = {}
+    for path in sorted(package_root.rglob("*.py")) if package_root.is_dir() else ():
+        text = _read_text(path)
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in names:
+                matches.setdefault(node.name, []).append((path, node, text))
+
+    sources: dict[str, dict[str, Any]] = {}
+    for name, candidates in sorted(matches.items()):
+        if len(candidates) != 1:
+            continue
+        path, node, text = candidates[0]
+        source = ast.get_source_segment(text, node)
+        if not source:
+            continue
+        record: dict[str, Any] = {
+            "path": str(path.relative_to(validation_root)),
+            "start_line": node.lineno,
+            "end_line": node.end_lineno,
+            "sha256": _sha256_text(source),
+            "source_chars": len(source),
+        }
+        if len(source) <= MAX_DEPENDENCY_SOURCE_CHARS:
+            record["source"] = source
+        else:
+            record["source_omitted"] = "helper exceeds one-hop source bound"
+        sources[name] = record
+    return sources
+
+
+def _method_interface(node: ast.FunctionDef | ast.AsyncFunctionDef, text: str) -> dict[str, Any]:
+    signature = f"{node.name}({_source_expression(text, node.args)})"
+    if node.returns is not None:
+        signature += f" -> {_source_expression(text, node.returns)}"
+    return {
+        "name": node.name,
+        "signature": signature,
+        "execution_mode": "async" if isinstance(node, ast.AsyncFunctionDef) else "sync",
+        "decorators": [_source_expression(text, decorator) for decorator in node.decorator_list],
+        "start_line": node.lineno,
+        "end_line": node.end_lineno,
+    }
+
+
+def _call_name(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        prefix = _call_name(node.value)
+        return f"{prefix}.{node.attr}" if prefix else node.attr
+    return None
+
+
+def _is_direct_dependency(callee: str | None) -> bool:
+    if callee is None:
+        return True
+    name = callee.rsplit(".", 1)[-1]
+    return (
+        name not in BUILTIN_CALLS
+        and name not in DYNAMIC_CALLS
+        and name not in OUTCOME_CALLS
+        and name != "get"
+        and not callee.startswith("self.log.")
+    )
+
+
+def _caught_exceptions(node: ast.ClassDef, text: str) -> list[dict[str, Any]]:
+    caught: list[dict[str, Any]] = []
+    for child in ast.walk(node):
+        if not isinstance(child, ast.ExceptHandler):
+            continue
+        caught.append(
+            {
+                "line": child.lineno,
+                "type": _source_expression(text, child.type) if child.type is not None else "BaseException",
+            }
+        )
+    return _deduplicate_records(caught)
+
+
+def _constant_string(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
+def _source_expression(text: str, node: ast.AST | None) -> str:
+    if node is None:
+        return ""
+    source = ast.get_source_segment(text, node)
+    return source.strip() if source else ast.unparse(node)
+
+
+def _bounded_expression(text: str, node: ast.AST, *, max_chars: int = 240) -> str | dict[str, Any]:
+    expression = _source_expression(text, node)
+    if len(expression) <= max_chars:
+        return expression
+    return {
+        "chars": len(expression),
+        "sha256": _sha256_text(expression),
+        "omitted": "expression exceeds deterministic interface bound",
+    }
+
+
+def _deduplicate_records(records: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    result: list[dict[str, Any]] = []
+    for record in sorted(records, key=lambda item: (int(item.get("line", 0)), json.dumps(item, sort_keys=True))):
+        fingerprint = json.dumps(record, sort_keys=True, separators=(",", ":"))
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        result.append(record)
+    return result
+
+
+def _group_records(records: Sequence[dict[str, Any]], fields: tuple[str, ...]) -> list[dict[str, Any]]:
+    grouped: dict[str, tuple[dict[str, Any], set[int]]] = {}
+    for record in records:
+        payload = {field: record.get(field) for field in fields}
+        fingerprint = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        grouped.setdefault(fingerprint, (payload, set()))[1].add(int(record.get("line", 0)))
+    return [
+        {**payload, "lines": sorted(lines)}
+        for _fingerprint, (payload, lines) in sorted(grouped.items())
+    ]
 
 
 def _sync_source(

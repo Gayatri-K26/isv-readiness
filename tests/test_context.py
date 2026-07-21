@@ -110,9 +110,13 @@ class ContextTests(unittest.TestCase):
             )
             validations.mkdir(parents=True)
             (validations / "vm.py").write_text(
+                "def normalize_state(value):\n"
+                "    return value.strip()\n"
+                "\n"
                 "class VmLaunchCheck:\n"
                 "    def run(self):\n"
-                "        state = self.config['step_output'].get('state')\n"
+                "        checker = getattr(self, 'checker', None)\n"
+                "        state = normalize_state(self.config['step_output'].get('state'))\n"
                 "        return state == self.config.get('expected_state', 'running')\n",
                 encoding="utf-8",
             )
@@ -169,9 +173,37 @@ class ContextTests(unittest.TestCase):
             upstream = next(item for item in raw["items"] if item["source_id"] == "upstream_target_contract")
             self.assertIn("expected_state", upstream["content"])
             self.assertIn("step_output", upstream["content"])
+            upstream_payload = json.loads(upstream["content"])
+            self.assertEqual(upstream_payload["validation_interface_projection"]["version"], "python_ast_v1")
+            helper = upstream_payload["direct_dependency_sources"]["normalize_state"]
+            self.assertIn("def normalize_state(value)", helper["source"])
+            self.assertRegex(helper["sha256"], r"^[0-9a-f]{64}$")
+            interface = upstream_payload["validation_interfaces"]["VmLaunchCheck"]
+            self.assertFalse(interface["source"]["complete_source_in_pack"])
+            self.assertEqual(interface["source"]["path"], "isvtest/src/isvtest/validations/vm.py")
+            self.assertRegex(interface["source"]["class_sha256"], r"^[0-9a-f]{64}$")
+            self.assertEqual(interface["methods"][0]["signature"], "run(self)")
+            self.assertIn("expected_state", {lookup["key"] for lookup in interface["data_lookups"]})
+            self.assertIn("step_output", {lookup["key"] for lookup in interface["data_lookups"]})
+            by_key = {lookup["key"]: lookup for lookup in interface["data_lookups"]}
+            self.assertEqual(by_key["step_output"]["access"], "index")
+            self.assertEqual(by_key["expected_state"]["access"], "get")
+            self.assertTrue(by_key["expected_state"]["default_supplied"])
+            self.assertEqual(
+                interface["returns"][0]["expression"],
+                "state == self.config.get('expected_state', 'running')",
+            )
+            self.assertEqual(interface["uncertainties"][0]["reason"], "dynamic call cannot be resolved statically")
+            self.assertNotIn("def run", upstream["content"])
             self.assertEqual(raw["budget"]["omitted_items"], 0)
             self.assertTrue(all(not item["truncated"] for item in raw["items"]))
             self.assertTrue(
+                any(
+                    "deterministic projection of the pinned consumer source" in rule
+                    for rule in raw["constraints"]
+                )
+            )
+            self.assertFalse(
                 any(
                     "Use only runtime environment names declared by the project" in rule
                     for rule in raw["constraints"]

@@ -153,36 +153,56 @@ contract unit. Checks share a unit when they use one script. Rows whose target
 is a YAML configuration file share a unit only when their step name also
 matches; unrelated steps commonly live in the same domain file and must remain
 independent decisions. The pack also includes the exact relevant entries from
-the pinned suite, the step-output schemas, and the source of the validation
-classes that consume those outputs. Provider-neutral authoring rules require
-source-grounded interfaces, one canonical resource identifier across configured
-lifecycle steps, verified TLS, bounded timeouts, structured result fields, and
-no raw provider output in evidence. The rules also require the documented
-semantic contract to be honored even when an executable assertion is weaker;
-provider-native concepts may be mapped to contract primitives only when the
-supplied evidence establishes that mapping. Provider-derived subprocess
-arguments are treated as untrusted, and absent optional response fields are not
-allowed to override required state fields implicitly. The reviewed profile
-mapping is an approved implementation premise: a declared response variation
-is handled by bounded parsing and explicit runtime failure rather than by
-reopening qualification scope. Standard verified client behavior may implement
-an established access flow without inventing provider credentials or success.
+the pinned suite, the step-output schemas, and a deterministic AST projection of
+the validation classes that consume those outputs. That projection retains
+method signatures, documented inputs, keyed data access, exact branch
+conditions, pass/fail outcomes, direct dependencies, caught exceptions, source
+line ranges, source hashes, and explicit unresolved dynamic behavior. Complete
+consumer files remain at their pinned paths instead of being copied into every
+model request. When a direct dependency resolves uniquely to a local helper,
+the pack adds that one bounded function source as exact evidence; lookup does
+not recurse through an unbounded call graph. Provider-authoring rules live once
+at the generator task boundary instead of being duplicated inside the evidence
+pack.
+
+Provider-neutral authoring rules require source-grounded interfaces, one
+canonical resource identifier across configured lifecycle steps, verified TLS,
+bounded timeouts, structured result fields, and no raw provider output in
+evidence. The rules also require the documented semantic contract to be honored
+even when an executable assertion is weaker; provider-native concepts may be
+mapped to contract primitives only when the supplied evidence establishes that
+mapping. Provider-derived subprocess arguments are treated as untrusted, and
+absent optional response fields are not allowed to override required state
+fields implicitly. The reviewed profile mapping is an approved implementation
+premise: a declared response variation is handled by bounded parsing and
+explicit runtime failure rather than by reopening qualification scope. Standard
+verified client behavior may implement an established access flow without
+inventing provider credentials or success. Interactive consoles and shells are
+treated as sessions: a probe must use source-backed readiness evidence and
+terminate cleanly instead of waiting for a healthy session to exit naturally.
+
 Retry accounting uses the same contract unit, so several checks backed by one
-adapter cannot multiply the model budget or consume another step's retries. The
-final parked reason retains the last guardrail or static-verification feedback
-when that budget is exhausted. The per-gap pack has a 180k-character bound and
-fails closed instead of truncating or omitting selected evidence; sibling rows
-are represented by their validation contract fields rather than duplicated
-scanner metadata.
+adapter cannot multiply the model budget or consume another step's retries.
+Each retry receives only the latest structured failure in full plus a compact
+attempt ledger. If the same deterministic failure fingerprint appears twice,
+the unit is parked immediately instead of spending a third generation on the
+same outcome. Model and transport failures remain infrastructure errors outside
+this repair state. The final parked reason retains the exact stopping evidence.
+The per-gap pack keeps its model-neutral 180k-character safety bound and fails
+closed instead of truncating or omitting selected evidence; sibling rows are
+represented by their validation contract fields rather than duplicated scanner
+metadata.
 
 Deterministic candidate checks enforce what can be established without knowing
 the provider: environment references in each changed candidate must be declared,
 insecure TLS patterns are rejected, raw response/console fields cannot enter
-result JSON, a downstream-consumed output cannot remain provably empty, and an
-explicit internal deadline cannot exceed its configured step timeout. When an
-authoritative API specification declares a machine-readable lifecycle timeout,
-the changed lifecycle adapter's runner timeout and explicit internal recovery
-deadline cannot be shorter than that source-backed threshold.
+result JSON, a recognizable result mapping cannot omit or leave empty an output
+consumed by a later configured step, and an explicit internal deadline cannot
+exceed its configured step timeout. Dynamic result construction remains a human
+review concern when static proof is not possible. When an authoritative API
+specification declares a machine-readable lifecycle timeout, the changed
+lifecycle adapter's runner timeout and explicit internal recovery deadline
+cannot be shorter than that source-backed threshold.
 For an existing domain YAML configuration, removing the selected step block
 from the original and candidate must leave the same surrounding text. This
 permits a coordinated step wiring or timeout change while rejecting whole-file
@@ -194,6 +214,11 @@ provider interfaces cannot satisfy the pinned contract within the edit boundary,
 the schema permits an empty change set carrying the exact blocker; the target is
 parked instead of forcing fabricated code. Static rescan success is therefore
 labeled as static verification, never as runtime proof.
+
+Lifecycle semantics remain literal. A create, launch, provision, delete, or
+teardown step cannot be implemented as a read-only check of a pre-existing
+resource; when the declared interface lacks the corresponding operation, the
+generator must park it.
 
 Connection topology is part of that structural comparison. A jump host, proxy,
 or gateway cannot be substituted for the resource that an upstream check tests
