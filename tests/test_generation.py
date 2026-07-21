@@ -8,10 +8,36 @@ import unittest
 from pathlib import Path
 
 from isv_readiness.fixes import FixGuardrailError
-from isv_readiness.generation import dispatch_generator, run_generator
+from isv_readiness.generation import GeneratorInfrastructureError, dispatch_generator, run_generator
 
 
 class GeneratorAdapterTests(unittest.TestCase):
+    def test_generator_timeout_is_classified_as_infrastructure_failure(self) -> None:
+        def timed_out(command, cwd, request, environment, timeout):
+            del cwd, request, environment
+            raise subprocess.TimeoutExpired(command, timeout)
+
+        with self.assertRaisesRegex(GeneratorInfrastructureError, "timed out after 900 seconds"):
+            dispatch_generator(
+                {"output_schema": {}},
+                command=["fixture"],
+                cwd=Path("/tmp"),
+                runner=timed_out,
+            )
+
+    def test_generator_adapter_reports_nested_model_timeout(self) -> None:
+        def timed_out(command, cwd, request, environment, timeout):
+            del cwd, request, environment, timeout
+            return subprocess.CompletedProcess(command, 124, "", "Claude model timed out after 600 seconds.")
+
+        with self.assertRaisesRegex(GeneratorInfrastructureError, "Claude model timed out"):
+            dispatch_generator(
+                {"output_schema": {}},
+                command=["fixture"],
+                cwd=Path("/tmp"),
+                runner=timed_out,
+            )
+
     def test_nonzero_generator_exit_reports_the_actual_error_tail(self) -> None:
         def failed(command, cwd, request, environment, timeout):
             del cwd, request, environment, timeout
@@ -90,6 +116,8 @@ class GeneratorAdapterTests(unittest.TestCase):
             self.assertIn("lifecycle_step_timeout_seconds=1200", rules)
             self.assertIn("explicit optional failure indicator", rules)
             self.assertIn("current remote SSH user", rules)
+            self.assertIn("connection topology", rules)
+            self.assertIn("Never substitute the intermediary", rules)
             self.assertIn("structurally incompatible", seen["request"]["task"])
             self.assertEqual(seen["timeout"], 900)
             self.assertEqual(seen["environment"]["USER"], "operator")

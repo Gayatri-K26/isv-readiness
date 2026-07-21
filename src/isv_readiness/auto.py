@@ -14,7 +14,7 @@ from isv_readiness.changes import ChangeSet
 from isv_readiness.context import build_context_pack, provider_contract_constraints
 from isv_readiness.decision import adapter_contract_unit, decide_gap, validation_profile_issues
 from isv_readiness.fixes import FixGuardrailError
-from isv_readiness.generation import GeneratorRunner, run_generator
+from isv_readiness.generation import GeneratorInfrastructureError, GeneratorRunner, run_generator
 from isv_readiness.project import ReadinessProject, declared_provider_environment, load_project
 from isv_readiness.scan.profile import enrich_report_with_profile
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
@@ -184,6 +184,11 @@ def run_auto(
                 allowed_environment=allowed_environment,
                 contract_constraints=contract_constraints,
             )
+        except GeneratorInfrastructureError as exc:
+            raise AutoWorkflowError(
+                "Generator infrastructure failed; validation stopped without changing the real provider: "
+                f"{exc}"
+            ) from exc
         except FixGuardrailError as exc:
             # A malformed generation or guard violation is a failed attempt for
             # this gap, not a reason to abort every other gap in the run.

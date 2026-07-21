@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import subprocess
 import unittest
@@ -10,10 +11,22 @@ from isv_readiness.codex_generator import (
     CodexGeneratorError,
     _resolve_codex_executable,
     generate_with_codex,
+    main,
 )
 
 
 class CodexGeneratorTests(unittest.TestCase):
+    def test_main_returns_distinct_timeout_exit_code(self) -> None:
+        error = io.StringIO()
+        with (
+            patch("isv_readiness.codex_generator.generate_with_codex", side_effect=subprocess.TimeoutExpired(["codex"], 600)),
+            patch("sys.stdin", io.StringIO("{}")),
+            patch("sys.stderr", error),
+        ):
+            self.assertEqual(main([]), 124)
+
+        self.assertIn("timed out after 600 seconds", error.getvalue())
+
     def test_runs_codex_ephemerally_read_only_with_output_schema(self) -> None:
         seen = {}
         expected = {"schema_version": "0.1.0", "changes": []}

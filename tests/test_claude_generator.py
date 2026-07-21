@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import io
 import json
 import subprocess
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from isv_readiness.claude_generator import ClaudeGeneratorError, generate_with_claude
+from isv_readiness.claude_generator import ClaudeGeneratorError, generate_with_claude, main
 
 SCHEMA = {
     "type": "object",
@@ -19,6 +21,17 @@ SCHEMA = {
 
 
 class ClaudeGeneratorTests(unittest.TestCase):
+    def test_main_returns_distinct_timeout_exit_code(self) -> None:
+        error = io.StringIO()
+        with (
+            patch("isv_readiness.claude_generator.generate_with_claude", side_effect=subprocess.TimeoutExpired(["claude"], 600)),
+            patch("sys.stdin", io.StringIO("{}")),
+            patch("sys.stderr", error),
+        ):
+            self.assertEqual(main([]), 124)
+
+        self.assertIn("timed out after 600 seconds", error.getvalue())
+
     def test_runs_claude_print_mode_with_tools_disallowed_in_empty_tempdir(self) -> None:
         seen = {}
         expected = {"schema_version": "0.1.0", "changes": []}

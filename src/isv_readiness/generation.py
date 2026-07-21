@@ -27,6 +27,10 @@ GeneratorRunner = Callable[
 ]
 
 
+class GeneratorInfrastructureError(FixGuardrailError):
+    """Raised when the configured generator cannot complete a model call."""
+
+
 def dispatch_generator(
     request: dict[str, Any],
     *,
@@ -59,11 +63,20 @@ def dispatch_generator(
         if source_env.get(name):
             child_env[name] = source_env[name]
     run = runner or _default_runner
-    result = run(command, cwd.resolve(), json.dumps(request, sort_keys=True), child_env, timeout_seconds)
+    try:
+        result = run(command, cwd.resolve(), json.dumps(request, sort_keys=True), child_env, timeout_seconds)
+    except subprocess.TimeoutExpired as exc:
+        raise GeneratorInfrastructureError(
+            f"Generator adapter timed out after {timeout_seconds} seconds."
+        ) from exc
     if result.returncode != 0:
         details = (result.stderr or result.stdout or "").strip()
         if len(details) > 2000:
             details = "..." + details[-2000:]
+        if result.returncode == 124:
+            raise GeneratorInfrastructureError(
+                f"Generator model timed out: {details or 'no diagnostic output'}"
+            )
         raise FixGuardrailError(f"Generator exited with code {result.returncode}: {details or 'no output'}")
     output = (result.stdout or "").strip()
     try:

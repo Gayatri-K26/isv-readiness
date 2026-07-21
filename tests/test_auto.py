@@ -99,6 +99,28 @@ class AutoWorkflowTests(unittest.TestCase):
 
 
 class AutoResilienceTests(unittest.TestCase):
+    def test_generator_infrastructure_failure_stops_without_identical_retries(self) -> None:
+        calls = {"n": 0}
+
+        def timed_out(command, cwd, request, environment, timeout):
+            del cwd, request, environment, timeout
+            calls["n"] += 1
+            return subprocess.CompletedProcess(command, 124, "", "model timed out")
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            project_path, provider = _project(Path(tempdir))
+            with self.assertRaisesRegex(AutoWorkflowError, "infrastructure failed"):
+                run_auto(
+                    project_path,
+                    domain="vm",
+                    work_dir=Path(tempdir) / "work",
+                    generator_command=["fixture-generator"],
+                    generator_runner=timed_out,
+                )
+
+            self.assertEqual(calls["n"], 1)
+            self.assertIn("TODO", (provider / "scripts" / "vm" / "launch_instance.py").read_text())
+
     def test_evidence_grounded_refusal_is_parked_with_the_exact_blocker(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             project_path, _provider = _project(Path(tempdir))

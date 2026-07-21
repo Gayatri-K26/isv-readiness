@@ -1886,3 +1886,48 @@ review boundary.
 - `uv run python -m unittest discover -s tests`: 144 tests passed.
 - Ruff, Python compilation, lock validation, schema parsing, and diff checks
   passed.
+
+## Step 40 - Fail Fast and Reap Timed-Out Generator Sessions
+
+### Evidence
+
+The first Claude bare-metal rehearsal produced one statically verified adapter
+that contradicted the supplied access topology, then spent repeated long model
+calls without another verified change. The configured model deadline did not
+bound the observed wall time; the prior `communicate()` timeout can exclude a
+macOS sleep interval. Terminating the parent killed the adapter before it could
+clean its separately-sessioned Claude child, leaving that process orphaned. The
+generic auto loop also treated a nested model timeout like a malformed
+candidate and repeated the identical request against the provider retry budget.
+
+### Decisions
+
+1. Bound captured subprocesses with a wall-clock deadline checked in short
+   communication intervals, so a deadline is recognized promptly after macOS
+   wakes instead of excluding the sleep interval.
+2. On timeout, Ctrl+C, or SIGTERM, signal the adapter gracefully first so its
+   own cleanup boundary can reap the nested model session. Escalate to SIGKILL
+   after five seconds and never wait forever on pipes inherited by an orphan.
+3. Give model timeouts a distinct adapter exit code and infrastructure-error
+   type. Stop the validation run after the first timeout; do not classify it as
+   provider evidence or repeat it using the candidate retry budget.
+4. Make connection topology an explicit structural authoring rule. When
+   provider evidence requires an intermediate hop and the pinned consumer has
+   no compatible proxy input, the generator must return a structured refusal
+   rather than substitute the hop or claim direct resource reachability.
+
+### Simplicity boundary
+
+Do not add provider names, BCM fields, or text heuristics that pretend every ISV
+specification expresses topology the same way. Exact provider evidence and the
+pinned consumer remain model and human-review inputs; deterministic code owns
+only process cleanup and unambiguous infrastructure-failure classification.
+
+### Verification
+
+- Focused tests cover wall-clock expiry, SIGTERM-to-SIGKILL escalation, a real
+  separately-sessioned nested child, distinct adapter timeout exits, one-call
+  auto abort, and the topology authoring rule.
+- `uv run python -m unittest discover -s tests`: 151 tests passed.
+- Ruff, Python compilation, lock validation, schema parsing, and diff checks
+  passed.

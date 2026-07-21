@@ -49,6 +49,9 @@ def main(argv: list[str] | None = None) -> int:
             model=args.model,
             timeout_seconds=args.timeout,
         )
+    except subprocess.TimeoutExpired as exc:
+        print(f"Codex model timed out after {exc.timeout} seconds.", file=sys.stderr)
+        return 124
     except (OSError, json.JSONDecodeError, subprocess.SubprocessError, CodexGeneratorError) as exc:
         print(str(exc), file=sys.stderr)
         return 2

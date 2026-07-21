@@ -195,6 +195,14 @@ the schema permits an empty change set carrying the exact blocker; the target is
 parked instead of forcing fabricated code. Static rescan success is therefore
 labeled as static verification, never as runtime proof.
 
+Connection topology is part of that structural comparison. A jump host, proxy,
+or gateway cannot be substituted for the resource that an upstream check tests
+directly. When provider evidence requires an intermediate hop but the pinned
+consumer exposes no compatible proxy input, the generator must park the shared
+adapter contract instead of claiming direct reachability. Human review remains
+the final semantic gate because arbitrary ISV specifications do not share one
+safe machine-readable topology shape.
+
 A non-empty change set must include the scanner-selected remediation target,
 but that target is not the whole edit boundary. The generator may also include
 other provider-owned scripts and the selected domain configuration when the
@@ -203,9 +211,12 @@ existing path, hash, candidate-content, and isolated-rescan guards apply to
 every included file.
 
 The shared generator boundary allows the built-in model adapter to finish or
-time out first. Timeout, Ctrl+C, and SIGTERM terminate and reap the adapter's
-process group; adapters forward termination through the same cleanup boundary
-to their nested model process. Built-in adapter names resolve beside the running
+time out first. Its wall-clock deadline also expires across macOS sleep.
+Timeout, Ctrl+C, and SIGTERM first give an adapter a short cleanup window so it
+can reap a nested model session, then force-kill and close inherited pipes if
+cleanup does not finish. A model timeout stops the run as generator
+infrastructure failure; it does not consume provider retry attempts or launch
+the identical request again. Built-in adapter names resolve beside the running
 `gapctl` executable first, which prevents mixed tool versions when another
 installation is also on `PATH`.
 Generator children receive only the minimal process environment, explicitly

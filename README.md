@@ -185,6 +185,11 @@ adapters so Claude can retrieve an existing SSO session from Keychain. Claude
 credentials remain outside gapctl and are never copied into project files or
 generation context.
 
+A model or adapter timeout stops the current validation run immediately. It is
+an infrastructure failure, not evidence about an ISV capability, so gapctl does
+not spend the provider retry budget repeating the identical request. No real
+provider file is changed.
+
 `validate` prints readiness after the run. Repeat the same command until every
 owned domain has no blocking gaps and a successful live test. Gaps that are not
 safe to generate are parked with a reason for SME or manual implementation. If

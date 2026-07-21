@@ -108,6 +108,10 @@ PROVIDER_IMPLEMENTATION_RULES = (
     "Standard client behavior such as verified TLS defaults, the current remote SSH user, and host-side SSH "
     "configuration may be used when the reviewed interface explicitly establishes that access flow. Do not "
     "fabricate credentials or claim reachability; return a runtime failure when the environment is not configured.",
+    "Treat connection topology as part of the structural contract. If provider evidence requires a jump host, "
+    "proxy, gateway, or equivalent intermediate hop but the pinned validation consumer accepts only a direct "
+    "endpoint and credential with no compatible proxy input, return an empty change set with that exact blocker. "
+    "Never substitute the intermediary for the tested resource or claim direct reachability.",
 )
 LIFECYCLE_TIMEOUT_CONSTRAINT = "lifecycle_step_timeout_seconds"
 TEXT_EXTENSIONS = {
