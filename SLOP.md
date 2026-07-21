@@ -1931,3 +1931,41 @@ only process cleanup and unambiguous infrastructure-failure classification.
 - `uv run python -m unittest discover -s tests`: 151 tests passed.
 - Ruff, Python compilation, lock validation, schema parsing, and diff checks
   passed.
+
+## Step 41 - Align Model and Adapter Time Budgets
+
+### Evidence
+
+The BCM rehearsal completed and statically staged one narrow adapter, then the
+next Codex request reached the built-in 600-second model limit. That shared
+`describe_instance.py` contract carried 167,873 characters of source-grounded
+context, including every relevant pinned validation consumer, with no omitted
+or truncated items. The outer adapter still allowed 900 seconds, but its extra
+time could never help because the nested model process stopped first.
+
+### Decisions
+
+1. Centralize generator limits so the Codex adapter, Claude adapter, and outer
+   dispatcher cannot silently drift apart again.
+2. Allow Codex's single schema-constrained call 1,680 seconds. Allow each of
+   Claude's two possible schema attempts 840 seconds. Keep the full
+   source-grounded contract instead of dropping validation consumers merely to
+   make generation faster.
+3. Allow 1,800 seconds for the adapter boundary. Either built-in route retains
+   120 seconds for serialization and process cleanup.
+4. Preserve fail-fast semantics: a model or adapter timeout remains one
+   infrastructure failure, never provider evidence or a consumed retry.
+
+### Simplicity boundary
+
+Do not add an ISV-facing timeout option, provider-specific timeout, partial
+unverified checkpoint, or context truncation rule. One shared internal policy
+covers both built-in generators.
+
+### Verification
+
+- Focused tests bind each adapter to its centrally defined model deadline and
+  require the outer boundary to retain 120 seconds beyond either route.
+- `uv run python -m unittest discover -s tests`: 152 tests passed.
+- Ruff, Python compilation, lock validation, schema parsing, and diff checks
+  passed.

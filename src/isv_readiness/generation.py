@@ -14,11 +14,15 @@ from isv_readiness.context import (
     provider_contract_constraints,
 )
 from isv_readiness.fixes import FixGuardrailError
+from isv_readiness.generator_limits import (
+    GENERATOR_ADAPTER_TIMEOUT_SECONDS,
+    MAX_GENERATOR_TIMEOUT_SECONDS,
+)
 from isv_readiness.project import MINIMAL_PROCESS_ENV
 from isv_readiness.schema import load_schema
 from isv_readiness.subprocesses import run_captured
 
-DEFAULT_GENERATOR_TIMEOUT_SECONDS = 900
+DEFAULT_GENERATOR_TIMEOUT_SECONDS = GENERATOR_ADAPTER_TIMEOUT_SECONDS
 GENERATOR_PROCESS_ENV = (*MINIMAL_PROCESS_ENV, "USER")
 
 GeneratorRunner = Callable[
@@ -49,8 +53,8 @@ def dispatch_generator(
     """
     if not command or not all(isinstance(item, str) and item for item in command):
         raise FixGuardrailError("Generator command must contain at least one non-empty argument.")
-    if timeout_seconds < 1 or timeout_seconds > 1800:
-        raise FixGuardrailError("Generator timeout must be between 1 and 1800 seconds.")
+    if timeout_seconds < 1 or timeout_seconds > MAX_GENERATOR_TIMEOUT_SECONDS:
+        raise FixGuardrailError(f"Generator timeout must be between 1 and {MAX_GENERATOR_TIMEOUT_SECONDS} seconds.")
     source_env = environment if environment is not None else os.environ
     child_env = {
         name: source_env[name]

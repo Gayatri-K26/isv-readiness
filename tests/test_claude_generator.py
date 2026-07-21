@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from isv_readiness.claude_generator import ClaudeGeneratorError, generate_with_claude, main
+from isv_readiness.generator_limits import CLAUDE_MODEL_ATTEMPT_TIMEOUT_SECONDS
 
 SCHEMA = {
     "type": "object",
@@ -24,13 +25,16 @@ class ClaudeGeneratorTests(unittest.TestCase):
     def test_main_returns_distinct_timeout_exit_code(self) -> None:
         error = io.StringIO()
         with (
-            patch("isv_readiness.claude_generator.generate_with_claude", side_effect=subprocess.TimeoutExpired(["claude"], 600)),
+            patch(
+                "isv_readiness.claude_generator.generate_with_claude",
+                side_effect=subprocess.TimeoutExpired(["claude"], CLAUDE_MODEL_ATTEMPT_TIMEOUT_SECONDS),
+            ),
             patch("sys.stdin", io.StringIO("{}")),
             patch("sys.stderr", error),
         ):
             self.assertEqual(main([]), 124)
 
-        self.assertIn("timed out after 600 seconds", error.getvalue())
+        self.assertIn(f"timed out after {CLAUDE_MODEL_ATTEMPT_TIMEOUT_SECONDS} seconds", error.getvalue())
 
     def test_runs_claude_print_mode_with_tools_disallowed_in_empty_tempdir(self) -> None:
         seen = {}
@@ -62,6 +66,7 @@ class ClaudeGeneratorTests(unittest.TestCase):
         self.assertEqual(seen["command"][seen["command"].index("--model") + 1], "claude-opus-test")
         self.assertIn("gap_test", seen["prompt"])
         self.assertTrue(seen["cwd_was_empty"])
+        self.assertEqual(seen["timeout"], CLAUDE_MODEL_ATTEMPT_TIMEOUT_SECONDS)
 
     def test_adapter_computes_real_content_hashes_over_model_output(self) -> None:
         import hashlib

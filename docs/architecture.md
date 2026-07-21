@@ -210,8 +210,10 @@ same adapter contract requires coordinated wiring or timeout changes. The
 existing path, hash, candidate-content, and isolated-rescan guards apply to
 every included file.
 
-The shared generator boundary allows the built-in model adapter to finish or
-time out first. Its wall-clock deadline also expires across macOS sleep.
+The shared generator boundary gives the single schema-constrained Codex call
+1,680 seconds, each of Claude's possible two schema-correction attempts 840
+seconds, and the adapter 1,800 seconds. Either route retains 120 seconds of
+outer headroom. All deadlines also expire across macOS sleep.
 Timeout, Ctrl+C, and SIGTERM first give an adapter a short cleanup window so it
 can reap a nested model session, then force-kill and close inherited pipes if
 cleanup does not finish. A model timeout stops the run as generator

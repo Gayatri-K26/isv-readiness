@@ -12,6 +12,7 @@ from typing import Any
 
 import jsonschema
 
+from isv_readiness.generator_limits import CLAUDE_MODEL_ATTEMPT_TIMEOUT_SECONDS, MAX_GENERATOR_TIMEOUT_SECONDS
 from isv_readiness.subprocesses import run_captured
 
 ClaudeRunner = Callable[[Sequence[str], Path, str, int], subprocess.CompletedProcess[str]]
@@ -38,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--claude", default="claude", help="Claude Code CLI executable")
     parser.add_argument("--model", default=None, help="Optional explicit Claude model")
-    parser.add_argument("--timeout", type=int, default=600)
+    parser.add_argument("--timeout", type=int, default=CLAUDE_MODEL_ATTEMPT_TIMEOUT_SECONDS)
     args = parser.parse_args(argv)
     try:
         request = json.loads(sys.stdin.read())
@@ -63,14 +64,16 @@ def generate_with_claude(
     *,
     claude_executable: str = "claude",
     model: str | None = None,
-    timeout_seconds: int = 600,
+    timeout_seconds: int = CLAUDE_MODEL_ATTEMPT_TIMEOUT_SECONDS,
     runner: ClaudeRunner | None = None,
 ) -> dict[str, Any]:
     schema = request.get("output_schema")
     if not isinstance(schema, dict):
         raise ClaudeGeneratorError("Generator request does not contain an output_schema object.")
-    if timeout_seconds < 1 or timeout_seconds > 1800:
-        raise ClaudeGeneratorError("Claude generator timeout must be between 1 and 1800 seconds.")
+    if timeout_seconds < 1 or timeout_seconds > MAX_GENERATOR_TIMEOUT_SECONDS:
+        raise ClaudeGeneratorError(
+            f"Claude generator timeout must be between 1 and {MAX_GENERATOR_TIMEOUT_SECONDS} seconds."
+        )
     validator = jsonschema.Draft202012Validator(schema)
     run = runner or _default_runner
 

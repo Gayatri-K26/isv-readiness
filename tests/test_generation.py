@@ -9,6 +9,11 @@ from pathlib import Path
 
 from isv_readiness.fixes import FixGuardrailError
 from isv_readiness.generation import GeneratorInfrastructureError, dispatch_generator, run_generator
+from isv_readiness.generator_limits import (
+    CLAUDE_MODEL_ATTEMPT_TIMEOUT_SECONDS,
+    CODEX_MODEL_TIMEOUT_SECONDS,
+    GENERATOR_ADAPTER_TIMEOUT_SECONDS,
+)
 
 
 class GeneratorAdapterTests(unittest.TestCase):
@@ -17,7 +22,10 @@ class GeneratorAdapterTests(unittest.TestCase):
             del cwd, request, environment
             raise subprocess.TimeoutExpired(command, timeout)
 
-        with self.assertRaisesRegex(GeneratorInfrastructureError, "timed out after 900 seconds"):
+        with self.assertRaisesRegex(
+            GeneratorInfrastructureError,
+            f"timed out after {GENERATOR_ADAPTER_TIMEOUT_SECONDS} seconds",
+        ):
             dispatch_generator(
                 {"output_schema": {}},
                 command=["fixture"],
@@ -28,7 +36,12 @@ class GeneratorAdapterTests(unittest.TestCase):
     def test_generator_adapter_reports_nested_model_timeout(self) -> None:
         def timed_out(command, cwd, request, environment, timeout):
             del cwd, request, environment, timeout
-            return subprocess.CompletedProcess(command, 124, "", "Claude model timed out after 600 seconds.")
+            return subprocess.CompletedProcess(
+                command,
+                124,
+                "",
+                f"Claude model timed out after {CLAUDE_MODEL_ATTEMPT_TIMEOUT_SECONDS} seconds.",
+            )
 
         with self.assertRaisesRegex(GeneratorInfrastructureError, "Claude model timed out"):
             dispatch_generator(
@@ -119,10 +132,20 @@ class GeneratorAdapterTests(unittest.TestCase):
             self.assertIn("connection topology", rules)
             self.assertIn("Never substitute the intermediary", rules)
             self.assertIn("structurally incompatible", seen["request"]["task"])
-            self.assertEqual(seen["timeout"], 900)
+            self.assertEqual(seen["timeout"], GENERATOR_ADAPTER_TIMEOUT_SECONDS)
             self.assertEqual(seen["environment"]["USER"], "operator")
             self.assertEqual(seen["environment"]["MODEL_API_KEY"], "available")
             self.assertNotIn("ACME_TOKEN", seen["environment"])
+
+    def test_outer_timeout_contains_each_builtin_generator_route(self) -> None:
+        self.assertGreaterEqual(
+            GENERATOR_ADAPTER_TIMEOUT_SECONDS - CODEX_MODEL_TIMEOUT_SECONDS,
+            120,
+        )
+        self.assertGreaterEqual(
+            GENERATOR_ADAPTER_TIMEOUT_SECONDS - (2 * CLAUDE_MODEL_ATTEMPT_TIMEOUT_SECONDS),
+            120,
+        )
 
     def test_rejects_markdown_output_and_context_hash_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:

@@ -12,6 +12,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from isv_readiness.generator_limits import CODEX_MODEL_TIMEOUT_SECONDS, MAX_GENERATOR_TIMEOUT_SECONDS
 from isv_readiness.subprocesses import run_captured
 
 CodexRunner = Callable[[Sequence[str], Path, str, int], subprocess.CompletedProcess[str]]
@@ -39,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--codex", default="codex", help="Codex CLI executable")
     parser.add_argument("--model", default=None, help="Optional explicit Codex model")
-    parser.add_argument("--timeout", type=int, default=600)
+    parser.add_argument("--timeout", type=int, default=CODEX_MODEL_TIMEOUT_SECONDS)
     args = parser.parse_args(argv)
     try:
         request = json.loads(sys.stdin.read())
@@ -64,14 +65,16 @@ def generate_with_codex(
     *,
     codex_executable: str = "codex",
     model: str | None = None,
-    timeout_seconds: int = 600,
+    timeout_seconds: int = CODEX_MODEL_TIMEOUT_SECONDS,
     runner: CodexRunner | None = None,
 ) -> dict[str, Any]:
     schema = request.get("output_schema")
     if not isinstance(schema, dict):
         raise CodexGeneratorError("Generator request does not contain an output_schema object.")
-    if timeout_seconds < 1 or timeout_seconds > 1800:
-        raise CodexGeneratorError("Codex generator timeout must be between 1 and 1800 seconds.")
+    if timeout_seconds < 1 or timeout_seconds > MAX_GENERATOR_TIMEOUT_SECONDS:
+        raise CodexGeneratorError(
+            f"Codex generator timeout must be between 1 and {MAX_GENERATOR_TIMEOUT_SECONDS} seconds."
+        )
     codex_schema = _codex_output_schema(schema)
     codex_request = dict(request)
     codex_request["output_schema"] = codex_schema

@@ -13,19 +13,23 @@ from isv_readiness.codex_generator import (
     generate_with_codex,
     main,
 )
+from isv_readiness.generator_limits import CODEX_MODEL_TIMEOUT_SECONDS
 
 
 class CodexGeneratorTests(unittest.TestCase):
     def test_main_returns_distinct_timeout_exit_code(self) -> None:
         error = io.StringIO()
         with (
-            patch("isv_readiness.codex_generator.generate_with_codex", side_effect=subprocess.TimeoutExpired(["codex"], 600)),
+            patch(
+                "isv_readiness.codex_generator.generate_with_codex",
+                side_effect=subprocess.TimeoutExpired(["codex"], CODEX_MODEL_TIMEOUT_SECONDS),
+            ),
             patch("sys.stdin", io.StringIO("{}")),
             patch("sys.stderr", error),
         ):
             self.assertEqual(main([]), 124)
 
-        self.assertIn("timed out after 600 seconds", error.getvalue())
+        self.assertIn(f"timed out after {CODEX_MODEL_TIMEOUT_SECONDS} seconds", error.getvalue())
 
     def test_runs_codex_ephemerally_read_only_with_output_schema(self) -> None:
         seen = {}
@@ -56,6 +60,7 @@ class CodexGeneratorTests(unittest.TestCase):
         self.assertEqual(seen["command"][seen["command"].index("--model") + 1], "test-model")
         self.assertEqual(seen["command"][-1], "-")
         self.assertEqual(seen["schema"], seen["prompt"]["output_schema"])
+        self.assertEqual(seen["timeout"], CODEX_MODEL_TIMEOUT_SECONDS)
 
     def test_translates_full_schema_for_codex_and_removes_optional_nulls(self) -> None:
         seen = {}
