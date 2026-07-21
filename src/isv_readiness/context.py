@@ -72,14 +72,20 @@ QUALIFICATION_MAPPING_RULES = (
 )
 PROVIDER_IMPLEMENTATION_RULES = (
     "Use only runtime environment names declared by the project; never invent a new input name in provider code.",
-    "Use only interface paths, methods, authentication, response fields, and lifecycle semantics established by "
-    "the supplied authoritative contract. If a required behavior is absent or ambiguous, do not guess.",
+    "Treat the reviewed solution-profile capability mapping and rationale as an approved implementation premise. "
+    "Do not re-open scope merely because runtime behavior has not yet been tested.",
+    "Use declared interface paths, methods, authentication, response fields, and lifecycle semantics. Never invent "
+    "an undocumented provider operation, field, credential, or passing result.",
+    "When a declared response may vary at runtime, generate a bounded adapter for the supplied shape that validates "
+    "what it receives and fails closed on unsupported data. Runtime uncertainty belongs in live validation; it is "
+    "not by itself a reason to refuse implementation.",
     "Preserve one canonical resource identifier across setup output, configured step arguments, lifecycle API calls, "
     "and result JSON. Do not silently replace a configured identifier with another environment-derived identifier.",
     "Keep TLS peer verification enabled. Never add an unverified SSL context, CERT_NONE, verify=False, curl -k, "
     "or an equivalent bypass.",
-    "Keep internal polling and subprocess deadlines inside the configured step timeout. Do not invent provider "
-    "recovery thresholds when the supplied contract does not establish them.",
+    "Keep internal polling and subprocess deadlines inside the configured step timeout. A runner timeout may include "
+    "bounded orchestration headroom beyond a source-backed provider deadline; that headroom is not a new provider "
+    "recovery threshold.",
     "Emit only the structured fields required by the validation contract. Never place raw API bodies, headers, "
     "console output, stdout, stderr, or log excerpts in result JSON.",
     "Treat edit-eligible unresolved checks as one adapter contract only when they share a script target, or when "
@@ -92,8 +98,12 @@ PROVIDER_IMPLEMENTATION_RULES = (
     "Treat environment, API, and configuration strings used as subprocess arguments as untrusted. Validate them "
     "against a narrow source-backed syntax or use an explicit end-of-options boundary when supported; shell "
     "quoting alone does not prevent a leading hyphen from becoming a command option.",
-    "Respect optional provider response fields. Do not interpret an absent optional boolean as true or false unless "
-    "the supplied contract defines that default; handle missing values explicitly and conservatively.",
+    "Respect optional provider response fields. Base outcomes on required state fields when available, let an "
+    "explicit optional failure indicator override that state, and fail closed when the declared fields cannot "
+    "support a result; do not fabricate a default or refuse merely because an optional field may be absent.",
+    "Standard client behavior such as verified TLS defaults, the current remote SSH user, and host-side SSH "
+    "configuration may be used when the reviewed interface explicitly establishes that access flow. Do not "
+    "fabricate credentials or claim reachability; return a runtime failure when the environment is not configured.",
 )
 TEXT_EXTENSIONS = {
     ".json",

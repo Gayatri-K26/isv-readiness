@@ -162,13 +162,18 @@ semantic contract to be honored even when an executable assertion is weaker;
 provider-native concepts may be mapped to contract primitives only when the
 supplied evidence establishes that mapping. Provider-derived subprocess
 arguments are treated as untrusted, and absent optional response fields are not
-assigned semantics the contract does not define. Retry accounting uses the
-same contract unit, so several checks backed by one adapter cannot multiply the
-model budget or consume another step's retries. The final parked reason retains
-the last guardrail or static-verification feedback when that budget is
-exhausted. The per-gap pack has a 180k-character bound and fails closed instead
-of truncating or omitting selected evidence; sibling rows are represented by
-their validation contract fields rather than duplicated scanner metadata.
+allowed to override required state fields implicitly. The reviewed profile
+mapping is an approved implementation premise: a declared response variation
+is handled by bounded parsing and explicit runtime failure rather than by
+reopening qualification scope. Standard verified client behavior may implement
+an established access flow without inventing provider credentials or success.
+Retry accounting uses the same contract unit, so several checks backed by one
+adapter cannot multiply the model budget or consume another step's retries. The
+final parked reason retains the last guardrail or static-verification feedback
+when that budget is exhausted. The per-gap pack has a 180k-character bound and
+fails closed instead of truncating or omitting selected evidence; sibling rows
+are represented by their validation contract fields rather than duplicated
+scanner metadata.
 
 Deterministic candidate checks enforce what can be established without knowing
 the provider: environment references in each changed candidate must be declared,

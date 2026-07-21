@@ -84,9 +84,10 @@ def run_generator(
         "schema_version": "0.1.0",
         "task": (
             "Produce the smallest source-grounded provider-owned change set that addresses the selected gap "
-            "and the shared adapter contract represented by any related_target_gaps. If the supplied provider "
-            "interfaces cannot satisfy the pinned validation contract within the allowed edit boundary, return "
-            "an empty changes array and explain the exact blocker in summary."
+            "and the shared adapter contract represented by any related_target_gaps. Implement the reviewed "
+            "capability mapping with a bounded adapter that fails closed on unsupported runtime data. Return an "
+            "empty changes array only when a required provider interface is absent or the pinned validation "
+            "contract is structurally incompatible with the allowed edit boundary."
         ),
         "context_pack_sha256": context_sha256,
         "rules": [
@@ -101,8 +102,9 @@ def run_generator(
                 "by the same adapter contract; do not assume the selected target is the only authorized file."
             ),
             (
-                "If no source-grounded provider-owned implementation can satisfy the pinned validation contract, "
-                "return an empty changes array with the exact blocker in summary; never fabricate a passing result."
+                "Refuse only for an absent required interface or a structural contract mismatch. Unverified runtime "
+                "behavior should be tested by fail-closed adapter code, not treated as proof of impossibility. Never "
+                "fabricate a passing result."
             ),
             *PROVIDER_IMPLEMENTATION_RULES,
         ],

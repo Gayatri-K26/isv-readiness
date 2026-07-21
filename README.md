@@ -164,6 +164,10 @@ Generator guidance also treats provider-derived subprocess arguments as
 untrusted and preserves the declared meaning of optional response fields.
 When retries are exhausted, the parked gap retains the last deterministic
 guardrail or static-verification failure for review.
+The reviewed qualification mapping is an implementation premise during
+`validate`: runtime uncertainty is handled by response validation and explicit
+failure, while refusal is reserved for absent interfaces and structural
+incompatibility with the pinned NVIDIA contract.
 
 If review or live execution is deferred, run `gapctl validate` again. It resumes
 an existing statically verified candidate patch instead of regenerating a

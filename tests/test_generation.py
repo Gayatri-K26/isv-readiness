@@ -77,7 +77,13 @@ class GeneratorAdapterTests(unittest.TestCase):
             self.assertIn("only the selected step block", rules)
             self.assertIn("subprocess arguments as untrusted", rules)
             self.assertIn("leading hyphen", rules)
-            self.assertIn("absent optional boolean", rules)
+            self.assertIn("reviewed solution-profile capability mapping", rules)
+            self.assertIn("fails closed on unsupported data", rules)
+            self.assertIn("not by itself a reason to refuse", rules)
+            self.assertIn("bounded orchestration headroom", rules)
+            self.assertIn("explicit optional failure indicator", rules)
+            self.assertIn("current remote SSH user", rules)
+            self.assertIn("structurally incompatible", seen["request"]["task"])
             self.assertEqual(seen["timeout"], 900)
             self.assertEqual(seen["environment"]["MODEL_API_KEY"], "available")
             self.assertNotIn("ACME_TOKEN", seen["environment"])
@@ -143,7 +149,7 @@ class GeneratorAdapterTests(unittest.TestCase):
 
             self.assertEqual(change_set.changes, ())
             self.assertIn("direct node SSH", change_set.summary)
-            self.assertIn("never fabricate", "\n".join(seen["rules"]))
+            self.assertIn("Never fabricate", "\n".join(seen["rules"]))
 
 
 def _context_pack() -> dict:

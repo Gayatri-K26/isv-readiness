@@ -1783,3 +1783,50 @@ only preserves the exact failure it already knows.
 - `uv run python -m unittest discover -s tests`: 142 tests passed.
 - Ruff, Python compilation, lock validation, schema loading, and diff checks
   passed.
+
+## Step 38 - Keep Qualification and Runtime Uncertainty Separate
+
+### Evidence
+
+The next bare-metal run produced zero candidates and parked all 70 blocking
+rows. The generator treated the reviewed BCM capability mappings as unproven,
+rejected standard fail-closed implementation choices, and required every
+response envelope, optional field default, SSH client behavior, and runner
+timeout margin to be a formal provider guarantee. This repeated qualification
+inside validation and converted ordinary runtime uncertainty into structural
+impossibility.
+
+### Decisions
+
+1. Treat the reviewed solution-profile capability mapping and rationale as an
+   approved implementation premise. `validate` implements that decision; it
+   does not reopen scope because runtime behavior is untested.
+2. Generate a bounded adapter for declared response shapes and fail explicitly
+   on unsupported runtime data. Refuse only when a required provider interface
+   is absent or the pinned validation contract is structurally incompatible
+   with provider-owned edits.
+3. Permit standard verified client behavior to realize an established access
+   flow, including the current remote SSH user and host-side SSH configuration.
+   This does not authorize invented credentials or a reachability claim.
+4. Base results on required state fields and let explicit optional failure
+   indicators override them. Missing optional data alone neither proves success
+   nor makes implementation impossible.
+5. Allow a configured runner timeout to include bounded orchestration headroom
+   beyond a source-backed provider deadline without reclassifying that margin
+   as a provider recovery threshold.
+
+### Simplicity boundary
+
+Keep one workflow boundary instead of adding confidence levels or another
+profile state: qualification decides applicability, generated adapters fail
+closed, and live validation proves behavior. Real direct-SSH versus jump-host
+contract mismatches remain parked.
+
+### Verification
+
+- Focused generator tests require the reviewed-mapping premise, fail-closed
+  runtime handling, narrow refusal boundary, standard-client allowance,
+  optional-field precedence, and runner-headroom distinction.
+- `uv run python -m unittest discover -s tests`: 142 tests passed.
+- Ruff, Python compilation, lock validation, schema loading, and diff checks
+  passed.
