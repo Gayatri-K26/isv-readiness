@@ -5,7 +5,7 @@ import difflib
 import hashlib
 import json
 import shlex
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -26,6 +26,15 @@ from isv_readiness.solution_profile import canonicalize_domain
 CHANGE_PROPOSAL_VERSION = "0.1.0"
 MAX_CHANGE_SET_BYTES = 2_000_000
 ALLOWED_SCRIPT_SUFFIXES = {".json", ".md", ".py", ".sh", ".txt", ".yaml", ".yml"}
+LIFECYCLE_STEP_TIMEOUT_SECONDS = "lifecycle_step_timeout_seconds"
+LIFECYCLE_STEP_NAMES = {
+    "launch_instance",
+    "stop_instance",
+    "start_instance",
+    "reboot_instance",
+    "power_cycle_instance",
+    "reinstall_instance",
+}
 
 
 @dataclass(frozen=True)
@@ -120,6 +129,7 @@ def build_change_proposal(
     provider_repo: Path,
     change_set: ChangeSet,
     allowed_environment: Sequence[str] | None = None,
+    contract_constraints: Mapping[str, float] | None = None,
 ) -> ChangeProposal:
     validate_change_set(change_set.to_dict())
     row = select_gap(report, change_set.gap_id)
@@ -185,7 +195,13 @@ def build_change_proposal(
         changed_keys.add((change.target_root, change.path))
 
     _require_primary_target(row, provider_root, domain, changed_keys)
-    _validate_timeout_envelopes(provider_root, domain, change_set)
+    _validate_timeout_envelopes(
+        provider_root,
+        domain,
+        change_set,
+        selected_step_name=str(row.get("step_name") or ""),
+        contract_constraints=contract_constraints,
+    )
     combined = "".join(patches)
     return ChangeProposal(
         schema_version=CHANGE_PROPOSAL_VERSION,
@@ -358,18 +374,19 @@ def _validate_timeout_envelopes(
     provider_root: Path,
     domain: str,
     change_set: ChangeSet,
+    *,
+    selected_step_name: str,
+    contract_constraints: Mapping[str, float] | None,
 ) -> None:
-    """Reject a script whose own deadline is longer than its runner step."""
+    """Keep candidate deadlines inside the runner and above declared floors."""
 
     config_name = DOMAIN_CONFIG_FILES.get(domain)
     if not config_name:
         return
     config_path = provider_root / "config" / config_name
-    replacements = {
-        change.path: change.content
-        for change in change_set.changes
-        if change.target_root == "provider"
-    }
+    replacements = {change.path: change.content for change in change_set.changes if change.target_root == "provider"}
+    config_changed = f"config/{config_name}" in replacements
+    lifecycle_timeout_floor = (contract_constraints or {}).get(LIFECYCLE_STEP_TIMEOUT_SECONDS)
     config_text = replacements.get(f"config/{config_name}")
     if config_text is None:
         if not config_path.is_file():
@@ -402,8 +419,25 @@ def _validate_timeout_envelopes(
                 script_text = script_path.read_text(encoding="utf-8")
             internal_timeout = _max_internal_timeout(script_text)
             runner_timeout = float(step["timeout"])
+            step_name = str(step.get("name") or relative_script)
+            script_changed = relative_script.as_posix() in replacements
+            affected_lifecycle_step = step_name in LIFECYCLE_STEP_NAMES and (
+                script_changed or (config_changed and step_name == selected_step_name)
+            )
+            if lifecycle_timeout_floor is not None and affected_lifecycle_step:
+                if runner_timeout < lifecycle_timeout_floor:
+                    raise FixGuardrailError(
+                        f"Candidate timeout mismatch for step {step_name}: configured timeout "
+                        f"{runner_timeout:g}s is below the source-backed lifecycle minimum "
+                        f"{lifecycle_timeout_floor:g}s."
+                    )
+                if internal_timeout is not None and internal_timeout < lifecycle_timeout_floor:
+                    raise FixGuardrailError(
+                        f"Candidate timeout mismatch for step {step_name}: internal deadline "
+                        f"{internal_timeout:g}s is below the source-backed lifecycle minimum "
+                        f"{lifecycle_timeout_floor:g}s."
+                    )
             if internal_timeout is not None and internal_timeout > runner_timeout:
-                step_name = str(step.get("name") or relative_script)
                 raise FixGuardrailError(
                     f"Candidate timeout mismatch for step {step_name}: internal deadline "
                     f"{internal_timeout:g}s exceeds configured timeout {runner_timeout:g}s."

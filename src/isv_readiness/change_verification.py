@@ -5,7 +5,7 @@ import os
 import shutil
 import stat
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -104,6 +104,7 @@ def verify_change_set(
     change_set: ChangeSet,
     validation_root: Path | None,
     allowed_environment: Sequence[str] | None = None,
+    contract_constraints: Mapping[str, float] | None = None,
 ) -> ChangeVerificationManifest:
     selected = select_gap(report, change_set.gap_id)
     detection = selected.get("detection")
@@ -114,6 +115,7 @@ def verify_change_set(
         provider_repo=provider_repo,
         change_set=change_set,
         allowed_environment=allowed_environment,
+        contract_constraints=contract_constraints,
     )
     provider_root = provider_repo.resolve()
     with tempfile.TemporaryDirectory(prefix="gapctl-change-verify-") as tempdir:

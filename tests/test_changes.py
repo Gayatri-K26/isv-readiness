@@ -315,6 +315,79 @@ class ChangeProposalTests(unittest.TestCase):
             )
             self.assertEqual(len(proposal.files), 2)
 
+    def test_rejects_lifecycle_timeouts_below_the_authoritative_source_floor(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            provider = Path(tempdir) / "acme"
+            script = provider / "scripts" / "bare_metal" / "reboot_instance.py"
+            config = provider / "config" / "bare_metal.yaml"
+            script.parent.mkdir(parents=True)
+            config.parent.mkdir()
+            script.write_text("raise NotImplementedError()\n", encoding="utf-8")
+            original_config = (
+                "commands:\n"
+                "  bare_metal:\n"
+                "    steps:\n"
+                "      - name: reboot_instance\n"
+                "        command: python ../scripts/bare_metal/reboot_instance.py\n"
+                "        timeout: 60\n"
+            )
+            config.write_text(original_config, encoding="utf-8")
+            report = _report(
+                domain="bare_metal",
+                target="scripts/bare_metal/reboot_instance.py",
+                step_name="reboot_instance",
+            )
+            constraints = {"lifecycle_step_timeout_seconds": 1200.0}
+            short_deadline = (
+                "import time\n"
+                "OPERATION_DEADLINE_SECONDS = 50\n"
+                "deadline = time.monotonic() + OPERATION_DEADLINE_SECONDS\n"
+            )
+
+            with self.assertRaisesRegex(
+                FixGuardrailError,
+                "configured timeout 60s is below the source-backed lifecycle minimum 1200s",
+            ):
+                build_change_proposal(
+                    report,
+                    provider_repo=provider,
+                    change_set=_change_set(
+                        [("provider", "scripts/bare_metal/reboot_instance.py", "replace", short_deadline)]
+                    ),
+                    contract_constraints=constraints,
+                )
+
+            raised_config = original_config.replace("timeout: 60", "timeout: 1260")
+            with self.assertRaisesRegex(
+                FixGuardrailError,
+                "internal deadline 50s is below the source-backed lifecycle minimum 1200s",
+            ):
+                build_change_proposal(
+                    report,
+                    provider_repo=provider,
+                    change_set=_change_set(
+                        [
+                            ("provider", "scripts/bare_metal/reboot_instance.py", "replace", short_deadline),
+                            ("provider", "config/bare_metal.yaml", "replace", raised_config),
+                        ]
+                    ),
+                    contract_constraints=constraints,
+                )
+
+            compliant_deadline = short_deadline.replace("= 50", "= 1200")
+            proposal = build_change_proposal(
+                report,
+                provider_repo=provider,
+                change_set=_change_set(
+                    [
+                        ("provider", "scripts/bare_metal/reboot_instance.py", "replace", compliant_deadline),
+                        ("provider", "config/bare_metal.yaml", "replace", raised_config),
+                    ]
+                ),
+                contract_constraints=constraints,
+            )
+            self.assertEqual(len(proposal.files), 2)
+
 
 def _change_set(values: list[tuple[str, str, str, str]]) -> ChangeSet:
     changes = tuple(

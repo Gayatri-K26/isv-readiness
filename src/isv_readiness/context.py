@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import math
 import os
 import re
 import urllib.request
@@ -86,6 +87,9 @@ PROVIDER_IMPLEMENTATION_RULES = (
     "Keep internal polling and subprocess deadlines inside the configured step timeout. A runner timeout may include "
     "bounded orchestration headroom beyond a source-backed provider deadline; that headroom is not a new provider "
     "recovery threshold.",
+    "Preserve every explicit source-backed timing threshold. Never shorten a provider lifecycle deadline to fit a "
+    "scaffold default; update the selected step timeout and keep any explicit internal recovery deadline at or above "
+    "the declared threshold.",
     "Emit only the structured fields required by the validation contract. Never place raw API bodies, headers, "
     "console output, stdout, stderr, or log excerpts in result JSON.",
     "Treat edit-eligible unresolved checks as one adapter contract only when they share a script target, or when "
@@ -105,6 +109,7 @@ PROVIDER_IMPLEMENTATION_RULES = (
     "configuration may be used when the reviewed interface explicitly establishes that access flow. Do not "
     "fabricate credentials or claim reachability; return a runtime failure when the environment is not configured.",
 )
+LIFECYCLE_TIMEOUT_CONSTRAINT = "lifecycle_step_timeout_seconds"
 TEXT_EXTENSIONS = {
     ".json",
     ".md",
@@ -457,6 +462,44 @@ def build_qualify_pack(
 
 def validate_context_pack(raw: Any) -> None:
     _validate_against_schema(raw, "context-pack.schema.json", "context pack")
+
+
+def provider_contract_constraints(context_pack: Mapping[str, Any]) -> dict[str, float]:
+    """Normalize optional machine-readable limits from authoritative API specs."""
+
+    values: list[float] = []
+    for item in context_pack.get("items", []):
+        if not isinstance(item, Mapping) or item.get("kind") != "api_spec" or item.get("trust") != "authoritative":
+            continue
+        content = item.get("content")
+        if not isinstance(content, str):
+            continue
+        try:
+            parsed = yaml.safe_load(content)
+        except yaml.YAMLError as exc:
+            raise ContextError("Authoritative API specification is not valid YAML or JSON.") from exc
+        if not isinstance(parsed, Mapping):
+            continue
+        runtime = parsed.get("runtime")
+        timing = runtime.get("operation_timing") if isinstance(runtime, Mapping) else None
+        value = timing.get(LIFECYCLE_TIMEOUT_CONSTRAINT) if isinstance(timing, Mapping) else None
+        if value is None:
+            continue
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(float(value))
+            or value <= 0
+            or value > 86_400
+        ):
+            raise ContextError(f"Authoritative {LIFECYCLE_TIMEOUT_CONSTRAINT} must be a number from 1 through 86400.")
+        values.append(float(value))
+
+    if not values:
+        return {}
+    if len(set(values)) != 1:
+        raise ContextError("Authoritative API specifications declare conflicting lifecycle timeout thresholds.")
+    return {LIFECYCLE_TIMEOUT_CONSTRAINT: values[0]}
 
 
 def _validate_against_schema(raw: Any, schema_name: str, label: str) -> None:

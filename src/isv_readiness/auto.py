@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from isv_readiness.change_verification import apply_verified_change_set, verify_change_set
-from isv_readiness.context import build_context_pack
+from isv_readiness.changes import ChangeSet
+from isv_readiness.context import build_context_pack, provider_contract_constraints
 from isv_readiness.decision import adapter_contract_unit, decide_gap, validation_profile_issues
 from isv_readiness.fixes import FixGuardrailError
 from isv_readiness.generation import GeneratorRunner, run_generator
@@ -155,7 +156,7 @@ def run_auto(
         contract_unit = adapter_contract_unit(row)
 
         try:
-            change_set = _generate(
+            change_set, contract_constraints = _generate(
                 project,
                 project_path,
                 report,
@@ -181,6 +182,7 @@ def run_auto(
                 change_set=change_set,
                 validation_root=project.validation_root(project_path),
                 allowed_environment=allowed_environment,
+                contract_constraints=contract_constraints,
             )
         except FixGuardrailError as exc:
             # A malformed generation or guard violation is a failed attempt for
@@ -416,7 +418,7 @@ def _generate(
     environment: Mapping[str, str] | None,
     generator_runner: GeneratorRunner | None,
     feedback: Sequence[str],
-):
+) -> tuple[ChangeSet, dict[str, float]]:
     context_pack = build_context_pack(
         project,
         project_path,
@@ -426,14 +428,15 @@ def _generate(
         environment=environment,
         feedback=feedback,
     )
+    raw_context_pack = context_pack.to_dict()
     return run_generator(
-        context_pack.to_dict(),
+        raw_context_pack,
         command=list(generator_command),
         cwd=work_dir,
         pass_env=generator_pass_env,
         runner=generator_runner,
         environment=environment,
-    )
+    ), provider_contract_constraints(raw_context_pack)
 
 
 def _feedback_for(prior_attempts: int) -> tuple[str, ...]:

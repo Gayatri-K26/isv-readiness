@@ -17,7 +17,7 @@ from isv_readiness.change_verification import (
     verify_change_set,
 )
 from isv_readiness.changes import build_change_proposal, canonical_sha256, load_change_set
-from isv_readiness.context import build_context_pack
+from isv_readiness.context import build_context_pack, provider_contract_constraints
 from isv_readiness.decision import decide_gap, validation_profile_issues
 from isv_readiness.fixes import select_gap
 from isv_readiness.generation import GeneratorRunner, run_generator
@@ -250,8 +250,10 @@ def _prepare_next_change(
         environment=environment,
         feedback=state.feedback,
     )
+    raw_context_pack = context_pack.to_dict()
+    contract_constraints = provider_contract_constraints(raw_context_pack)
     context_path = work_dir / f"context-{state.iteration:03d}-{gap_id}.json"
-    _write_json(context_path, context_pack.to_dict())
+    _write_json(context_path, raw_context_pack)
     if not generator_command:
         return _transition(
             state,
@@ -262,7 +264,7 @@ def _prepare_next_change(
         )
 
     change_set = run_generator(
-        context_pack.to_dict(),
+        raw_context_pack,
         command=generator_command,
         cwd=work_dir,
         pass_env=generator_pass_env,
@@ -289,6 +291,7 @@ def _prepare_next_change(
         provider_repo=project.provider_root(project_path),
         change_set=change_set,
         allowed_environment=allowed_environment,
+        contract_constraints=contract_constraints,
     )
     proposal_path = work_dir / f"proposal-{state.iteration:03d}-{gap_id}.json"
     patch_path = work_dir / f"proposal-{state.iteration:03d}-{gap_id}.patch"
@@ -300,6 +303,7 @@ def _prepare_next_change(
         change_set=change_set,
         validation_root=project.validation_root(project_path),
         allowed_environment=allowed_environment,
+        contract_constraints=contract_constraints,
     )
     verification_path = work_dir / f"verification-{state.iteration:03d}-{gap_id}.json"
     _write_json(verification_path, verification.to_dict())

@@ -9,8 +9,10 @@ from pathlib import Path
 import jsonschema
 
 from isv_readiness.context import (
+    ContextError,
     build_context_pack,
     context_cache_is_current,
+    provider_contract_constraints,
     sync_context_sources,
 )
 from isv_readiness.project import (
@@ -26,6 +28,31 @@ COMMIT = "b" * 40
 
 
 class ContextTests(unittest.TestCase):
+    def test_normalizes_only_explicit_authoritative_lifecycle_timing(self) -> None:
+        pack = {
+            "items": [
+                {
+                    "kind": "api_spec",
+                    "trust": "authoritative",
+                    "content": ("runtime:\n  operation_timing:\n    lifecycle_step_timeout_seconds: 1200\n"),
+                },
+                {
+                    "kind": "documentation",
+                    "trust": "reference",
+                    "content": "lifecycle_step_timeout_seconds: 30\n",
+                },
+            ]
+        }
+
+        self.assertEqual(
+            provider_contract_constraints(pack),
+            {"lifecycle_step_timeout_seconds": 1200.0},
+        )
+
+        pack["items"][0]["content"] = "runtime:\n  operation_timing:\n    lifecycle_step_timeout_seconds: short\n"
+        with self.assertRaisesRegex(ContextError, "must be a number"):
+            provider_contract_constraints(pack)
+
     def test_sync_degrades_offline_and_redacts_local_api_spec(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             workspace, project, manifest = _project(Path(tempdir))

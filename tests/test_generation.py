@@ -81,6 +81,8 @@ class GeneratorAdapterTests(unittest.TestCase):
             self.assertIn("fails closed on unsupported data", rules)
             self.assertIn("not by itself a reason to refuse", rules)
             self.assertIn("bounded orchestration headroom", rules)
+            self.assertIn("Never shorten a provider lifecycle deadline", rules)
+            self.assertIn("lifecycle_step_timeout_seconds=1200", rules)
             self.assertIn("explicit optional failure indicator", rules)
             self.assertIn("current remote SSH user", rules)
             self.assertIn("structurally incompatible", seen["request"]["task"])
@@ -156,7 +158,13 @@ def _context_pack() -> dict:
     return {
         "schema_version": "0.1.0",
         "gap": {"id": "gap_0123456789ab", "domain": "vm"},
-        "items": [],
+        "items": [
+            {
+                "kind": "api_spec",
+                "trust": "authoritative",
+                "content": ("runtime:\n  operation_timing:\n    lifecycle_step_timeout_seconds: 1200\n"),
+            }
+        ],
     }
 
 

@@ -179,7 +179,10 @@ Deterministic candidate checks enforce what can be established without knowing
 the provider: environment references in each changed candidate must be declared,
 insecure TLS patterns are rejected, raw response/console fields cannot enter
 result JSON, a downstream-consumed output cannot remain provably empty, and an
-explicit internal deadline cannot exceed its configured step timeout.
+explicit internal deadline cannot exceed its configured step timeout. When an
+authoritative API specification declares a machine-readable lifecycle timeout,
+the changed lifecycle adapter's runner timeout and explicit internal recovery
+deadline cannot be shorter than that source-backed threshold.
 For an existing domain YAML configuration, removing the selected step block
 from the original and candidate must leave the same surrounding text. This
 permits a coordinated step wiring or timeout change while rejecting whole-file

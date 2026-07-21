@@ -8,7 +8,11 @@ from pathlib import Path
 from typing import Any
 
 from isv_readiness.changes import ChangeSet, canonical_sha256, change_set_from_dict, validate_change_set
-from isv_readiness.context import PROVIDER_IMPLEMENTATION_RULES
+from isv_readiness.context import (
+    LIFECYCLE_TIMEOUT_CONSTRAINT,
+    PROVIDER_IMPLEMENTATION_RULES,
+    provider_contract_constraints,
+)
 from isv_readiness.fixes import FixGuardrailError
 from isv_readiness.schema import load_schema
 from isv_readiness.subprocesses import run_captured
@@ -80,6 +84,15 @@ def run_generator(
     if not isinstance(gap_id, str) or not gap_id:
         raise FixGuardrailError("Context pack has no selected gap ID.")
     context_sha256 = canonical_sha256(context_pack)
+    contract_constraints = provider_contract_constraints(context_pack)
+    source_rules: list[str] = []
+    lifecycle_timeout = contract_constraints.get(LIFECYCLE_TIMEOUT_CONSTRAINT)
+    if lifecycle_timeout is not None:
+        source_rules.append(
+            "The authoritative provider contract sets lifecycle_step_timeout_seconds="
+            f"{lifecycle_timeout:g}. For lifecycle adapters, keep the explicit internal recovery deadline at or "
+            "above that value and set the configured step timeout to contain it; bounded runner headroom is allowed."
+        )
     request = {
         "schema_version": "0.1.0",
         "task": (
@@ -107,6 +120,7 @@ def run_generator(
                 "fabricate a passing result."
             ),
             *PROVIDER_IMPLEMENTATION_RULES,
+            *source_rules,
         ],
         "output_schema": load_schema("change-set.schema.json"),
         "context_pack": context_pack,

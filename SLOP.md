@@ -1830,3 +1830,48 @@ contract mismatches remain parked.
 - `uv run python -m unittest discover -s tests`: 142 tests passed.
 - Ruff, Python compilation, lock validation, schema loading, and diff checks
   passed.
+
+## Step 39 - Enforce Source-Backed Lifecycle Timing
+
+### Evidence
+
+A clean synthetic bare-metal rehearsal generated a reboot adapter with a
+50-second internal recovery deadline and left the configured runner timeout at
+60 seconds even though the authoritative ISV specification declared a
+1,200-second lifecycle threshold. The existing timeout guard checked only that
+the internal deadline fit inside the runner; it could not reject two mutually
+consistent values that were both shorter than the supplied provider contract.
+
+### Decisions
+
+1. Normalize the optional
+   `runtime.operation_timing.lifecycle_step_timeout_seconds` value only from
+   authoritative API-spec context. Reject invalid or conflicting declarations
+   instead of guessing.
+2. State that normalized threshold explicitly in every generator adapter
+   request. A model must update the selected lifecycle step rather than shorten
+   a provider deadline to fit a scaffold default.
+3. For a changed lifecycle adapter, reject a configured step timeout or an
+   explicit internal recovery deadline below the normalized source threshold.
+   Keep the existing rule that the internal deadline cannot exceed the runner.
+4. Apply the floor only to lifecycle steps changed by the candidate. Unrelated
+   incomplete scaffold steps do not block a safe change elsewhere in the
+   domain.
+
+### Simplicity boundary
+
+This does not infer timing from prose, prescribe one universal bare-metal
+timeout, or add a provider name check. Specifications without the optional
+machine-readable value retain the existing generic envelope guard and human
+review boundary.
+
+### Verification
+
+- The regression test recreates the rejected 50-second internal and 60-second
+  runner candidate against a 1,200-second authoritative floor, then proves a
+  1,200-second internal deadline with 1,260-second runner headroom is accepted.
+- The actual stopped BCM reboot candidate is rejected by the new guard with
+  the source-backed 1,200-second reason.
+- `uv run python -m unittest discover -s tests`: 144 tests passed.
+- Ruff, Python compilation, lock validation, schema parsing, and diff checks
+  passed.
