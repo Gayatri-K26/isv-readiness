@@ -2129,12 +2129,17 @@ but it cannot weaken the product's publishable validation contract.
    temporary files.
 5. Keep provider-specific rehearsal semantics outside generic guardrails. No
    new profile state, exception mode, CLI flag, or BCM rule was added.
+6. Order edit-eligible work by adapter-contract-unit size before the stable
+   step/class/id tie-breakers. A large shared script can no longer prevent
+   smaller independent units from being attempted merely because its step name
+   sorts first. The complex unit remains blocking and must still be implemented
+   or parked with exact evidence.
 
 ### Verification
 
 - Focused tests cover stale-review removal on model timeout, multi-file rollback,
   file-mode preservation, and staged-file cleanup after a failed replacement.
-- `uv run python -m unittest discover -s tests`: 156 tests passed.
+- `uv run python -m unittest discover -s tests`: 157 tests passed.
 - Ruff, Python compilation, every packaged JSON schema, lock validation, and
   diff checks passed.
 - The pinned local `ai-cloud-validation` checkout's full `isvtest` suite passed

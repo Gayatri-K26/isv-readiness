@@ -12,7 +12,14 @@ from unittest.mock import patch
 
 import yaml
 
-from isv_readiness.auto import AutoWorkflowError, ChangedFile, _apply_to_provider, _park, run_auto
+from isv_readiness.auto import (
+    AutoWorkflowError,
+    ChangedFile,
+    _apply_to_provider,
+    _park,
+    _select_fixable,
+    run_auto,
+)
 from isv_readiness.decision import adapter_contract_unit
 from isv_readiness.project import build_bootstrap_plan, execute_bootstrap
 
@@ -101,6 +108,50 @@ class AutoWorkflowTests(unittest.TestCase):
 
 
 class AutoResilienceTests(unittest.TestCase):
+    def test_fixable_selection_prioritizes_the_smallest_contract_unit(self) -> None:
+        profile = {
+            "solution_profile": {
+                "action": "implement_or_fix_adapter",
+                "owned": True,
+                "profile_status": "reviewed",
+                "journey_stage": "validate",
+            }
+        }
+        rows = [
+            {
+                "id": "gap_shared000001",
+                "domain": "vm",
+                "step_name": "alpha",
+                "validation_class": "FirstCheck",
+                "status": "not_implemented",
+                "remediation": {"auto_fixable": True, "target": "scripts/vm/shared.py"},
+                "enrichment": profile,
+            },
+            {
+                "id": "gap_shared000002",
+                "domain": "vm",
+                "step_name": "alpha",
+                "validation_class": "SecondCheck",
+                "status": "not_implemented",
+                "remediation": {"auto_fixable": True, "target": "scripts/vm/shared.py"},
+                "enrichment": profile,
+            },
+            {
+                "id": "gap_single000001",
+                "domain": "vm",
+                "step_name": "zulu",
+                "validation_class": "OnlyCheck",
+                "status": "not_implemented",
+                "remediation": {"auto_fixable": True, "target": "scripts/vm/single.py"},
+                "enrichment": profile,
+            },
+        ]
+
+        selected = _select_fixable({"rows": rows}, "vm")
+
+        self.assertEqual(selected[0]["id"], "gap_single000001")
+        self.assertEqual([row["id"] for row in selected[1:]], ["gap_shared000001", "gap_shared000002"])
+
     def test_generator_infrastructure_failure_stops_without_identical_retries(self) -> None:
         calls = {"n": 0}
 

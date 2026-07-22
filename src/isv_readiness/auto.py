@@ -375,7 +375,18 @@ def _select_fixable(report: dict[str, Any], domain: str) -> list[dict[str, Any]]
         if row.get("domain") == domain
         and decide_gap(row).edit_eligible
     ]
-    rows.sort(key=lambda row: (str(row.get("step_name")), str(row.get("validation_class") or ""), str(row.get("id"))))
+    unit_sizes: dict[str, int] = {}
+    for row in rows:
+        unit = adapter_contract_unit(row)
+        unit_sizes[unit] = unit_sizes.get(unit, 0) + 1
+    rows.sort(
+        key=lambda row: (
+            unit_sizes[adapter_contract_unit(row)],
+            str(row.get("step_name")),
+            str(row.get("validation_class") or ""),
+            str(row.get("id")),
+        )
+    )
     return rows
 
 
