@@ -812,6 +812,14 @@ def _nested_strings(raw: Any):
     if isinstance(raw, str):
         yield raw
     elif isinstance(raw, dict):
+        # A skipped command step is never executed, so its arguments cannot
+        # create a runtime dependency on outputs from an earlier step.
+        if (
+            raw.get("skip") is True
+            and isinstance(raw.get("name"), str)
+            and ("command" in raw or "args" in raw)
+        ):
+            return
         for value in raw.values():
             yield from _nested_strings(value)
     elif isinstance(raw, (list, tuple)):

@@ -275,6 +275,41 @@ class StaticScanTests(unittest.TestCase):
             row = next(item for item in report.rows if item.step_name == "launch_instance")
             self.assertEqual(row.status, "pass")
 
+    def test_skipped_consumer_does_not_require_producer_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            provider = Path(tempdir) / "provider"
+            script = provider / "scripts" / "vm" / "launch_instance.py"
+            config = provider / "config" / "vm.yaml"
+            script.parent.mkdir(parents=True)
+            config.parent.mkdir()
+            config.write_text(
+                "commands:\n"
+                "  vm:\n"
+                "    steps:\n"
+                "      - name: launch_instance\n"
+                "        command: python ../scripts/vm/launch_instance.py\n"
+                "      - name: teardown\n"
+                "        skip: true\n"
+                "        command: python ../scripts/vm/teardown.py\n"
+                "        args: ['{{steps.launch_instance.security_group_id}}']\n",
+                encoding="utf-8",
+            )
+            script.write_text(
+                'print({"success": True, "platform": "fixture", "instance_id": "node-1"})\n',
+                encoding="utf-8",
+            )
+
+            report = scan_provider(
+                ScanOptions(
+                    provider_repo=provider,
+                    domains=["vm"],
+                    validation_root=Path(tempdir) / "validation",
+                )
+            )
+
+        launch = next(row for row in report.rows if row.step_name == "launch_instance")
+        self.assertEqual(launch.status, "pass")
+
     def test_k8s_scan_finds_top_level_provider_wrapper(self) -> None:
         provider = FIXTURES / "ai-cloud-validation" / "isvctl" / "configs" / "providers" / "dsx-air"
         report = scan_provider(
