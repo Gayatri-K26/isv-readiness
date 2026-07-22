@@ -2049,3 +2049,43 @@ that evidence cannot support a safe implementation.
 - `uv run python -m unittest discover -s tests`: 154 tests passed.
 - Ruff, Python compilation, lock validation, schema parsing, and diff checks
   passed.
+
+## Step 43 - Invalidate Stale Local Qualification Context
+
+### Evidence
+
+The BCM review was rejected without applying its candidate patch. Rechecking
+the authoritative product manuals showed that the local fixture itself had
+incorrect collection envelopes and ambiguous lifecycle semantics. Editing that
+fixture would not have changed later generator requests because cache freshness
+checked only source IDs, not source declarations or local content.
+
+### Decisions
+
+1. Bind context-cache schema `0.3.0` to the complete declared context-source
+   configuration and the per-source cached record.
+2. When `qualify` checks cache freshness, resolve each local source from the
+   project manifest and compare its current redacted content hash and origin
+   with the indexed record. Refresh before proposal generation when either
+   differs.
+3. Keep network freshness explicit. A cache check never fetches a URL; network
+   sources retain the last successful import until the normal sync path runs.
+4. Do not add BCM response fields, state names, certificate behavior, or
+   provisioning assumptions to generic guardrails. Those facts belong in the
+   ISV-supplied authoritative contract and SME scope decision.
+
+### Simplicity boundary
+
+Do not keep hardening generic rules from one provider rehearsal. Add a generic
+deterministic check only for a provider-neutral invariant with low false-positive
+risk. Provider semantics and missing product interfaces must remain explicit
+qualification blockers instead of being guessed by code or repaired through
+repeated generation.
+
+### Verification
+
+- The context test changes a local API specification after sync, proves the
+  cache becomes stale, refreshes it, and proves it becomes current again.
+- `uv run python -m unittest discover -s tests`: 154 tests passed.
+- Ruff, Python compilation, lock validation, schema parsing, and diff checks
+  passed.

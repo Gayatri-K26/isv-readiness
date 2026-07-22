@@ -331,7 +331,14 @@ class ContextTests(unittest.TestCase):
             self.assertIn("Data center VM lifecycle guidance", nsrg["content"])
             self.assertIn("Pages: 3", nsrg["content"])
             self.assertNotIn("inference-ra/home.md", fetched)
-            self.assertTrue(context_cache_is_current(project, cache))
+            self.assertTrue(context_cache_is_current(project, cache, manifest_path=manifest))
+            (workspace / "openapi.yaml").write_text(
+                "paths:\n  /instances:\n    post: {}\n",
+                encoding="utf-8",
+            )
+            self.assertFalse(context_cache_is_current(project, cache, manifest_path=manifest))
+            sync_context_sources(project, manifest, cache, fetcher=fetcher_relevant)
+            self.assertTrue(context_cache_is_current(project, cache, manifest_path=manifest))
             pack = build_context_pack(
                 project, manifest, report, gap_id="gap_0123456789ab", cache_dir=cache, environment={}
             )

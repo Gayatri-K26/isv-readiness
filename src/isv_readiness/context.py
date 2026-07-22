@@ -31,7 +31,7 @@ from isv_readiness.scan.schema_registry import SchemaRegistry
 from isv_readiness.schema import load_schema
 
 CONTEXT_PACK_SCHEMA_VERSION = "0.1.0"
-CONTEXT_CACHE_SCHEMA_VERSION = "0.2.0"
+CONTEXT_CACHE_SCHEMA_VERSION = "0.3.0"
 MAX_SOURCE_BYTES = 1_000_000
 NCP_GUIDE_PAGE_PREFIXES = (
     "https://docs.nvidia.com/dsx/ncp/software-reference-guide/",
@@ -229,7 +229,13 @@ def sync_context_sources(
     for path in cache_dir.glob("*.json"):
         if path.name != "index.json" and path.stem not in declared_ids:
             path.unlink()
-    index = {"schema_version": CONTEXT_CACHE_SCHEMA_VERSION, "records": [record.to_dict() for record in records]}
+    index = {
+        "schema_version": CONTEXT_CACHE_SCHEMA_VERSION,
+        "source_definitions": {
+            source.id: _jsonable(asdict(source)) for source in project.context_sources
+        },
+        "records": [record.to_dict() for record in records],
+    }
     (cache_dir / "index.json").write_text(json.dumps(index, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return tuple(records)
 
@@ -246,7 +252,20 @@ def load_context_records(cache_dir: Path) -> tuple[ContextRecord, ...]:
     return tuple(records)
 
 
-def context_cache_is_current(project: ReadinessProject, cache_dir: Path) -> bool:
+def context_cache_is_current(
+    project: ReadinessProject,
+    cache_dir: Path,
+    *,
+    manifest_path: Path | None = None,
+) -> bool:
+    """Return whether the cache still represents the declared context sources.
+
+    A manifest path lets callers also compare local source content. Network
+    sources remain pinned to their last successful sync until a normal refresh
+    is otherwise required; checking freshness must not introduce hidden
+    network access.
+    """
+
     index_path = cache_dir / "index.json"
     try:
         index = json.loads(index_path.read_text(encoding="utf-8"))
@@ -257,9 +276,50 @@ def context_cache_is_current(project: ReadinessProject, cache_dir: Path) -> bool
     records = index.get("records")
     if not isinstance(records, list):
         return False
+    expected_definitions = {
+        source.id: _jsonable(asdict(source)) for source in project.context_sources
+    }
+    if index.get("source_definitions") != expected_definitions:
+        return False
     cached_ids = {record.get("source_id") for record in records if isinstance(record, dict)}
     expected_ids = {source.id for source in project.context_sources}
-    return cached_ids == expected_ids and all((cache_dir / f"{source_id}.json").is_file() for source_id in expected_ids)
+    if cached_ids != expected_ids:
+        return False
+
+    indexed_records = {
+        record["source_id"]: record
+        for record in records
+        if isinstance(record, dict) and isinstance(record.get("source_id"), str)
+    }
+    for source_id in expected_ids:
+        record_path = cache_dir / f"{source_id}.json"
+        try:
+            stored = json.loads(record_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        if stored != indexed_records.get(source_id):
+            return False
+
+    if manifest_path is None:
+        return True
+
+    for source in project.context_sources:
+        is_url = source.location.startswith(("https://", "http://"))
+        if source.kind == "web_url" or (source.kind == "api_spec" and is_url):
+            continue
+        try:
+            current = _sync_source(
+                project,
+                manifest_path,
+                source,
+                fetcher=_unexpected_cache_check_fetch,
+            )
+        except (OSError, UnicodeError, json.JSONDecodeError, ContextError):
+            return False
+        cached = indexed_records[source.id]
+        if current.sha256 != cached.get("sha256") or current.origin != cached.get("origin"):
+            return False
+    return True
 
 
 def build_context_pack(
@@ -1439,6 +1499,13 @@ def _fetch_url(url: str, headers: Mapping[str, str]) -> bytes:
     request = urllib.request.Request(url, headers=dict(headers))
     with urllib.request.urlopen(request, timeout=30) as response:
         return response.read(MAX_SOURCE_BYTES + 1)
+
+
+def _unexpected_cache_check_fetch(url: str, headers: Mapping[str, str]) -> bytes:
+    """Prevent a cache freshness check from performing network I/O."""
+
+    del headers
+    raise ContextError(f"Cache freshness check attempted an unexpected network fetch: {url}")
 
 
 def _gap_from_dict(raw: Mapping[str, Any]) -> GapRow:

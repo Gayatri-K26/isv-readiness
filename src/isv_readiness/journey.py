@@ -71,7 +71,11 @@ def cmd_qualify(*, generator: str = "codex", confirm: Confirm | None = None) -> 
             qualification_dir.mkdir(parents=True, exist_ok=True)
             cache_dir = project_path.parent / ".gapctl" / "context-cache"
             cached_records = load_context_records(cache_dir)
-            if not context_cache_is_current(project, cache_dir) or any(
+            if not context_cache_is_current(
+                project,
+                cache_dir,
+                manifest_path=project_path,
+            ) or any(
                 record.status == "error" for record in cached_records
             ):
                 records = sync_context_sources(project, project_path, cache_dir)

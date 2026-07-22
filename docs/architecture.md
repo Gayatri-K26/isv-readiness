@@ -35,6 +35,12 @@ flowchart LR
 6. import declared context into the redacted cache;
 7. create the initial draft profile.
 
+The cache index is bound to both the declared source configuration and the
+current bytes of local sources. If an ISV edits a local API specification or
+qualification document before proposal generation, `qualify` refreshes that
+source instead of sending stale evidence to the generator. This freshness
+check never performs hidden network requests.
+
 A fresh clone obtains the current head of the selected ref. Once recorded, the
 commit is stable for that qualification. Later commands reject checkout drift
 instead of silently pulling different tests into an active engagement.
