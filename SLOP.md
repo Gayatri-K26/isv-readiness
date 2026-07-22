@@ -2134,12 +2134,15 @@ but it cannot weaken the product's publishable validation contract.
    upstream validation order within the phase. Auto-generation preserves that
    order instead of re-sorting by target size or name, so setup producers are
    considered before their dependent test and teardown adapters.
+7. Parked-gap continuation text mentions applying a staged patch only when the
+   run actually staged at least one verified change. A no-change run now tells
+   the operator only to re-run, rather than referring to a nonexistent patch.
 
 ### Verification
 
 - Focused tests cover stale-review removal on model timeout, multi-file rollback,
   file-mode preservation, and staged-file cleanup after a failed replacement.
-- `uv run python -m unittest discover -s tests`: 159 tests passed.
+- `uv run python -m unittest discover -s tests`: 160 tests passed.
 - Ruff, Python compilation, every packaged JSON schema, lock validation, and
   diff checks passed.
 - The pinned local `ai-cloud-validation` checkout's full `isvtest` suite passed

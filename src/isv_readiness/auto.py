@@ -394,6 +394,9 @@ def _park(
     attempts_by_unit = attempts_by_unit or {}
     blocked_by_unit = blocked_by_unit or {}
     feedback_by_unit = feedback_by_unit or {}
+    continue_instruction = (
+        "apply the staged patch and re-run auto" if staged else "re-run auto"
+    )
     parked: list[ParkedGap] = []
     for row in report.get("rows", []):
         decision = decide_gap(row)
@@ -410,9 +413,15 @@ def _park(
             if blocker:
                 reason = blocker
             elif attempts == 0:
-                reason = "Not attempted within this run's iteration budget; apply the staged patch and re-run auto to continue."
+                reason = (
+                    "Not attempted within this run's iteration budget; "
+                    f"{continue_instruction} to continue."
+                )
             elif attempts < max_attempts:
-                reason = f"{attempts} failed attempt(s); retry budget remains — re-run auto after applying."
+                reason = (
+                    f"{attempts} failed attempt(s); retry budget remains — "
+                    f"{continue_instruction}."
+                )
                 if last_feedback:
                     reason += f" Last failure: {last_feedback}"
             else:

@@ -422,6 +422,20 @@ class AutoResilienceTests(unittest.TestCase):
         self.assertNotIn("launch interface is unavailable", by_id[rows[1]["id"]].reason)
         self.assertIn("Not attempted", by_id[rows[1]["id"]].reason)
 
+    def test_park_does_not_claim_an_unstaged_patch_exists(self) -> None:
+        rows = _config_rows()
+
+        parked = _park(
+            {"rows": rows},
+            "vm",
+            [],
+            {adapter_contract_unit(rows[0]): 1},
+            3,
+        )
+
+        self.assertTrue(all("re-run auto" in item.reason for item in parked))
+        self.assertTrue(all("apply" not in item.reason for item in parked))
+
 
 def _project(root: Path) -> tuple[Path, Path]:
     workspace = root / "workspace"
