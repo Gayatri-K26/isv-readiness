@@ -93,21 +93,19 @@ def scan_provider(options: ScanOptions) -> GapReport:
 
         provider_config = _read_yaml(config_path)
         suite_docs = _load_imported_suite_docs(config_path, provider_config, domain, validation_root)
-        checks = _checks_for_domain(suite_docs, provider_config)
         steps = _steps_for_domain(provider_config, domain, config_path)
+        checks = _checks_for_domain(suite_docs, provider_config)
         aws_steps = _aws_steps_for_domain(validation_root, domain)
 
         step_names_with_checks = {check.step_name for check in checks if check.requires_step}
-        for step_name in sorted(set(steps) - step_names_with_checks):
-            checks.append(CheckRef(step_name=step_name, validation_class="StepOutputSchema"))
+        for step_name in steps:
+            if step_name not in step_names_with_checks:
+                checks.append(CheckRef(step_name=step_name, validation_class="StepOutputSchema"))
 
-        for check in sorted(
+        for check in _checks_in_execution_order(
             checks,
-            key=lambda item: (
-                item.step_name,
-                item.validation_class,
-                (item.enrichment or {}).get("validation_instance", ""),
-            ),
+            steps,
+            _phases_for_domain(provider_config, domain),
         ):
             step = steps.get(check.step_name)
             aws_step = aws_steps.get(check.step_name)
@@ -124,7 +122,6 @@ def scan_provider(options: ScanOptions) -> GapReport:
                 )
             )
 
-    rows = sorted(rows, key=lambda row: (row.domain, row.step_name, row.validation_class or "", row.id))
     return GapReport(
         schema_version=SCHEMA_VERSION,
         provider_repo=str(provider_repo),
@@ -714,20 +711,72 @@ def _deep_merge_config(base: dict[str, Any], override: dict[str, Any]) -> dict[s
     return result
 
 
-def _steps_for_domain(provider_config: dict[str, Any], domain: str, config_path: Path) -> dict[str, StepRef]:
-    commands = provider_config.get("commands") or {}
-    entries: list[dict[str, Any]] = []
-    if isinstance(commands, dict):
-        command_keys = _command_keys_for_domain(domain)
-        matched_entries = [commands[key] for key in command_keys if isinstance(commands.get(key), dict)]
-        if matched_entries:
-            entries.extend(matched_entries)
-        else:
-            entries.extend(entry for entry in commands.values() if isinstance(entry, dict))
+def _checks_in_execution_order(
+    checks: list[CheckRef],
+    steps: dict[str, StepRef],
+    declared_phases: tuple[str, ...],
+) -> list[CheckRef]:
+    """Keep gap work aligned with the provider's declared execution plan."""
 
+    phase_names = list(dict.fromkeys(("configuration", *declared_phases)))
+    for step in steps.values():
+        if step.phase and step.phase not in phase_names:
+            phase_names.append(step.phase)
+    for check in checks:
+        phase = (check.enrichment or {}).get("validation_phase")
+        if isinstance(phase, str) and phase not in phase_names:
+            phase_names.append(phase)
+
+    phase_positions = {phase: index for index, phase in enumerate(phase_names)}
+    step_positions = {name: index for index, name in enumerate(steps)}
+
+    def key(indexed_check: tuple[int, CheckRef]) -> tuple[int, int, int, int]:
+        original_index, check = indexed_check
+        step = steps.get(check.step_name)
+        raw_phase = step.phase if step and step.phase else (check.enrichment or {}).get("validation_phase")
+        phase = raw_phase if isinstance(raw_phase, str) else ""
+        phase_position = phase_positions.get(phase, len(phase_positions))
+
+        if check.step_name in step_positions:
+            return phase_position, 0, step_positions[check.step_name], original_index
+
+        # A suite-required step that the provider has not wired yet has no
+        # provider execution position. Keep it in upstream validation order,
+        # after the configured work in the same phase.
+        return phase_position, 1, original_index, original_index
+
+    return [check for _, check in sorted(enumerate(checks), key=key)]
+
+
+def _command_entries_for_domain(
+    provider_config: dict[str, Any], domain: str
+) -> list[dict[str, Any]]:
+    commands = provider_config.get("commands") or {}
+    if not isinstance(commands, dict):
+        return []
+    command_keys = _command_keys_for_domain(domain)
+    matched_entries = [commands[key] for key in command_keys if isinstance(commands.get(key), dict)]
+    if matched_entries:
+        return matched_entries
+    return [entry for entry in commands.values() if isinstance(entry, dict)]
+
+
+def _phases_for_domain(provider_config: dict[str, Any], domain: str) -> tuple[str, ...]:
+    phases: list[str] = []
+    for entry in _command_entries_for_domain(provider_config, domain):
+        raw_phases = entry.get("phases") or []
+        if not isinstance(raw_phases, list):
+            continue
+        for phase in raw_phases:
+            if isinstance(phase, str) and phase not in phases:
+                phases.append(phase)
+    return tuple(phases)
+
+
+def _steps_for_domain(provider_config: dict[str, Any], domain: str, config_path: Path) -> dict[str, StepRef]:
     output_references = _step_output_references(provider_config)
     steps: dict[str, StepRef] = {}
-    for entry in entries:
+    for entry in _command_entries_for_domain(provider_config, domain):
         raw_steps = entry.get("steps") or []
         if not isinstance(raw_steps, list):
             continue

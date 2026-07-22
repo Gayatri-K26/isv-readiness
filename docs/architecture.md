@@ -145,6 +145,12 @@ Generation requires all of the following:
 - the scanner marks the row safely auto-fixable;
 - the target is inside the provider-owned allowlist.
 
+The scanner orders rows from the normalized execution plan: declared phase
+order, then provider step order. Suite-required steps that are not wired into
+the provider yet retain upstream validation order within their phase. The
+generation loop preserves that order instead of introducing a separate target
+priority heuristic.
+
 The generator never writes the provider directly. It returns a schema-valid
 change set bound to the context pack hash. Verification applies the change in a
 scratch copy and rescans it. The operator sees one combined patch per domain.

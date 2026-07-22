@@ -369,25 +369,15 @@ def _apply_reviewed_scratch(
 
 
 def _select_fixable(report: dict[str, Any], domain: str) -> list[dict[str, Any]]:
-    rows = [
+    # The scanner emits rows in the normalized provider execution order.
+    # Preserve it: setup producers must be handled before dependent test and
+    # teardown adapters, regardless of target size or alphabetical name.
+    return [
         row
         for row in report.get("rows", [])
         if row.get("domain") == domain
         and decide_gap(row).edit_eligible
     ]
-    unit_sizes: dict[str, int] = {}
-    for row in rows:
-        unit = adapter_contract_unit(row)
-        unit_sizes[unit] = unit_sizes.get(unit, 0) + 1
-    rows.sort(
-        key=lambda row: (
-            unit_sizes[adapter_contract_unit(row)],
-            str(row.get("step_name")),
-            str(row.get("validation_class") or ""),
-            str(row.get("id")),
-        )
-    )
-    return rows
 
 
 def _park(

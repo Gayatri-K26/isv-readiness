@@ -136,7 +136,8 @@ For every owned domain, `validate`:
 
 1. scans provider-owned files against the pinned NVIDIA contracts;
 2. selects only gaps that are both profile-approved and deterministically safe
-   to edit;
+   to edit, in declared phase and provider-step execution order rather than by
+   target name or size;
 3. gives the selected generator the complete declared runtime-input contract,
    every edit-eligible unresolved check in the same adapter contract unit, and
    the exact pinned suite entries and step-output schemas plus a deterministic,

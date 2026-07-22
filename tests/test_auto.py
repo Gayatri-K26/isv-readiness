@@ -108,7 +108,7 @@ class AutoWorkflowTests(unittest.TestCase):
 
 
 class AutoResilienceTests(unittest.TestCase):
-    def test_fixable_selection_prioritizes_the_smallest_contract_unit(self) -> None:
+    def test_fixable_selection_preserves_scanner_execution_order(self) -> None:
         profile = {
             "solution_profile": {
                 "action": "implement_or_fix_adapter",
@@ -121,7 +121,7 @@ class AutoResilienceTests(unittest.TestCase):
             {
                 "id": "gap_shared000001",
                 "domain": "vm",
-                "step_name": "alpha",
+                "step_name": "launch",
                 "validation_class": "FirstCheck",
                 "status": "not_implemented",
                 "remediation": {"auto_fixable": True, "target": "scripts/vm/shared.py"},
@@ -130,7 +130,7 @@ class AutoResilienceTests(unittest.TestCase):
             {
                 "id": "gap_shared000002",
                 "domain": "vm",
-                "step_name": "alpha",
+                "step_name": "launch",
                 "validation_class": "SecondCheck",
                 "status": "not_implemented",
                 "remediation": {"auto_fixable": True, "target": "scripts/vm/shared.py"},
@@ -139,7 +139,7 @@ class AutoResilienceTests(unittest.TestCase):
             {
                 "id": "gap_single000001",
                 "domain": "vm",
-                "step_name": "zulu",
+                "step_name": "describe",
                 "validation_class": "OnlyCheck",
                 "status": "not_implemented",
                 "remediation": {"auto_fixable": True, "target": "scripts/vm/single.py"},
@@ -149,8 +149,10 @@ class AutoResilienceTests(unittest.TestCase):
 
         selected = _select_fixable({"rows": rows}, "vm")
 
-        self.assertEqual(selected[0]["id"], "gap_single000001")
-        self.assertEqual([row["id"] for row in selected[1:]], ["gap_shared000001", "gap_shared000002"])
+        self.assertEqual(
+            [row["id"] for row in selected],
+            ["gap_shared000001", "gap_shared000002", "gap_single000001"],
+        )
 
     def test_generator_infrastructure_failure_stops_without_identical_retries(self) -> None:
         calls = {"n": 0}

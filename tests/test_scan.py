@@ -57,6 +57,60 @@ class StaticScanTests(unittest.TestCase):
         self.assertEqual(teardown.status, "skipped")
         self.assertFalse(teardown.remediation.auto_fixable)
 
+    def test_static_scan_preserves_declared_execution_order(self) -> None:
+        report = scan_provider(
+            ScanOptions(
+                provider_repo=FIXTURES / "provider_repo",
+                domains=["vm"],
+                validation_root=FIXTURES / "ai-cloud-validation",
+            )
+        )
+
+        self.assertEqual(
+            [row.step_name for row in report.rows],
+            ["launch_instance", "list_instances", "describe_instance", "teardown"],
+        )
+
+    def test_static_scan_orders_by_phase_then_step_declaration(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            provider = Path(tempdir) / "provider"
+            validation_root = Path(tempdir) / "validation"
+            validation_root.mkdir()
+            config = provider / "config" / "vm.yaml"
+            config.parent.mkdir(parents=True)
+            config.write_text(
+                "commands:\n"
+                "  vm:\n"
+                "    phases: [setup, test, teardown]\n"
+                "    steps:\n"
+                "      - name: zulu_test\n"
+                "        phase: test\n"
+                "        command: python ../scripts/vm/zulu_test.py\n"
+                "      - name: alpha_setup\n"
+                "        phase: setup\n"
+                "        command: python ../scripts/vm/alpha_setup.py\n"
+                "      - name: beta_test\n"
+                "        phase: test\n"
+                "        command: python ../scripts/vm/beta_test.py\n"
+                "      - name: aardvark_teardown\n"
+                "        phase: teardown\n"
+                "        command: python ../scripts/vm/aardvark_teardown.py\n",
+                encoding="utf-8",
+            )
+
+            report = scan_provider(
+                ScanOptions(
+                    provider_repo=provider,
+                    domains=["vm"],
+                    validation_root=validation_root,
+                )
+            )
+
+        self.assertEqual(
+            [row.step_name for row in report.rows],
+            ["alpha_setup", "zulu_test", "beta_test", "aardvark_teardown"],
+        )
+
     def test_scan_report_rendering(self) -> None:
         report = scan_provider(
             ScanOptions(
