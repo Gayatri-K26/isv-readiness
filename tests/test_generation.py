@@ -110,6 +110,8 @@ class GeneratorAdapterTests(unittest.TestCase):
             self.assertIn("output_schema", seen["request"])
             rules = "\n".join(seen["request"]["rules"])
             self.assertIn("runtime environment names declared by the project", rules)
+            self.assertIn("not authorization for demo inputs or behavior", rules)
+            self.assertIn("provider_runtime_contract.allowed_provider_env", rules)
             self.assertIn("canonical resource identifier", rules)
             self.assertIn("Preserve lifecycle verbs", rules)
             self.assertIn("pre-existing resource does not satisfy", rules)

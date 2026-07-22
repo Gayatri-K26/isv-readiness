@@ -2137,6 +2137,10 @@ but it cannot weaken the product's publishable validation contract.
 7. Parked-gap continuation text mentions applying a staged patch only when the
    run actually staged at least one verified change. A no-change run now tells
    the operator only to re-run, rather than referring to a nonexistent patch.
+8. State explicitly that scaffold and reference demo branches do not authorize
+   undeclared runtime inputs or behavior. The declared runtime allowlist and
+   authoritative provider contract outrank incomplete template code; this is a
+   provider-neutral prompt rule and does not add a BCM lifecycle exception.
 
 ### Verification
 

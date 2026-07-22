@@ -74,6 +74,10 @@ QUALIFICATION_MAPPING_RULES = (
 )
 PROVIDER_IMPLEMENTATION_RULES = (
     "Use only runtime environment names declared by the project; never invent a new input name in provider code.",
+    "Treat provider scaffolds, templates, and reference implementations as incomplete implementation material, "
+    "not authorization for demo inputs or behavior. If they read an environment name that is absent from "
+    "provider_runtime_contract.allowed_provider_env, do not copy or preserve that path; the authoritative runtime "
+    "and provider interface contracts control the implementation.",
     "Treat the reviewed solution-profile capability mapping and rationale as an approved implementation premise. "
     "Do not re-open scope merely because runtime behavior has not yet been tested.",
     "Use declared interface paths, methods, authentication, response fields, and lifecycle semantics. Never invent "
