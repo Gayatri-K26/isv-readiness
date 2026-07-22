@@ -105,6 +105,12 @@ PROVIDER_IMPLEMENTATION_RULES = (
     "Honor the documented semantic contract as well as the executable assertions. Do not exploit a missing "
     "validation check or relabel a provider concept as a contract primitive unless supplied evidence establishes "
     "that mapping.",
+    "Populate each structured result field only from the source-backed provider concept that field represents. "
+    "Never satisfy a schema with a placeholder, sentinel, or unrelated value; leave an optional field empty when "
+    "the provider contract has no mapping, and refuse when an unmapped field is required.",
+    "Report success only after actively verifying every success precondition declared by the authoritative "
+    "provider contract. The presence of a credential, key path, endpoint, or configuration value is not evidence "
+    "that the corresponding operation or connection succeeded.",
     "When changing a domain configuration, edit only the selected step block. Preserve all comments, formatting, "
     "and unrelated steps exactly.",
     "Treat environment, API, and configuration strings used as subprocess arguments as untrusted. Validate them "
