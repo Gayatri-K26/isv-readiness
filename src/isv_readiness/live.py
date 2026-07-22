@@ -215,11 +215,16 @@ def run_live_domain(
 
 def _domain_config(provider_root: Path, domain: str) -> Path:
     if domain == "kubernetes":
+        config = provider_root / "config" / DOMAIN_CONFIG_FILES[domain]
+        if config.is_file():
+            return config
+        # Read legacy upstream-style sibling wrappers, but keep newly
+        # scaffolded and generated configs inside the provider boundary.
         for suffix in (".yaml", ".yml"):
             wrapper = provider_root.with_suffix(suffix)
             if wrapper.is_file():
                 return wrapper
-        return provider_root.with_suffix(".yaml")
+        return config
     filename = DOMAIN_CONFIG_FILES.get(domain)
     if filename is None:
         raise LiveRunError(f"No provider config mapping for domain: {domain}")

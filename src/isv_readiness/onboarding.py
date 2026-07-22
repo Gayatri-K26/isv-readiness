@@ -19,6 +19,7 @@ DOMAIN_CONFIG_FILES = {
     "control_plane": "control-plane.yaml",
     "iam": "iam.yaml",
     "image_registry": "image-registry.yaml",
+    "kubernetes": "kubernetes.yaml",
     "network": "network.yaml",
     "observability": "observability.yaml",
     "security": "security.yaml",

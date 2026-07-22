@@ -63,7 +63,9 @@ def build_k8s_onboarding_plan(validation_root: Path, provider_name: str) -> K8sO
         validation_root=validation_root,
         providers_dir=providers_dir,
         provider_dir=provider_dir,
-        wrapper_path=providers_dir / f"{provider_name}.yaml",
+        # Keep every generated provider artifact inside the provider directory.
+        # The review workflow copies that directory as one transactional unit.
+        wrapper_path=provider_dir / "config" / "kubernetes.yaml",
         setup_script_path=provider_dir / "scripts" / "k8s" / "setup.sh",
         teardown_script_path=provider_dir / "scripts" / "k8s" / "teardown.sh",
         scope_template_path=provider_dir / "isv-readiness.k8s.scope.json",
@@ -132,7 +134,8 @@ def _copy_or_write_script(*, source: Path, target: Path, fallback: str, overwrit
 
 
 def _wrapper_text(provider_name: str) -> str:
-    return f"""import: ../suites/k8s.yaml
+    return f"""import:
+  - ../../../suites/k8s.yaml
 
 version: "1.0"
 
@@ -142,11 +145,11 @@ commands:
     steps:
       - name: setup
         phase: setup
-        command: "{provider_name}/scripts/k8s/setup.sh"
+        command: "../scripts/k8s/setup.sh"
         timeout: 120
       - name: teardown
         phase: teardown
-        command: "{provider_name}/scripts/k8s/teardown.sh"
+        command: "../scripts/k8s/teardown.sh"
         timeout: 30
 
 tests:

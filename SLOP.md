@@ -2232,3 +2232,41 @@ generic safety checks, exact contract tests, and human-reviewed application.
 - `isv-readiness` passes all 163 unit tests, Ruff, Python compilation, packaged
   JSON schema parsing, lock validation, and diff checks.
 - No live BCM API, SSH, power, or reprovisioning operation ran during this step.
+
+## Step 46 - Keep Kubernetes Configuration Inside the Review Boundary
+
+### Evidence
+
+The four-domain BCM rehearsal reached `gapctl validate` with zero direct static
+blockers, but the public workflow reported a missing Kubernetes wrapper. The
+wrapper lived beside the provider directory while automatic review copied only
+the provider directory into `scratch-provider`. Direct scanning therefore saw
+the wrapper, while the same scan inside the transactional scratch did not.
+
+### Decisions
+
+1. Scaffold new Kubernetes configuration at
+   `provider/config/kubernetes.yaml`, matching every other domain's provider
+   ownership boundary.
+2. Resolve suite imports and setup/teardown commands relative to that config.
+   Do not add a second sidecar-copy, diff, backup, and apply transaction for one
+   exceptional domain.
+3. Prefer the in-provider config for live execution. Continue reading an older
+   sibling wrapper as a compatibility fallback, but do not create that layout
+   for new providers.
+4. Make a missing-config remediation target the in-provider path so generated
+   work remains reviewable and atomically applicable.
+5. Migrate the synthetic BCM fixture to the canonical path without changing its
+   five explicit node-pool exclusions or expanding its reviewed product claim.
+
+### Verification
+
+- The full `isv-readiness` suite passes all 164 tests, including a regression
+  that copies the provider into the same scratch boundary used by automatic
+  review and confirms that the Kubernetes config remains present.
+- Ruff, Python compilation, packaged JSON schema parsing, lock validation, and
+  diff checks pass.
+- The migrated BCM provider scans 160 rows across bare metal, Kubernetes,
+  Slurm, and observability with zero blocking or edit-eligible gaps.
+- The migrated Kubernetes config passes the pinned `isvctl` dry-run parser.
+- No live provider operation ran during this correction.

@@ -347,7 +347,7 @@ class StaticScanTests(unittest.TestCase):
         self.assertEqual(reframe.enrichment["execution_adapter"], "reframe")
         self.assertEqual(len(report.rows), len({row.id for row in report.rows}))
 
-    def test_k8s_scan_reports_missing_provider_wrapper_as_onboarding_gap(self) -> None:
+    def test_k8s_scan_reports_missing_provider_config_as_onboarding_gap(self) -> None:
         provider = FIXTURES / "ai-cloud-validation" / "isvctl" / "configs" / "providers" / "new-k8s"
         report = scan_provider(
             ScanOptions(
@@ -361,8 +361,8 @@ class StaticScanTests(unittest.TestCase):
         row = report.rows[0]
         self.assertEqual(row.status, "not_implemented")
         self.assertTrue(row.remediation.auto_fixable)
-        self.assertIn("No Kubernetes provider wrapper", row.evidence.message)
-        self.assertTrue((row.remediation.target or "").endswith("new-k8s.yaml"))
+        self.assertIn("No Kubernetes provider config", row.evidence.message)
+        self.assertTrue((row.remediation.target or "").endswith("new-k8s/config/kubernetes.yaml"))
 
     def test_k8s_scan_flags_my_isv_template_command_wiring(self) -> None:
         provider = FIXTURES / "ai-cloud-validation" / "isvctl" / "configs" / "providers" / "bad-k8s"
@@ -452,7 +452,7 @@ tests:
         ).to_dict()
 
         self.assertTrue(data["rows"][0]["remediation"]["auto_fixable"])
-        self.assertIn("No Kubernetes provider wrapper", data["rows"][0]["evidence"]["message"])
+        self.assertIn("No Kubernetes provider config", data["rows"][0]["evidence"]["message"])
 
 
 if __name__ == "__main__":

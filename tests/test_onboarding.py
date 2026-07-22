@@ -51,7 +51,8 @@ class CrossDomainOnboardingTests(unittest.TestCase):
             self.assertIsNotNone(plan.k8s_plan)
             assert plan.k8s_plan is not None
             self.assertIn(plan.k8s_plan.wrapper_path, written)
-            self.assertTrue((plan.provider_dir.parent / "acme.yaml").exists())
+            self.assertEqual(plan.k8s_plan.wrapper_path, plan.provider_dir / "config" / "kubernetes.yaml")
+            self.assertTrue(plan.k8s_plan.wrapper_path.exists())
             self.assertTrue((plan.provider_dir / "isv-readiness.k8s.scope.json").exists())
             self.assertEqual(
                 (plan.provider_dir / "scripts" / "k8s" / "setup.sh").read_text(encoding="utf-8"),

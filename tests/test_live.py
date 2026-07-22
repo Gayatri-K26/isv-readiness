@@ -9,7 +9,7 @@ from pathlib import Path
 import jsonschema
 import yaml
 
-from isv_readiness.live import LiveRunError, run_live_domain
+from isv_readiness.live import LiveRunError, _domain_config, run_live_domain
 from isv_readiness.project import build_bootstrap_plan, execute_bootstrap, load_project
 from isv_readiness.schema import load_schema
 
@@ -19,6 +19,19 @@ COMMIT = "c" * 40
 
 
 class LiveRunTests(unittest.TestCase):
+    def test_kubernetes_prefers_config_inside_provider_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            provider = Path(tempdir) / "providers" / "acme"
+            config = provider / "config" / "kubernetes.yaml"
+            config.parent.mkdir(parents=True)
+            config.write_text("tests:\n  platform: kubernetes\n", encoding="utf-8")
+            legacy = provider.with_suffix(".yaml")
+            legacy.write_text("tests:\n  platform: legacy\n", encoding="utf-8")
+
+            self.assertEqual(_domain_config(provider, "kubernetes"), config)
+            config.unlink()
+            self.assertEqual(_domain_config(provider, "kubernetes"), legacy)
+
     def test_live_run_requires_project_policy_and_explicit_authorization(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             project, manifest = _project(Path(tempdir), allow_live=False)

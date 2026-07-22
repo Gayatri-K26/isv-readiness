@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -22,11 +23,17 @@ class K8sOnboardingTests(unittest.TestCase):
             written = write_k8s_onboarding_files(plan)
 
             self.assertEqual(len(written), 4)
-            self.assertTrue((providers_dir / "dsx-air.yaml").exists())
+            self.assertTrue((providers_dir / "dsx-air" / "config" / "kubernetes.yaml").exists())
             self.assertTrue((providers_dir / "dsx-air" / "scripts" / "k8s" / "setup.sh").exists())
-            wrapper = (providers_dir / "dsx-air.yaml").read_text(encoding="utf-8")
-            self.assertIn('command: "dsx-air/scripts/k8s/setup.sh"', wrapper)
-            self.assertIn("import: ../suites/k8s.yaml", wrapper)
+            wrapper = (providers_dir / "dsx-air" / "config" / "kubernetes.yaml").read_text(encoding="utf-8")
+            self.assertIn('command: "../scripts/k8s/setup.sh"', wrapper)
+            self.assertIn("../../../suites/k8s.yaml", wrapper)
+
+            # The automatic review workspace copies only the provider root.
+            # Its Kubernetes config must survive that boundary.
+            scratch = Path(tempdir) / "scratch-provider"
+            shutil.copytree(plan.provider_dir, scratch)
+            self.assertTrue((scratch / "config" / "kubernetes.yaml").is_file())
 
             scope = json.loads((providers_dir / "dsx-air" / "isv-readiness.k8s.scope.json").read_text())
             self.assertEqual(scope["provider"], "dsx-air")
@@ -39,10 +46,10 @@ class K8sOnboardingTests(unittest.TestCase):
             (validation_root / "isvctl" / "configs" / "providers").mkdir(parents=True)
 
             plan = build_k8s_onboarding_plan(validation_root, "acme-k8s")
-            self.assertFalse((validation_root / "isvctl" / "configs" / "providers" / "acme-k8s.yaml").exists())
+            self.assertFalse(plan.wrapper_path.exists())
 
             write_k8s_onboarding_files(plan)
-            self.assertTrue((validation_root / "isvctl" / "configs" / "providers" / "acme-k8s.yaml").exists())
+            self.assertTrue(plan.wrapper_path.exists())
 
 
 if __name__ == "__main__":

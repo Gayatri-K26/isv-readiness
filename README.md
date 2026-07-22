@@ -160,6 +160,11 @@ For every owned domain, `validate`:
 10. asks for explicit authorization before running the real cloud tests;
 11. records JUnit, logs, run metadata, and the full-scope gap scorecard.
 
+All scaffolded domain configuration, including Kubernetes, lives under the
+provider directory. The isolated review copy and atomic apply therefore use one
+provider-owned filesystem boundary; legacy sibling Kubernetes wrappers remain
+readable but are not generated for new workspaces.
+
 Rejecting a candidate discards its generated review markers. The next
 `gapctl validate` regenerates from the unchanged provider instead of repeatedly
 showing the rejected patch.

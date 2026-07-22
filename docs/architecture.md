@@ -155,6 +155,10 @@ The generator never writes the provider directly. It returns a schema-valid
 change set bound to the context pack hash. Verification applies the change in a
 scratch copy and rescans it. The operator sees one combined patch per domain.
 Application recomputes the patch and refuses any hash mismatch.
+Scaffolding keeps every generated domain config inside the provider directory,
+including `config/kubernetes.yaml`, so scratch verification and atomic apply
+operate on one complete provider-owned tree. The scanner and live runner can
+still read an older sibling Kubernetes wrapper for compatibility.
 Declining the patch removes only its generated review markers; the next
 validation run replaces the scratch copy from the unchanged provider and
 generates a new candidate rather than resuming the rejected review.

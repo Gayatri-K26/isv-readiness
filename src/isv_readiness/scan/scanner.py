@@ -566,7 +566,7 @@ def _suggest_config_target(provider_repo: Path, domain: str) -> str | None:
         return None
     if provider_repo.suffix in {".yaml", ".yml"}:
         return str(provider_repo)
-    return str(provider_repo.with_suffix(".yaml"))
+    return str(provider_repo / "config" / "kubernetes.yaml")
 
 
 def _missing_config_message(provider_repo: Path, domain: str) -> str:
@@ -574,7 +574,7 @@ def _missing_config_message(provider_repo: Path, domain: str) -> str:
         return f"No provider config found for domain '{domain}'"
     target = _suggest_config_target(provider_repo, domain) or "isvctl/configs/providers/<provider>.yaml"
     return (
-        "No Kubernetes provider wrapper found. Create a provider config that imports "
+        "No Kubernetes provider config found. Create a provider config that imports "
         f"suites/k8s.yaml and points setup/teardown at this provider's scripts, for example {target}."
     )
 
