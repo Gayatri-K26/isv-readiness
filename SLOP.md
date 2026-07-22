@@ -2089,3 +2089,53 @@ repeated generation.
 - `uv run python -m unittest discover -s tests`: 154 tests passed.
 - Ruff, Python compilation, lock validation, schema parsing, and diff checks
   passed.
+
+## Step 44 - Pre-validation Review-State and Application Audit
+
+### Evidence
+
+Before restarting the synthetic BCM validation, a full review of the recent
+generation, review, timeout, and application paths found two state-integrity
+problems. A generator infrastructure failure could leave an older
+`auto-review.json` or `auto-review.patch` in the work directory, so an external
+observer could mistake stale output for the failed run's result. The combined
+review apply path also replaced each file atomically but did not roll back
+earlier files when a later replacement failed, despite describing the whole
+multi-file patch as atomic. The older change-set transaction retained a staged
+temporary file if `os.replace` failed because it removed that path from its
+cleanup map before the replacement completed.
+
+An uncommitted rehearsal-only generator instruction was also rejected during
+the audit. Allowing a declared existing-resource mode to satisfy a mutating
+lifecycle step would require a deterministic non-production evidence gate
+before readiness or publication. The product has no such gate, so the simpler
+and accurate rule remains that launch/create/provision/delete/teardown preserve
+their literal upstream meaning. A synthetic fixture may describe its limits,
+but it cannot weaken the product's publishable validation contract.
+
+### Decisions
+
+1. Clear prior review artifacts immediately before a new scratch generation
+   begins. A timeout or other generator failure now leaves no review result
+   rather than preserving unrelated stale output.
+2. When a completed review has no patch, explicitly remove any old patch file
+   while writing the current JSON result.
+3. Stage and fsync every reviewed file before replacing any provider target.
+   Preserve existing file modes, back up every existing target, verify each
+   reviewed after-hash, and roll back all earlier replacements if any later
+   replacement or hash check fails.
+4. Retain a staged path in the cleanup map until `os.replace` succeeds in both
+   application implementations, so failed replacement attempts do not leak
+   temporary files.
+5. Keep provider-specific rehearsal semantics outside generic guardrails. No
+   new profile state, exception mode, CLI flag, or BCM rule was added.
+
+### Verification
+
+- Focused tests cover stale-review removal on model timeout, multi-file rollback,
+  file-mode preservation, and staged-file cleanup after a failed replacement.
+- `uv run python -m unittest discover -s tests`: 156 tests passed.
+- Ruff, Python compilation, every packaged JSON schema, lock validation, and
+  diff checks passed.
+- The pinned local `ai-cloud-validation` checkout's full `isvtest` suite passed
+  all 1,271 tests, including the private BCM head-hop overlay's 14 SSH tests.

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import jsonschema
 
@@ -104,6 +106,49 @@ class ChangeVerificationTests(unittest.TestCase):
                     manifest=manifest,
                     backup_dir=root / "backups",
                 )
+
+    def test_application_failure_rolls_back_and_cleans_staged_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            provider = root / "provider"
+            shutil.copytree(FIXTURES / "provider_repo", provider)
+            report, gap_id = _fixture_report(provider)
+            script = provider / "scripts" / "vm" / "launch_instance.py"
+            config = provider / "config" / "vm.yaml"
+            script_before = script.read_bytes()
+            config_before = config.read_bytes()
+            change_set = _change_set(gap_id, config_before.decode())
+            manifest = verify_change_set(
+                report,
+                provider_repo=provider,
+                change_set=change_set,
+                validation_root=FIXTURES / "ai-cloud-validation",
+            )
+            real_replace = os.replace
+            calls = {"count": 0}
+
+            def fail_second_replace(source, target):
+                calls["count"] += 1
+                if calls["count"] == 2:
+                    raise OSError("simulated second-file failure")
+                return real_replace(source, target)
+
+            with (
+                patch("isv_readiness.change_verification.os.replace", side_effect=fail_second_replace),
+                self.assertRaisesRegex(VerificationError, "rolled back"),
+            ):
+                apply_verified_change_set(
+                    report,
+                    provider_repo=provider,
+                    change_set=change_set,
+                    manifest=manifest,
+                    backup_dir=root / "backups",
+                )
+
+            self.assertEqual(script.read_bytes(), script_before)
+            self.assertEqual(config.read_bytes(), config_before)
+            self.assertFalse(list(script.parent.glob(f".{script.name}.*")))
+            self.assertFalse(list(config.parent.glob(f".{config.name}.*")))
 
     def test_rollback_rejects_post_application_drift(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:

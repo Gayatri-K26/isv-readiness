@@ -254,7 +254,8 @@ def apply_verified_change_set(
             staged[target] = staged_path
 
         for _, target, _ in targets:
-            os.replace(staged.pop(target), target)
+            os.replace(staged[target], target)
+            staged.pop(target)
             applied.append(target)
 
         results = []

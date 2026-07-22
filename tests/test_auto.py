@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 
-from isv_readiness.auto import AutoWorkflowError, _park, run_auto
+from isv_readiness.auto import AutoWorkflowError, ChangedFile, _apply_to_provider, _park, run_auto
 from isv_readiness.decision import adapter_contract_unit
 from isv_readiness.project import build_bootstrap_plan, execute_bootstrap
 
@@ -109,17 +111,77 @@ class AutoResilienceTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tempdir:
             project_path, provider = _project(Path(tempdir))
+            work = Path(tempdir) / "work"
+            work.mkdir()
+            (work / "auto-review.json").write_text('{"status":"no_changes"}\n', encoding="utf-8")
+            (work / "auto-review.patch").write_text("stale patch\n", encoding="utf-8")
             with self.assertRaisesRegex(AutoWorkflowError, "infrastructure failed"):
                 run_auto(
                     project_path,
                     domain="vm",
-                    work_dir=Path(tempdir) / "work",
+                    work_dir=work,
                     generator_command=["fixture-generator"],
                     generator_runner=timed_out,
                 )
 
             self.assertEqual(calls["n"], 1)
             self.assertIn("TODO", (provider / "scripts" / "vm" / "launch_instance.py").read_text())
+            self.assertFalse((work / "auto-review.json").exists())
+            self.assertFalse((work / "auto-review.patch").exists())
+
+    def test_reviewed_multi_file_apply_rolls_back_and_preserves_modes(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            provider = root / "provider"
+            scratch = root / "scratch"
+            provider.mkdir()
+            scratch.mkdir()
+            original_a = provider / "a.py"
+            original_b = provider / "b.py"
+            scratch_a = scratch / "a.py"
+            scratch_b = scratch / "b.py"
+            original_a.write_text("old a\n", encoding="utf-8")
+            original_b.write_text("old b\n", encoding="utf-8")
+            scratch_a.write_text("new a\n", encoding="utf-8")
+            scratch_b.write_text("new b\n", encoding="utf-8")
+            original_a.chmod(0o755)
+            original_b.chmod(0o640)
+            scratch_a.chmod(0o600)
+            scratch_b.chmod(0o600)
+            changes = [
+                ChangedFile(
+                    path=name,
+                    before_sha256=hashlib.sha256((provider / name).read_bytes()).hexdigest(),
+                    after_sha256=hashlib.sha256((scratch / name).read_bytes()).hexdigest(),
+                    creates_file=False,
+                )
+                for name in ("a.py", "b.py")
+            ]
+            real_replace = os.replace
+            replace_calls = {"count": 0}
+
+            def fail_second_replace(source, target):
+                replace_calls["count"] += 1
+                if replace_calls["count"] == 2:
+                    raise OSError("simulated second-file failure")
+                return real_replace(source, target)
+
+            with (
+                patch("isv_readiness.auto.os.replace", side_effect=fail_second_replace),
+                self.assertRaisesRegex(AutoWorkflowError, "rolled back"),
+            ):
+                _apply_to_provider(provider, scratch, changes, root / "backups")
+
+            self.assertEqual(original_a.read_text(encoding="utf-8"), "old a\n")
+            self.assertEqual(original_b.read_text(encoding="utf-8"), "old b\n")
+            self.assertEqual(original_a.stat().st_mode & 0o777, 0o755)
+            self.assertEqual(original_b.stat().st_mode & 0o777, 0o640)
+
+            _apply_to_provider(provider, scratch, changes, root / "backups")
+            self.assertEqual(original_a.read_text(encoding="utf-8"), "new a\n")
+            self.assertEqual(original_b.read_text(encoding="utf-8"), "new b\n")
+            self.assertEqual(original_a.stat().st_mode & 0o777, 0o755)
+            self.assertEqual(original_b.stat().st_mode & 0o777, 0o640)
 
     def test_evidence_grounded_refusal_is_parked_with_the_exact_blocker(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:

@@ -3,7 +3,10 @@ from __future__ import annotations
 import difflib
 import hashlib
 import json
+import os
 import shutil
+import stat
+import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -142,6 +145,7 @@ def run_auto(
             approval_patch_sha256=approval_patch_sha256,
         )
 
+    _discard_review_artifacts(work_dir)
     for stale in (scratch, scratch_backups):
         if stale.exists():
             shutil.rmtree(stale)
@@ -594,27 +598,105 @@ def _combined_patch(original: Path, scratch: Path, changed_files: Sequence[Chang
 def _apply_to_provider(
     original: Path, scratch: Path, changed_files: Sequence[ChangedFile], backup_dir: Path
 ) -> None:
-    backup_dir.mkdir(parents=True, exist_ok=True)
+    """Apply one reviewed scratch diff as a rollback-capable transaction."""
+
+    targets: list[tuple[ChangedFile, Path, Path, int]] = []
+    backups: dict[Path, Path] = {}
+    staged: dict[Path, Path] = {}
+    applied: list[Path] = []
+
     for change in changed_files:
         target = original / change.path
         source = scratch / change.path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if target.is_file():
-            backup = backup_dir / change.path
-            backup.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(target, backup)
-        tmp = target.with_suffix(target.suffix + ".gapctl-tmp")
-        tmp.write_bytes(source.read_bytes())
-        tmp.replace(target)
+        if not target.parent.is_dir():
+            raise AutoWorkflowError(f"Provider target parent does not exist: {target.parent}")
+        current = _file_sha256(target) if target.is_file() else None
+        if current != change.before_sha256:
+            raise AutoWorkflowError(f"Provider target changed after review: {change.path}")
+        mode = (
+            stat.S_IMODE(target.stat().st_mode)
+            if target.is_file()
+            else stat.S_IMODE(source.stat().st_mode)
+        )
+        targets.append((change, target, source, mode))
+
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    backup_root = Path(tempfile.mkdtemp(prefix="review-", dir=backup_dir))
+    try:
+        for change, target, source, mode in targets:
+            if target.is_file():
+                backup = backup_root / change.path
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(target, backup)
+                backups[target] = backup
+            staged[target] = _stage_file(source, target, mode)
+
+        for change, target, _source, _mode in targets:
+            os.replace(staged[target], target)
+            staged.pop(target)
+            applied.append(target)
+            if _file_sha256(target) != change.after_sha256:
+                raise AutoWorkflowError(f"Applied target hash does not match reviewed content: {change.path}")
+    except Exception as exc:
+        rollback_errors: list[str] = []
+        for target in reversed(applied):
+            try:
+                backup = backups.get(target)
+                if backup is None:
+                    target.unlink(missing_ok=True)
+                else:
+                    restore = _stage_file(backup, target, stat.S_IMODE(backup.stat().st_mode))
+                    try:
+                        os.replace(restore, target)
+                    finally:
+                        restore.unlink(missing_ok=True)
+            except Exception as rollback_exc:
+                rollback_errors.append(f"{target}: {rollback_exc}")
+        if rollback_errors:
+            raise AutoWorkflowError(
+                "Reviewed patch application failed and rollback was incomplete: "
+                f"{exc}; {'; '.join(rollback_errors)}"
+            ) from exc
+        if isinstance(exc, AutoWorkflowError):
+            raise
+        raise AutoWorkflowError(f"Reviewed patch application failed and was rolled back: {exc}") from exc
+    finally:
+        for staged_path in staged.values():
+            staged_path.unlink(missing_ok=True)
+
+
+def _stage_file(source: Path, target: Path, mode: int) -> Path:
+    staged: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=target.parent, prefix=f".{target.name}.", delete=False) as handle:
+            staged = Path(handle.name)
+            handle.write(source.read_bytes())
+            handle.flush()
+            os.fsync(handle.fileno())
+        staged.chmod(mode)
+        return staged
+    except Exception:
+        if staged is not None:
+            staged.unlink(missing_ok=True)
+        raise
+
+
+def _discard_review_artifacts(work_dir: Path) -> None:
+    for name in ("auto-review.json", "auto-review.patch"):
+        (work_dir / name).unlink(missing_ok=True)
+
+
+def _write_review(work_dir: Path, review: AutoReview) -> None:
+    review_path = work_dir / "auto-review.json"
+    patch_path = work_dir / "auto-review.patch"
+    review_path.write_text(
+        json.dumps(review.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    if review.patch:
+        patch_path.write_text(review.patch, encoding="utf-8")
+    else:
+        patch_path.unlink(missing_ok=True)
 
 
 def _file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def _write_review(work_dir: Path, review: AutoReview) -> None:
-    (work_dir / "auto-review.json").write_text(
-        json.dumps(review.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    if review.patch:
-        (work_dir / "auto-review.patch").write_text(review.patch, encoding="utf-8")
