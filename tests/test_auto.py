@@ -288,6 +288,41 @@ class AutoResilienceTests(unittest.TestCase):
         self.assertEqual(len(digest["ledger"]), 1)
         self.assertEqual(digest["latest"]["fingerprint"], digest["ledger"][0]["fingerprint"])
 
+    def test_static_verification_retry_receives_selected_gap_evidence(self) -> None:
+        calls = {"n": 0}
+        requests: list[dict] = []
+
+        def incomplete_then_valid(command, cwd, request, environment, timeout):
+            calls["n"] += 1
+            requests.append(json.loads(request))
+            result = _generator_runner(command, cwd, request, environment, timeout)
+            if calls["n"] == 1:
+                output = json.loads(result.stdout)
+                content = 'import json\n\nprint(json.dumps({"success": True, "platform": "fixture"}))\n'
+                output["changes"][0]["content"] = content
+                output["changes"][0]["content_sha256"] = hashlib.sha256(content.encode()).hexdigest()
+                return subprocess.CompletedProcess(command, 0, json.dumps(output), "")
+            return result
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            project_path, _provider = _project(Path(tempdir))
+            review = run_auto(
+                project_path,
+                domain="vm",
+                work_dir=Path(tempdir) / "work",
+                generator_command=["fixture-generator"],
+                generator_runner=incomplete_then_valid,
+            )
+
+        self.assertEqual(review.status, "awaiting_review")
+        feedback = next(
+            item
+            for item in requests[1]["context_pack"]["items"]
+            if item["source_id"] == "previous_attempt_feedback"
+        )
+        digest = json.loads(feedback["content"])
+        self.assertIn("instance_id", " ".join(digest["latest"]["details"]))
+
     def test_same_deterministic_failure_twice_parks_without_a_third_generation(self) -> None:
         calls_by_target: dict[str, int] = {}
 

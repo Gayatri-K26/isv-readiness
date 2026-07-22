@@ -323,6 +323,7 @@ def _prepare_next_change(
         )
         feedback = (
             reason,
+            *verification.selected_failure_details,
             *(f"Regression: {item}" for item in verification.regressions),
         )
         if attempts >= project.execution.max_attempts:

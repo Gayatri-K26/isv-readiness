@@ -237,7 +237,10 @@ def run_auto(
                     "Candidate failed isolated static verification; selected status became "
                     f"{manifest.selected_status_after or 'missing'}."
                 ),
-                details=tuple(f"Regression: {item}" for item in manifest.regressions),
+                details=(
+                    *manifest.selected_failure_details,
+                    *(f"Regression: {item}" for item in manifest.regressions),
+                ),
             )
             if repeated:
                 attempts_by_unit[contract_unit] = max_attempts

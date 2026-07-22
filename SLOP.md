@@ -2141,12 +2141,15 @@ but it cannot weaken the product's publishable validation contract.
    undeclared runtime inputs or behavior. The declared runtime allowlist and
    authoritative provider contract outrank incomplete template code; this is a
    provider-neutral prompt rule and does not add a BCM lifecycle exception.
+9. Preserve the selected row's scanner evidence when isolated verification
+   fails. Retry feedback now includes the evidence message, schema errors, and
+   missing output fields instead of only saying that status remained `fail`.
 
 ### Verification
 
 - Focused tests cover stale-review removal on model timeout, multi-file rollback,
   file-mode preservation, and staged-file cleanup after a failed replacement.
-- `uv run python -m unittest discover -s tests`: 160 tests passed.
+- `uv run python -m unittest discover -s tests`: 162 tests passed.
 - Ruff, Python compilation, every packaged JSON schema, lock validation, and
   diff checks passed.
 - The pinned local `ai-cloud-validation` checkout's full `isvtest` suite passed

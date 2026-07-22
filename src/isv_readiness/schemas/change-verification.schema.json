@@ -15,6 +15,7 @@
     "files": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/file"}},
     "selected_status_before": {"type": "string"},
     "selected_status_after": {"type": ["string", "null"]},
+    "selected_failure_details": {"type": "array", "items": {"type": "string"}},
     "regressions": {"type": "array", "items": {"type": "string"}},
     "success": {"type": "boolean"}
   },

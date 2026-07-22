@@ -43,11 +43,13 @@ class ChangeVerificationManifest:
     selected_status_after: str | None
     regressions: tuple[str, ...]
     success: bool
+    selected_failure_details: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["files"] = [asdict(item) for item in self.files]
         payload["regressions"] = list(self.regressions)
+        payload["selected_failure_details"] = list(self.selected_failure_details)
         return payload
 
 
@@ -152,6 +154,11 @@ def verify_change_set(
         selected_gap_id=change_set.gap_id,
     )
     static_success = status_after == "pass" if detection == "static" else True
+    selected_failure_details = (
+        _selected_failure_details(selected_after)
+        if detection == "static" and status_after != "pass"
+        else ()
+    )
     manifest = ChangeVerificationManifest(
         schema_version=CHANGE_VERIFICATION_VERSION,
         verification_mode="isolated_static_change_set_rescan",
@@ -164,6 +171,7 @@ def verify_change_set(
         selected_status_after=str(status_after) if status_after is not None else None,
         regressions=tuple(regressions),
         success=static_success and not regressions,
+        selected_failure_details=selected_failure_details,
     )
     _validate_schema(manifest.to_dict(), "change-verification.schema.json")
     return manifest
@@ -184,7 +192,34 @@ def load_change_verification(path: Path) -> ChangeVerificationManifest:
         selected_status_after=raw["selected_status_after"],
         regressions=tuple(raw["regressions"]),
         success=raw["success"],
+        selected_failure_details=tuple(raw.get("selected_failure_details", ())),
     )
+
+
+def _selected_failure_details(row: dict[str, Any] | None) -> tuple[str, ...]:
+    if row is None:
+        return ("Selected gap was missing after the isolated rescan.",)
+    evidence = row.get("evidence") or {}
+    details: list[str] = []
+    message = evidence.get("message")
+    if isinstance(message, str) and message.strip():
+        details.append(f"Evidence: {message.strip()}")
+    schema_errors = evidence.get("schema_errors") or []
+    if isinstance(schema_errors, list):
+        details.extend(
+            f"Schema error: {error}"
+            for error in schema_errors
+            if isinstance(error, str) and error.strip()
+        )
+    missing_fields = evidence.get("missing_json_fields") or []
+    if isinstance(missing_fields, list) and missing_fields:
+        details.append(
+            "Missing JSON fields: "
+            + ", ".join(str(field) for field in missing_fields)
+        )
+    if not details:
+        details.append(f"Selected gap remained {row.get('status', 'unresolved')} after the isolated rescan.")
+    return tuple(details)
 
 
 def apply_verified_change_set(

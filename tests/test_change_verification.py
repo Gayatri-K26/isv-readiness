@@ -52,6 +52,7 @@ class ChangeVerificationTests(unittest.TestCase):
             self.assertEqual(config.read_text(encoding="utf-8"), config_before)
             verification_schema = load_schema("change-verification.schema.json")
             jsonschema.validate(manifest.to_dict(), verification_schema)
+            self.assertEqual(manifest.selected_failure_details, ())
             manifest_path = root / "manifest.json"
             manifest_path.write_text(json.dumps(manifest.to_dict()), encoding="utf-8")
 
@@ -81,6 +82,40 @@ class ChangeVerificationTests(unittest.TestCase):
             self.assertEqual(config.read_text(encoding="utf-8"), config_before)
             rollback_schema = load_schema("change-rollback.schema.json")
             jsonschema.validate(rollback.to_dict(), rollback_schema)
+
+    def test_failed_selected_gap_includes_actionable_scanner_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            provider = Path(tempdir) / "provider"
+            shutil.copytree(FIXTURES / "provider_repo", provider)
+            report, gap_id = _fixture_report(provider)
+            content = 'import json\n\nprint(json.dumps({"success": True, "platform": "fixture"}))\n'
+            change_set = ChangeSet(
+                schema_version="0.1.0",
+                gap_id=gap_id,
+                context_pack_sha256=canonical_sha256({"gap_id": gap_id}),
+                generator={"adapter": "fixture", "model": None},
+                summary="Return an incomplete launch result",
+                changes=(
+                    Change(
+                        target_root="provider",
+                        path="scripts/vm/launch_instance.py",
+                        operation="replace",
+                        content=content,
+                        content_sha256=hashlib.sha256(content.encode()).hexdigest(),
+                        rationale="Exercise failed verification feedback",
+                    ),
+                ),
+            )
+
+            manifest = verify_change_set(
+                report,
+                provider_repo=provider,
+                change_set=change_set,
+                validation_root=FIXTURES / "ai-cloud-validation",
+            )
+
+        self.assertFalse(manifest.success)
+        self.assertIn("instance_id", " ".join(manifest.selected_failure_details))
 
     def test_application_rejects_any_file_drift(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
