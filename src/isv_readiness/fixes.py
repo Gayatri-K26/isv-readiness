@@ -32,6 +32,20 @@ INSECURE_TLS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("disabled request verification", re.compile(r"\bverify\s*=\s*False\b")),
     ("insecure curl option", re.compile(r"(?m)^\s*curl\b[^\n]*(?:\s-k(?:\s|$)|--insecure\b)")),
 )
+INSECURE_SSH_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "disabled SSH host-key verification",
+        re.compile(r"(?i)StrictHostKeyChecking\s*[=:]\s*(?:no|off)\b"),
+    ),
+    (
+        "discarded SSH known-hosts state",
+        re.compile(r"(?i)UserKnownHostsFile\s*[=:]\s*(?:/dev/null|none)\b"),
+    ),
+    (
+        "automatic trust of unknown SSH host keys",
+        re.compile(r"\b(?:paramiko\.)?AutoAddPolicy\s*\("),
+    ),
+)
 RAW_EVIDENCE_FIELDS = frozenset(
     {
         "console_output",
@@ -75,6 +89,7 @@ def validate_candidate_content(
     _reject_secrets(candidate_text)
     _validate_candidate_syntax(relative_target, candidate_text)
     _reject_insecure_tls(candidate_text)
+    _reject_insecure_ssh(candidate_text)
     if relative_target.suffix.lower() == ".py":
         _reject_raw_evidence_fields(candidate_text)
     if allowed_environment is not None:
@@ -102,6 +117,12 @@ def _reject_insecure_tls(candidate_text: str) -> None:
     for label, pattern in INSECURE_TLS_PATTERNS:
         if pattern.search(candidate_text):
             raise FixGuardrailError(f"Candidate contains insecure TLS behavior ({label}).")
+
+
+def _reject_insecure_ssh(candidate_text: str) -> None:
+    for label, pattern in INSECURE_SSH_PATTERNS:
+        if pattern.search(candidate_text):
+            raise FixGuardrailError(f"Candidate contains insecure SSH behavior ({label}).")
 
 
 def _reject_raw_evidence_fields(candidate_text: str) -> None:

@@ -92,6 +92,8 @@ PROVIDER_IMPLEMENTATION_RULES = (
     "Return an empty change set when the declared interface lacks the required operation.",
     "Keep TLS peer verification enabled. Never add an unverified SSL context, CERT_NONE, verify=False, curl -k, "
     "or an equivalent bypass.",
+    "Keep SSH host-key verification enabled. Never disable StrictHostKeyChecking, discard known-hosts state, or "
+    "automatically trust an unknown host key.",
     "Keep internal polling and subprocess deadlines inside the configured step timeout. A runner timeout may include "
     "bounded orchestration headroom beyond a source-backed provider deadline; that headroom is not a new provider "
     "recovery threshold.",
@@ -99,7 +101,7 @@ PROVIDER_IMPLEMENTATION_RULES = (
     "scaffold default; update the selected step timeout and keep any explicit internal recovery deadline at or above "
     "the declared threshold.",
     "Emit only the structured fields required by the validation contract. Never place raw API bodies, headers, "
-    "console output, stdout, stderr, or log excerpts in result JSON.",
+    "console output, stdout, stderr, or log excerpts in result JSON, including inside a general error field.",
     "Treat edit-eligible unresolved checks as one adapter contract only when they share a script target, or when "
     "they share both a configuration target and step name. Preserve the existing cross-step data flow.",
     "Honor the documented semantic contract as well as the executable assertions. Do not exploit a missing "

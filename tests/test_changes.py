@@ -258,6 +258,19 @@ class ChangeProposalTests(unittest.TestCase):
                     ),
                 )
 
+            insecure_ssh = (
+                "import subprocess\n"
+                "subprocess.run(['ssh', '-o', 'StrictHostKeyChecking=no', 'host', 'true'])\n"
+            )
+            with self.assertRaisesRegex(FixGuardrailError, "insecure SSH"):
+                build_change_proposal(
+                    _report(),
+                    provider_repo=provider,
+                    change_set=_change_set(
+                        [("provider", "scripts/vm/launch.py", "replace", insecure_ssh)]
+                    ),
+                )
+
             raw_output = "result = {'success': True}\nresult['output_snippet'] = 'raw console'\n"
             with self.assertRaisesRegex(FixGuardrailError, "raw provider output"):
                 build_change_proposal(

@@ -116,6 +116,8 @@ class GeneratorAdapterTests(unittest.TestCase):
             self.assertIn("Preserve lifecycle verbs", rules)
             self.assertIn("pre-existing resource does not satisfy", rules)
             self.assertIn("TLS peer verification", rules)
+            self.assertIn("SSH host-key verification", rules)
+            self.assertIn("inside a general error field", rules)
             self.assertIn("configured step timeout", rules)
             self.assertIn("raw API bodies", rules)
             self.assertIn("selected domain configuration", rules)
