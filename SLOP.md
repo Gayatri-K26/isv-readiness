@@ -2157,3 +2157,78 @@ but it cannot weaken the product's publishable validation contract.
   diff checks passed.
 - The pinned local `ai-cloud-validation` checkout's full `isvtest` suite passed
   all 1,271 tests, including the private BCM head-hop overlay's 14 SSH tests.
+
+## Step 45 - Finish the BCM Bare-Metal Adapter Set Without Test Gaming
+
+### Evidence
+
+Repeated full-context model calls did not converge on the first lifecycle
+adapter in a useful amount of time. Different attempts omitted required
+consumer fields, lowered the source-backed lifecycle timeout, disabled SSH
+host-key verification, or copied raw provider output into result JSON. The
+same contract was being reconsidered rather than producing incremental,
+reviewable progress.
+
+A deterministic review of the synthetic BCM fixture and pinned bare-metal
+suite also found two proposed mappings that could make tests pass without
+proving the requirement. Computing a one-node health aggregate in the adapter
+does not prove that the provider exposes native primitive-level aggregation,
+and BCM power/status on this virtual lab node does not prove BMC sensor
+observability because the node uses a custom OpenStack power-control script.
+
+### Decisions
+
+1. Require generated result fields to represent evidence for their documented
+   meaning. A credential path, environment-variable presence, placeholder, or
+   unrelated provider value cannot satisfy a downstream field merely because
+   it has the required type.
+2. Reject generated Python that disables SSH host-key checking through common
+   OpenSSH or Paramiko patterns. Generated adapters must use existing trusted
+   host-key state and fail closed on unknown or changed hosts.
+3. Stop sending the unchanged BCM contract back through the model after the
+   repeated failures. Implement each bounded provider contract deterministically
+   in scratch, run the same content guardrails and scanner, test its result
+   against the exact pinned validation class, and only then apply it to the real
+   provider tree.
+4. Share BCM API, polling, validation, and secure head-hop behavior in one
+   provider helper instead of duplicating it across lifecycle scripts. Retry
+   only transient API availability errors; explicit unhealthy or invalid state
+   fails immediately.
+5. Implement documented BCM lifecycle behavior literally. Power operations use
+   the declared on, off, reset, and auxcycle routes. Reinstall uses the
+   documented existing-node `installmode FULL` flow, requires an observed
+   installer state and a changed boot identifier, and remains bounded by the
+   declared 1,200-second lifecycle deadline.
+6. Represent unsupported contracts as explicit skipped steps under the reviewed
+   domain default. Do not generate dummy scripts for VPC inventory, tenant
+   tags, cloud placement groups, DPU/governance APIs, tenant security policy,
+   native health aggregation, attestation, or unproven BMC sensors.
+7. Keep this work a synthetic workflow rehearsal. The reserved-node launch path,
+   private head-hop overlay, and local provider files are not evidence from an
+   unmodified upstream checkout and do not establish real BCM qualification.
+8. Keep live execution disabled until the operator explicitly authorizes the
+   destructive stop, start, reset, auxiliary power-cycle, and FULL-reinstall
+   sequence.
+
+### Simplicity boundary
+
+Do not add another retry policy, provider-specific product guardrail, transcript
+history, vector store, or generated compatibility layer. The stable product
+boundary remains deterministic gap selection, complete localized evidence,
+generic safety checks, exact contract tests, and human-reviewed application.
+
+### Verification
+
+- The real BCM bare-metal provider has 74 pinned rows: 48 statically complete
+  covered rows, 24 explicit accepted skips, and 2 statically complete rows whose
+  validation classes are explicitly excluded by reviewed scope. There are zero
+  blocking or edit-eligible rows.
+- Twenty-one provider behavior tests exercise exact BCM routes, strict host-key
+  handling on both hops, lifecycle proofs, FULL-reinstall transitions, hardware
+  identity failure behavior, and direct execution of the pinned output
+  validation classes.
+- The real provider config passes `isvctl` dry-run parsing. The relevant 121
+  upstream contract tests and the full 1,271-test `isvtest` suite pass.
+- `isv-readiness` passes all 163 unit tests, Ruff, Python compilation, packaged
+  JSON schema parsing, lock validation, and diff checks.
+- No live BCM API, SSH, power, or reprovisioning operation ran during this step.
