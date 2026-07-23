@@ -2270,3 +2270,61 @@ the wrapper, while the same scan inside the transactional scratch did not.
   Slurm, and observability with zero blocking or edit-eligible gaps.
 - The migrated Kubernetes config passes the pinned `isvctl` dry-run parser.
 - No live provider operation ran during this correction.
+
+## Step 47 - Enforce Reviewed Scope During Live Runs
+
+### Problem
+
+`gapctl` correctly treated profile-approved exclusions as non-blocking in its
+gap report, but `isvctl` still executed unselected validation classes imported
+by a provider config. An out-of-scope failure could therefore make the whole
+domain command fail and waste live-run time even though the reviewed profile
+did not claim that capability.
+
+### Decision
+
+Derive a run-local `tests.exclude.tests` overlay from the same centralized gap
+decision used by readiness. Exclude a validation name only when every configured
+occurrence resolves to `skip_with_rationale` or `request_external_adapter`.
+Pass the original provider config first so its directory remains the command
+working directory, then pass the artifact-backed overlay as the final config.
+Do not edit provider files or the pinned NVIDIA suite.
+
+### Verification
+
+- The full `isv-readiness` unit suite passes all 164 tests.
+- The live-run regression verifies that the original provider config remains
+  first, the generated overlay is second, and only the reviewed excluded class
+  appears in `tests.exclude.tests`.
+- A real pinned `isvctl --dry-run` merge of the BCM Kubernetes config plus a
+  generated overlay preserved the provider config and applied the exact class
+  exclusions.
+- Python compilation and `git diff --check` pass.
+
+## Step 48 - Reap Interrupted Live Validation Trees
+
+### Evidence
+
+An authorized BCM live rehearsal was interrupted after its required local API
+tunnel disappeared. The top-level `gapctl` and `isvctl` processes exited, but
+the active provider `launch_instance.py` poller was reparented to PID 1 and kept
+running. Generator adapters already used the shared process-group cleanup
+boundary; live execution still used plain `subprocess.run`.
+
+### Decision
+
+Run live `isvctl` commands through the existing captured-subprocess boundary
+with stderr merged into stdout to preserve the current live log contract. Keep
+the behavior provider-neutral: timeout, Ctrl+C, and SIGTERM terminate the live
+process group and reap its provider-script descendants. Do not add BCM tunnel
+knowledge, connectivity retries, or provider-specific cleanup rules to
+`gapctl`.
+
+### Verification
+
+- Focused live and subprocess tests verify the cleanup boundary is used and
+  retains combined output.
+- The existing real nested-child timeout test continues to prove process-group
+  cleanup on POSIX systems.
+- The full `isv-readiness` suite passes all 166 tests. Ruff, Python compilation,
+  every packaged JSON schema, lock validation, and diff checks pass.

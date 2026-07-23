@@ -5,11 +5,12 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import jsonschema
 import yaml
 
-from isv_readiness.live import LiveRunError, _domain_config, run_live_domain
+from isv_readiness.live import LiveRunError, _default_runner, _domain_config, run_live_domain
 from isv_readiness.project import build_bootstrap_plan, execute_bootstrap, load_project
 from isv_readiness.schema import load_schema
 
@@ -19,6 +20,23 @@ COMMIT = "c" * 40
 
 
 class LiveRunTests(unittest.TestCase):
+    def test_default_runner_uses_process_group_cleanup_boundary(self) -> None:
+        expected = subprocess.CompletedProcess(["isvctl"], 0, "output", None)
+        environment = {"PATH": "/bin"}
+
+        with patch("isv_readiness.live.run_captured", return_value=expected) as captured:
+            result = _default_runner(["isvctl"], Path("/tmp"), environment, 120)
+
+        self.assertIs(result, expected)
+        captured.assert_called_once_with(
+            ["isvctl"],
+            cwd=Path("/tmp"),
+            input_text="",
+            timeout_seconds=120,
+            environment=environment,
+            merge_stderr=True,
+        )
+
     def test_kubernetes_prefers_config_inside_provider_boundary(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             provider = Path(tempdir) / "providers" / "acme"
@@ -57,6 +75,10 @@ class LiveRunTests(unittest.TestCase):
     def test_targeted_live_run_uses_pinned_checkout_minimal_env_and_redacted_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             project, manifest = _project(Path(tempdir), allow_live=True)
+            suite_path = manifest.parent / "ai-cloud-validation" / "isvctl" / "configs" / "suites" / "vm.yaml"
+            suite = yaml.safe_load(suite_path.read_text(encoding="utf-8"))
+            suite["tests"]["validations"]["gpu_checks"] = {"checks": {"GpuCheck": {}}}
+            suite_path.write_text(yaml.safe_dump(suite, sort_keys=False), encoding="utf-8")
             seen = {}
 
             def runner(command, cwd, environment, timeout):
@@ -93,6 +115,13 @@ class LiveRunTests(unittest.TestCase):
             self.assertEqual(seen["environment"]["ACME_REGION"], "west")
             self.assertNotIn("UNDECLARED_SECRET", seen["environment"])
             self.assertNotIn("super-secret-value", Path(result.log_path).read_text(encoding="utf-8"))
+            config_flags = [index for index, value in enumerate(seen["command"]) if value == "-f"]
+            self.assertEqual(len(config_flags), 2)
+            overlay = Path(seen["command"][config_flags[1] + 1])
+            self.assertEqual(
+                yaml.safe_load(overlay.read_text(encoding="utf-8")),
+                {"tests": {"exclude": {"tests": ["GpuCheck"]}}},
+            )
             schema = load_schema("live-run.schema.json")
             jsonschema.validate(result.to_dict(), schema)
 

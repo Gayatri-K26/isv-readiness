@@ -32,6 +32,23 @@ class CapturedSubprocessTests(unittest.TestCase):
         process.communicate.assert_called_once_with("request", timeout=5.0)
         self.assertEqual(popen.call_args.kwargs["env"], {"PATH": "/bin"})
 
+    def test_can_merge_stderr_into_stdout(self) -> None:
+        process = Mock(pid=321, returncode=0)
+        process.communicate.return_value = ("combined output", None)
+
+        with patch("isv_readiness.subprocesses.subprocess.Popen", return_value=process) as popen:
+            result = run_captured(
+                ["fixture"],
+                cwd=Path("/tmp"),
+                input_text="",
+                timeout_seconds=9,
+                merge_stderr=True,
+            )
+
+        self.assertEqual(result.stdout, "combined output")
+        self.assertIsNone(result.stderr)
+        self.assertIs(popen.call_args.kwargs["stderr"], subprocess.STDOUT)
+
     @unittest.skipUnless(os.name == "posix", "process-group cleanup is POSIX-specific")
     def test_timeout_kills_and_reaps_the_process_group(self) -> None:
         timeout = subprocess.TimeoutExpired(["fixture"], 9)

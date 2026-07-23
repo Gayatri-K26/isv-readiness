@@ -27,6 +27,7 @@ def run_captured(
     input_text: str,
     timeout_seconds: int,
     environment: Mapping[str, str] | None = None,
+    merge_stderr: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Run one captured subprocess and clean up its process tree when interrupted."""
 
@@ -35,7 +36,7 @@ def run_captured(
         cwd=cwd,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT if merge_stderr else subprocess.PIPE,
         env=None if environment is None else dict(environment),
         text=True,
         start_new_session=os.name == "posix",

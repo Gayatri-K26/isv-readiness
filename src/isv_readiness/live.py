@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import jsonschema
+import yaml
 
 from isv_readiness.context import redact_text
 from isv_readiness.decision import decide_gap, validation_profile_issues
@@ -22,10 +23,12 @@ from isv_readiness.scan.profile import enrich_report_with_profile
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
 from isv_readiness.schema import load_schema
 from isv_readiness.solution_profile import canonicalize_domain, load_solution_profile
+from isv_readiness.subprocesses import run_captured
 from isv_readiness.validation_adapter import IsvctlAdapter
 
 LIVE_RUN_VERSION = "0.1.0"
 SELECTION_RE = re.compile(r"^[A-Za-z0-9_.\[\]-]+$")
+PROFILE_SKIP_ACTIONS = {"skip_with_rationale", "request_external_adapter"}
 LiveRunner = Callable[[Sequence[str], Path, Mapping[str, str], int], subprocess.CompletedProcess[str]]
 CommitResolver = Callable[[Path], str]
 
@@ -122,6 +125,14 @@ def run_live_domain(
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     junit = artifacts_dir / f"junit-{canonical_domain}.xml"
     log = artifacts_dir / f"isvctl-{canonical_domain}.log"
+
+    static_report = scan_provider(
+        ScanOptions(provider_repo=provider_root, domains=[canonical_domain], validation_root=validation_root)
+    )
+    scoped_static_report = enrich_report_with_profile(static_report, profile) if profile is not None else static_report
+    excluded_validations = _profile_excluded_validations(scoped_static_report)
+    scope_overlay = _write_scope_overlay(artifacts_dir, canonical_domain, excluded_validations)
+
     try:
         config_arg = str(config.resolve().relative_to(validation_root))
     except ValueError:
@@ -132,18 +143,15 @@ def run_live_domain(
         "run",
         "-f",
         config_arg,
-        "--no-upload",
-        "--junitxml",
-        str(junit),
     ]
+    if scope_overlay is not None:
+        command.extend(["-f", str(scope_overlay)])
+    command.extend(["--no-upload", "--junitxml", str(junit)])
     if selection:
         command.extend(["--", "-k", selection])
     result = (runner or _default_runner)(command, validation_root, child_env, timeout_seconds)
     log.write_text(redact_text(result.stdout or ""), encoding="utf-8")
 
-    static_report = scan_provider(
-        ScanOptions(provider_repo=provider_root, domains=[canonical_domain], validation_root=validation_root)
-    )
     dynamic_rows = []
     if junit.is_file():
         if canonical_domain == "kubernetes":
@@ -241,6 +249,33 @@ def _same_validation(selection: str, validation_class: str | None) -> bool:
     )
 
 
+def _profile_excluded_validations(report: GapReport) -> tuple[str, ...]:
+    """Return validation names whose every occurrence is profile-approved to skip."""
+    actions_by_validation: dict[str, list[str]] = {}
+    for row in report.rows:
+        name = row.validation_class
+        if not name or name == "StepOutputSchema":
+            continue
+        actions_by_validation.setdefault(name, []).append(decide_gap(row.to_dict()).action)
+    return tuple(
+        sorted(
+            name
+            for name, actions in actions_by_validation.items()
+            if actions and all(action in PROFILE_SKIP_ACTIONS for action in actions)
+        )
+    )
+
+
+def _write_scope_overlay(artifacts_dir: Path, domain: str, excluded: Sequence[str]) -> Path | None:
+    """Write a run-local isvctl overlay that enforces the reviewed profile scope."""
+    if not excluded:
+        return None
+    path = artifacts_dir / f"scope-overlay-{domain}.yaml"
+    payload = {"tests": {"exclude": {"tests": list(excluded)}}}
+    path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    return path
+
+
 def _validate_live_result(raw: Any) -> None:
     try:
         jsonschema.validate(raw, load_schema("live-run.schema.json"))
@@ -269,13 +304,11 @@ def _default_runner(
     environment: Mapping[str, str],
     timeout_seconds: int,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        list(command),
+    return run_captured(
+        command,
         cwd=cwd,
-        env=dict(environment),
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,
-        timeout=timeout_seconds,
+        input_text="",
+        timeout_seconds=timeout_seconds,
+        environment=environment,
+        merge_stderr=True,
     )

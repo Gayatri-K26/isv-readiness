@@ -271,6 +271,17 @@ forwarded explicitly nor added to context.
 runs one command for the entire owned scope. The explicit confirmation is the
 public live-run authorization. A transient authorized project is passed to the
 internal runner, so the operator does not edit a YAML policy toggle.
+The live `isvctl` process also runs inside the shared captured-subprocess
+boundary. Timeout, Ctrl+C, and SIGTERM therefore reap provider-script children
+before the CLI exits, using the same bounded graceful-then-forceful cleanup as
+generator adapters.
+
+Before invoking `isvctl`, the live runner deterministically derives an exclusion
+overlay from the reviewed profile. A validation name is excluded only when every
+configured occurrence resolves to an approved skip action; if the same validation
+class is in scope for another step, it remains active and the provider step wiring
+controls that occurrence. The overlay is stored with the run artifacts and passed
+after the provider config, so it does not modify the pinned suite or provider files.
 
 Each live domain produces:
 

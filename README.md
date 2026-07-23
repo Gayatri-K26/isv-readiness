@@ -158,7 +158,10 @@ For every owned domain, `validate`:
 8. applies only the exact reviewed patch;
 9. refuses to start live infrastructure while a known static blocker remains;
 10. asks for explicit authorization before running the real cloud tests;
-11. records JUnit, logs, run metadata, and the full-scope gap scorecard.
+11. adds a run-local `isvctl` exclusion overlay for validation classes that the
+    reviewed profile explicitly routes out of scope, without editing the pinned
+    suite or provider source;
+12. records JUnit, logs, run metadata, and the full-scope gap scorecard.
 
 All scaffolded domain configuration, including Kubernetes, lives under the
 provider directory. The isolated review copy and atomic apply therefore use one
@@ -204,6 +207,10 @@ A model or adapter timeout stops the current validation run immediately. It is
 an infrastructure failure, not evidence about an ISV capability, so gapctl does
 not spend the provider retry budget repeating the identical request. No real
 provider file is changed.
+
+Live `isvctl` execution uses the same process-group cleanup boundary. A timeout,
+Ctrl+C, or SIGTERM terminates and reaps the active validation process and its
+provider-script children instead of leaving infrastructure pollers running.
 
 `validate` prints readiness after the run. Repeat the same command until every
 owned domain has no blocking gaps and a successful live test. Gaps that are not
