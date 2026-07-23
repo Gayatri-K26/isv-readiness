@@ -2328,3 +2328,69 @@ knowledge, connectivity retries, or provider-specific cleanup rules to
   cleanup on POSIX systems.
 - The full `isv-readiness` suite passes all 166 tests. Ruff, Python compilation,
   every packaged JSON schema, lock validation, and diff checks pass.
+
+## Step 49 - Require Complete Setup Inventory Readiness
+
+### Evidence
+
+A live BCM sequence fully reprovisioned one of two Kubernetes GPU workers before
+the Kubernetes domain began. The provider setup returned success as soon as any
+one labeled node advertised an allocatable GPU. It then emitted inventory while
+the other declared GPU node was still recovering. Downstream checks observed a
+failed GPU pod, an operator validator still pending, and a false four-GPU suite
+fallback even though the target contains two one-GPU nodes.
+
+The existing regression asserted only that the setup text contained a bounded
+timeout, an allocatable-GPU query, and a sleep. It did not execute the readiness
+predicate or test partial multi-resource state.
+
+A follow-up live run proved the complete GPU count correction: both one-GPU
+nodes, total capacity, driver data, and GPU access passed. It also exposed a
+second setup boundary. The GPU Operator validator on the reprovisioned node was
+still Pending when `K8sNoPendingPodsCheck` ran at 16:04:20 and became Ready at
+16:04:22. Kubernetes events showed transient missing runtime, containerd, CNI,
+and service-account mount state while the node reconciled.
+
+The later GPU stress failure was not the same setup race. A timed-out NCCL
+MPIJob was deleted immediately before stress, and Kubernetes rejected the first
+stress pod because the MPI worker had not yet released node003's GPU. The
+second node passed, and the subsequent Slurm stress ran 1,078 loops on node003.
+That is an upstream workload-cleanup ordering issue plus a target-network
+limitation, not a reason to weaken provider inventory or hide the failure.
+
+### Decision
+
+1. Require provider setup and inventory adapters to verify the complete
+   source-backed resource set needed by downstream selected checks before
+   reporting success.
+2. Keep partial multi-resource state pending until the existing bounded
+   deadline, then fail closed without emitting misleading inventory.
+3. Require emitted identities, counts, and capacities to describe that same
+   verified set. Do not allow zero, empty, or partial observations to activate
+   scaffold or suite defaults that broaden the claim.
+4. Keep this rule provider-neutral in the generator contract. Do not encode BCM
+   node names, Kubernetes labels, or GPU-specific thresholds in `gapctl`.
+5. In the private BCM rehearsal provider, declare the reviewed two-node GPU
+   topology in its config and exercise the real setup shell script with a fake
+   `kubectl`: `[0, 1]` must continue polling, `[1, 1]` may emit inventory, and a
+   permanently partial set must fail at the deadline.
+6. Because bare-metal lifecycle operations reprovision a Kubernetes GPU worker,
+   require the declared GPU Operator namespace to finish reconciling before
+   setup succeeds. Every active Operator DaemonSet must be current, updated,
+   Ready, and available at its desired count; Operator pods must be Running and
+   Ready or successfully completed.
+7. Do not add a BCM-specific delay or reorder validation claims to conceal the
+   NCCL cleanup race. Keep `ai-cloud-validation` suites read-only from
+   `gapctl`; address generic cleanup behavior in its owning repository.
+
+### Verification
+
+- Eight focused BCM provider tests pass, including executable GPU recovery,
+  Operator recovery, and timeout scenarios.
+- All 506 provider tests pass. The merged BCM Kubernetes config passes the
+  pinned `isvctl` parser, and both changed shell scripts pass `bash -n`.
+- The focused generator-contract test confirms the complete-inventory rule is
+  present in every provider-generation request. All 166 `isv-readiness` tests
+  pass.
+- Ruff, Python compilation, every packaged JSON schema, lock validation, and
+  diff checks pass.

@@ -252,6 +252,14 @@ domain and uploads that domain's canonical JUnit XML.
 
 There is no bundle step.
 
+## Reference guides
+
+- [ISV qualification runbook](docs/isv-qualification-runbook.md): exact
+  operator commands from installation through publication.
+- [BCM rehearsal fixes and decisions](docs/bcm-rehearsal-findings.md): concise
+  results, product fixes, remaining gaps, and ownership decisions from the BCM
+  test-ISV run.
+
 ## Safety and ownership boundaries
 
 - `ai-cloud-validation` is a read-only source of truth. Generated changes are

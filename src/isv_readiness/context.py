@@ -113,6 +113,10 @@ PROVIDER_IMPLEMENTATION_RULES = (
     "Report success only after actively verifying every success precondition declared by the authoritative "
     "provider contract. The presence of a credential, key path, endpoint, or configuration value is not evidence "
     "that the corresponding operation or connection succeeded.",
+    "Before a setup or inventory adapter reports success, verify the complete source-backed resource set required "
+    "by downstream selected checks is ready. Partial multi-resource readiness must remain pending and then fail "
+    "closed at the existing deadline. Emit counts, identities, and capacities from that same verified set; never "
+    "let an empty, zero, or partial observation fall through to a scaffold or suite default that broadens the claim.",
     "When changing a domain configuration, edit only the selected step block. Preserve all comments, formatting, "
     "and unrelated steps exactly.",
     "Treat environment, API, and configuration strings used as subprocess arguments as untrusted. Validate them "
