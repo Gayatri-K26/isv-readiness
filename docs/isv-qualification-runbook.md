@@ -13,7 +13,9 @@ Have these ready before starting:
 - the provider API endpoint;
 - names of required credential and non-secret input environment variables;
 - a representative live environment with the claimed resources available;
-- an installed and authenticated Codex or Claude CLI.
+- an installed and authenticated agent CLI, a locally registered gapctl
+  generator adapter, or access to an agent that can consume and return JSON
+  files.
 
 ## 2. Install `gapctl`
 
@@ -44,10 +46,13 @@ gapctl init <provider-name> \
 cd ./<provider-name>-readiness
 ```
 
-`init` clones `ai-cloud-validation` into the workspace, records its exact commit,
-imports the provider specification and complete NCP Software Reference Guide,
-and creates the initial profile and provider scaffolding. Later commands do not
-silently update the pinned validation checkout.
+`init` clones `ai-cloud-validation` into the workspace, records its exact
+commit, imports the provider specification, complete NCP Software Reference
+Guide, and complete NVIDIA Inference Reference Architecture, and creates the
+initial profile and provider scaffolding. The Inference Reference Architecture
+is standard reference context for every ISV; it does not imply that the ISV
+claims inference capabilities. Later commands do not silently update the pinned
+validation checkout.
 
 Verify the generated state:
 
@@ -80,11 +85,30 @@ gapctl qualify
 Approve only when the displayed hash matches the reviewed proposal. There is no
 separate approval command.
 
-Use Claude instead of Codex when needed:
+Use any available registered adapter or executable:
 
 ```bash
 gapctl qualify --generator claude
+gapctl qualify --generator internal-agent
+gapctl qualify --generator /absolute/path/to/gapctl-agent-adapter
 ```
+
+Local registrations belong in `~/.config/gapctl/generators.yaml`, not the ISV
+workspace. Each entry declares a command, environment-variable names, bounded
+total and optional idle deadlines, and maximum complete-request size. Never put
+credential values in this file.
+
+When the available agent has no callable adapter:
+
+```bash
+gapctl qualify --generator export
+# Give .gapctl/qualification/generator-request.json to the agent.
+# Save the agent's JSON-only answer, then:
+gapctl qualify --generator-response /absolute/path/to/agent-response.json
+```
+
+Do not edit or shorten the exported request. Import is refused if the current
+request differs from the exported one.
 
 ## 5. Check the live environment
 
@@ -201,11 +225,25 @@ environment and run the same command again:
 gapctl validate
 ```
 
-To use Claude:
+The same agent choices are available during validation:
 
 ```bash
 gapctl validate --generator claude
+gapctl validate --generator internal-agent
+gapctl validate --generator /absolute/path/to/gapctl-agent-adapter
 ```
+
+For file exchange:
+
+```bash
+gapctl validate --generator export
+# Give .gapctl/generator-request.json to the agent.
+gapctl validate --generator-response /absolute/path/to/agent-response.json
+```
+
+One imported validation response reaches deterministic verification and the
+normal patch review gate before the workflow asks the agent for another
+candidate.
 
 ## 8. Inspect the evidence
 

@@ -42,7 +42,7 @@
       "additionalProperties": false,
       "required": ["max_chars", "used_chars", "omitted_items"],
       "properties": {
-        "max_chars": {"type": "integer", "minimum": 4000},
+        "max_chars": {"type": "null"},
         "used_chars": {"type": "integer", "minimum": 0},
         "omitted_items": {"type": "integer", "minimum": 0}
       }

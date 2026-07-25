@@ -67,6 +67,29 @@ class AutoWorkflowTests(unittest.TestCase):
             self.assertIn("TODO", (provider / "scripts" / "vm" / "launch_instance.py").read_text())
             self.assertTrue((work / "auto-review.patch").exists())
 
+    def test_file_exchange_can_stop_after_one_imported_generator_response(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            project_path, _provider = _project(Path(tempdir))
+            calls = 0
+
+            def one_response(command, cwd, request, environment, timeout):
+                nonlocal calls
+                calls += 1
+                return _generator_runner(command, cwd, request, environment, timeout)
+
+            review = run_auto(
+                project_path,
+                domain="vm",
+                work_dir=Path(tempdir) / "work",
+                generator_command=["file-exchange"],
+                generator_runner=one_response,
+                max_generator_calls=1,
+            )
+
+            self.assertEqual(calls, 1)
+            self.assertEqual(len(review.staged), 1)
+            self.assertEqual(review.status, "awaiting_review")
+
     def test_auto_apply_requires_matching_hash_then_writes_atomically(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             project_path, provider = _project(Path(tempdir))

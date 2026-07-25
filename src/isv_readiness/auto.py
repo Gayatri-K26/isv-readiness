@@ -18,6 +18,12 @@ from isv_readiness.context import build_context_pack, provider_contract_constrai
 from isv_readiness.decision import adapter_contract_unit, decide_gap, validation_profile_issues
 from isv_readiness.fixes import FixGuardrailError
 from isv_readiness.generation import GeneratorInfrastructureError, GeneratorRunner, run_generator
+from isv_readiness.generator_limits import GENERATOR_ADAPTER_TIMEOUT_SECONDS
+from isv_readiness.generators import (
+    DEFAULT_GENERATOR_MAX_REQUEST_BYTES,
+    GeneratorExchangeError,
+    GeneratorRequestExported,
+)
 from isv_readiness.project import ReadinessProject, declared_provider_environment, load_project
 from isv_readiness.scan.profile import enrich_report_with_profile
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
@@ -99,6 +105,10 @@ def run_auto(
     generator_pass_env: Sequence[str] = (),
     environment: Mapping[str, str] | None = None,
     generator_runner: GeneratorRunner | None = None,
+    generator_timeout_seconds: int = GENERATOR_ADAPTER_TIMEOUT_SECONDS,
+    generator_idle_timeout_seconds: int | None = None,
+    generator_max_request_bytes: int = DEFAULT_GENERATOR_MAX_REQUEST_BYTES,
+    max_generator_calls: int | None = None,
     max_iterations: int = 50,
     apply: bool = False,
     approval_patch_sha256: str | None = None,
@@ -120,6 +130,8 @@ def run_auto(
         raise AutoWorkflowError("Provider is not scaffolded; create a new workspace with `gapctl init`.")
     if not generator_command:
         raise AutoWorkflowError("An explicit generator adapter is required (--generator).")
+    if max_generator_calls is not None and max_generator_calls < 1:
+        raise AutoWorkflowError("max_generator_calls must be positive when supplied.")
 
     profile = _load_profile(project, project_path)
     profile_issues = validation_profile_issues(profile, [canonical_domain])
@@ -155,6 +167,7 @@ def run_auto(
     attempts_by_unit: dict[str, int] = {}
     feedback_by_unit: dict[str, list[AttemptFailure]] = {}
     blocked_by_unit: dict[str, str] = {}
+    generator_calls = 0
     max_attempts = project.execution.max_attempts
     allowed_environment = declared_provider_environment(project, canonical_domain)
 
@@ -186,14 +199,20 @@ def run_auto(
                 generator_pass_env=generator_pass_env,
                 environment=environment,
                 generator_runner=generator_runner,
+                generator_timeout_seconds=generator_timeout_seconds,
+                generator_idle_timeout_seconds=generator_idle_timeout_seconds,
+                generator_max_request_bytes=generator_max_request_bytes,
                 feedback=feedback_by_unit.get(contract_unit, ()),
             )
+            generator_calls += 1
             if not change_set.changes:
                 attempts_by_unit[contract_unit] = max_attempts
                 blocked_by_unit[contract_unit] = (
                     "Generator reported no source-grounded provider-owned implementation: "
                     f"{change_set.summary}"
                 )
+                if max_generator_calls is not None and generator_calls >= max_generator_calls:
+                    break
                 continue
             manifest = verify_change_set(
                 report,
@@ -203,6 +222,8 @@ def run_auto(
                 allowed_environment=allowed_environment,
                 contract_constraints=contract_constraints,
             )
+        except (GeneratorRequestExported, GeneratorExchangeError):
+            raise
         except GeneratorInfrastructureError as exc:
             raise AutoWorkflowError(
                 "Generator infrastructure failed; validation stopped without changing the real provider: "
@@ -263,6 +284,8 @@ def run_auto(
                 attempts=attempts_by_unit[contract_unit],
             )
         )
+        if max_generator_calls is not None and generator_calls >= max_generator_calls:
+            break
 
     final_report = _scan(scratch, project.validation_root(project_path), canonical_domain, profile)
     parked = _park(
@@ -468,6 +491,9 @@ def _generate(
     generator_pass_env: Sequence[str],
     environment: Mapping[str, str] | None,
     generator_runner: GeneratorRunner | None,
+    generator_timeout_seconds: int,
+    generator_idle_timeout_seconds: int | None,
+    generator_max_request_bytes: int,
     feedback: Sequence[AttemptFailure],
 ) -> tuple[ChangeSet, dict[str, float]]:
     context_pack = build_context_pack(
@@ -485,6 +511,9 @@ def _generate(
         command=list(generator_command),
         cwd=work_dir,
         pass_env=generator_pass_env,
+        timeout_seconds=generator_timeout_seconds,
+        idle_timeout_seconds=generator_idle_timeout_seconds,
+        max_request_bytes=generator_max_request_bytes,
         runner=generator_runner,
         environment=environment,
     ), provider_contract_constraints(raw_context_pack)

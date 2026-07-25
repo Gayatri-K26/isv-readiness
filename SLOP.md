@@ -2394,3 +2394,158 @@ limitation, not a reason to weaken provider inventory or hide the failure.
   pass.
 - Ruff, Python compilation, every packaged JSON schema, lock validation, and
   diff checks pass.
+
+## Step 50 - Include the Complete Inference Reference Architecture
+
+### Evidence
+
+Qualification previously imported only the complete NCP Software Reference
+Guide. The NVIDIA Inference Reference Architecture was deliberately filtered
+out of that guide crawl and was not otherwise present in a new ISV project.
+The published Inference Reference Architecture is one complete Markdown page
+and currently contains twelve Mermaid visuals. Its architecture, component
+interaction, validation-gate, performance, operations, and security guidance
+is useful context across ISV reviews, but its presence is not evidence that an
+ISV offers inference services.
+
+### Decision
+
+1. Add the complete NVIDIA Inference Reference Architecture as a required
+   `reference` source in every newly initialized ISV project. Do not add an
+   ISV-facing feature flag or infer a capability from its presence.
+   Older manifests receive the standard source when loaded without silently
+   rewriting the manifest.
+2. Fetch the published Markdown source whole and preserve every Mermaid block
+   unchanged.
+3. Append a deterministic agent-readable description to every Mermaid visual,
+   listing all parsed nodes, subgraph groups, and relationships. This preserves
+   visual information for text-only agents without replacing or shortening the
+   source.
+4. Keep both NVIDIA references whole in qualification packs and fail closed
+   when required context is unavailable or exceeds the guarded context budget.
+5. In agent and generator instructions, make the trust boundary explicit: the
+   Inference Reference Architecture may guide architecture interpretation and
+   validation review, but cannot prove capability, mandate every component,
+   expand scope, or override pinned contracts or empirical evidence.
+
+### Verification
+
+- The focused project, context, and qualification suites pass all 23 tests.
+- The current published 90,802-character Markdown source contains twelve
+  Mermaid diagrams. The ingestion transform preserves all twelve and appends
+  twelve agent-readable descriptions, producing 105,878 characters without
+  truncation.
+- The full `isv-readiness` suite passes all 168 tests. Ruff, Python
+  compilation, every packaged JSON schema, lock validation, and diff checks
+  pass.
+
+## Step 51 - Open the Generator Boundary to Any Available Agent
+
+### Evidence
+
+The generator transport was already model-neutral, but the public CLI rejected
+every value except `codex` and `claude`. The lower-level executable resolver
+could accept another command, yet no ISV-facing path reached it, no local
+registration carried authentication environment names or capacity, and the
+1,800-second safety limit could not be extended for a slower authorized agent.
+An ISV with web-only or otherwise non-callable agent access had no supported
+way to export the guarded request and import a response.
+
+### Decision
+
+1. Keep Codex and Claude as packaged aliases, but allow `--generator` to name a
+   registered adapter, a PATH executable, or an explicit executable path.
+2. Load optional operator-local registrations from
+   `~/.config/gapctl/generators.yaml`,
+   `GAPCTL_GENERATORS_CONFIG`, or `--generator-config`. Store only command
+   arguments, environment-variable names, protocol version, bounded deadlines,
+   and complete-request capacity; keep credentials out of project data.
+3. Retain a default 1,800-second total deadline while allowing registrations up
+   to an eight-hour ceiling. Support an optional inactivity deadline refreshed
+   by captured output. Keep model correction-attempt counts inside each adapter
+   rather than imposing one policy on all agents.
+4. Reject an adapter before invocation when the complete request exceeds its
+   declared byte capacity. Never truncate required evidence to make an adapter
+   fit.
+5. Add `--generator export` and `--generator-response` to the existing
+   `qualify` and `validate` commands. Export the exact request, require it to
+   remain identical at import, compute transport content hashes, and pass the
+   response through all existing schema, scope, verification, and review
+   guards.
+6. During validation, consume at most one imported candidate before producing
+   the normal patch review. This prevents a pause for the next external-agent
+   response from discarding verified scratch changes.
+7. Preserve the four-command journey. Do not add agent-specific workflow
+   commands, credentials, provider exceptions, or weaker review paths.
+
+### Verification
+
+- Focused registry, file-exchange, generator, subprocess, automatic
+  verification, and public-journey tests cover custom commands, local
+  registration, environment allowlisting, configurable deadlines, exact
+  request matching, non-truncating capacity failure, export/import, one-response
+  review preservation, and idle process cleanup.
+- The full `isv-readiness` suite passes all 182 tests. Ruff, Python
+  compilation, every packaged JSON schema, lock validation, CLI help, and diff
+  checks pass.
+
+## Step 52 - Remove the Qualification Character Ceiling
+
+### Evidence
+
+Qualification preserved each selected item whole, but `build_qualify_pack`
+still imposed a separate 300,000-character aggregate ceiling. That ceiling was
+unrelated to the selected generator's actual request capacity and could reject
+a complete pack that its adapter was able to carry.
+
+### Decision
+
+1. Remove the qualification pack's aggregate character limit. Include every
+   selected catalog, empirical record, authoritative source, and reference item
+   without omission or truncation.
+2. Preserve the existing pack budget metadata for protocol compatibility, with
+   `max_chars: null`, the actual `used_chars`, and zero omitted items.
+3. Keep the complete serialized request byte-capacity check at the generator
+   boundary. Reject an undersized adapter before invocation and never shorten
+   the request to make it fit.
+
+### Verification
+
+- A qualification regression constructs complete reference context larger than
+  the former 300,000-character ceiling and verifies both references survive
+  intact with no omitted items.
+- All 182 tests pass. Ruff, Python compilation, every packaged JSON schema,
+  lock validation, and diff checks pass.
+
+## Step 53 - Show Effective Check Coverage During Qualification
+
+### Evidence
+
+The qualification review printed only changes to domain-level `coverage`,
+`owned`, and `validation_mode` defaults. A partial product can deliberately use
+`out_of_scope/skip` as its unmatched default while capability selectors retain
+many pinned checks as `covered/test`. The old output therefore looked as if an
+entire domain had been skipped even though its mapped exceptions remained
+testable.
+
+### Decision
+
+1. Preserve the concise domain-default diff, then display a separate effective
+   pinned-check coverage section before SME approval.
+2. Include each check's validation category in the deterministic qualification
+   catalog. Resolve every check through the profile's existing step,
+   validation-category, and validation-class selector logic.
+3. Report per-domain counts for `covered/test`, `out_of_scope/skip`, other, and
+   total outcomes. Add an aggregate total when more than one domain is present.
+4. Rebuild the catalog from the pinned `ai-cloud-validation` checkout when
+   resuming an existing proposal so displayed counts cannot drift from the
+   qualification contract.
+
+### Verification
+
+- Focused qualification and public-journey tests prove a skipped domain default
+  still reports its mapped capability checks as `covered/test`, including an
+  aggregate regression with 82 covered exceptions across three skipped domain
+  defaults.
+- All 184 tests pass. Ruff, Python compilation, every packaged JSON schema,
+  lock validation, and diff checks pass.

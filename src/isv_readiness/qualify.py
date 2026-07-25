@@ -16,6 +16,7 @@ from typing import Any
 from isv_readiness.changes import canonical_sha256
 from isv_readiness.context import QUALIFICATION_MAPPING_RULES
 from isv_readiness.generation import DEFAULT_GENERATOR_TIMEOUT_SECONDS, GeneratorRunner, dispatch_generator
+from isv_readiness.generators import DEFAULT_GENERATOR_MAX_REQUEST_BYTES
 from isv_readiness.runs import latest_run
 from isv_readiness.schema import load_schema
 from isv_readiness.solution_profile import (
@@ -70,6 +71,7 @@ def build_qualify_catalog(adapter: IsvctlAdapter, domains: Sequence[str]) -> dic
                 "check": validation.base_name,
                 "test_id": _test_id(validation.params),
                 "step": validation.step,
+                "category": validation.category,
                 "phase": validation.phase,
                 "labels": list(validation.labels),
                 "description": validation.description,
@@ -98,6 +100,8 @@ def run_profile_draft(
     cwd: Path,
     pass_env: Sequence[str] = (),
     timeout_seconds: int = DEFAULT_GENERATOR_TIMEOUT_SECONDS,
+    idle_timeout_seconds: int | None = None,
+    max_request_bytes: int = DEFAULT_GENERATOR_MAX_REQUEST_BYTES,
     runner: GeneratorRunner | None = None,
     environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -135,6 +139,8 @@ def run_profile_draft(
         cwd=cwd,
         pass_env=pass_env,
         timeout_seconds=timeout_seconds,
+        idle_timeout_seconds=idle_timeout_seconds,
+        max_request_bytes=max_request_bytes,
         runner=runner,
         environment=environment,
     )
@@ -221,6 +227,68 @@ def profile_draft_diff(current: SolutionProfile | None, draft: SolutionProfile) 
         if changes:
             lines.append(f"{name}: " + ", ".join(changes))
     return lines
+
+
+def effective_check_summary(profile: SolutionProfile, catalog: Mapping[str, Any]) -> list[str]:
+    """Summarize effective per-check outcomes after capability overrides.
+
+    Domain defaults alone are misleading for partial products. Resolve every
+    pinned catalog check through the same selector logic used by validation so
+    grouped capability exceptions are reflected in the review output.
+    """
+
+    domains = catalog.get("domains")
+    if not isinstance(domains, Mapping):
+        raise QualifyError("Qualify catalog field 'domains' must be an object.")
+
+    lines: list[str] = []
+    totals = {"covered_test": 0, "out_of_scope_skip": 0, "other": 0, "total": 0}
+    for domain, entry in sorted(domains.items()):
+        if not isinstance(domain, str) or not isinstance(entry, Mapping):
+            raise QualifyError("Qualify catalog contains an invalid domain entry.")
+        checks = entry.get("checks")
+        if not isinstance(checks, list):
+            raise QualifyError(f"Qualify catalog domain '{domain}' field 'checks' must be a list.")
+
+        counts = {"covered_test": 0, "out_of_scope_skip": 0, "other": 0, "total": 0}
+        for check in checks:
+            if not isinstance(check, Mapping):
+                raise QualifyError(f"Qualify catalog domain '{domain}' contains an invalid check.")
+            resolved = profile.resolve(
+                domain,
+                step_name=_optional_string(check.get("step")),
+                validation_category=_optional_string(check.get("category")),
+                validation_class=_optional_string(check.get("check") or check.get("name")),
+            )
+            counts["total"] += 1
+            if resolved is None:
+                counts["other"] += 1
+            elif resolved.coverage == "covered" and resolved.validation_mode == "test":
+                counts["covered_test"] += 1
+            elif resolved.coverage == "out_of_scope" and resolved.validation_mode == "skip":
+                counts["out_of_scope_skip"] += 1
+            else:
+                counts["other"] += 1
+
+        for key in totals:
+            totals[key] += counts[key]
+        lines.append(_format_check_counts(domain, counts))
+
+    if len(lines) > 1:
+        lines.append(_format_check_counts("total", totals))
+    return lines
+
+
+def _format_check_counts(label: str, counts: Mapping[str, int]) -> str:
+    return (
+        f"{label}: {counts['covered_test']} covered/test, "
+        f"{counts['out_of_scope_skip']} out_of_scope/skip, "
+        f"{counts['other']} other ({counts['total']} total)"
+    )
+
+
+def _optional_string(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
 
 
 def _test_id(params: Any) -> str | None:

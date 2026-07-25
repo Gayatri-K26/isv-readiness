@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, call, patch
 
-from isv_readiness.subprocesses import _TerminationRequested, run_captured
+from isv_readiness.subprocesses import CapturedIdleTimeout, _TerminationRequested, run_captured
 
 
 class CapturedSubprocessTests(unittest.TestCase):
@@ -48,6 +48,45 @@ class CapturedSubprocessTests(unittest.TestCase):
         self.assertEqual(result.stdout, "combined output")
         self.assertIsNone(result.stderr)
         self.assertIs(popen.call_args.kwargs["stderr"], subprocess.STDOUT)
+
+    def test_idle_timeout_is_distinct_from_total_timeout(self) -> None:
+        timeout = subprocess.TimeoutExpired(["fixture"], 5, output="", stderr="")
+        process = Mock(pid=333, returncode=-signal.SIGTERM)
+        process.communicate.side_effect = [timeout, ("", "")]
+
+        with (
+            patch("isv_readiness.subprocesses.subprocess.Popen", return_value=process),
+            patch("isv_readiness.subprocesses.os.killpg"),
+            patch("isv_readiness.subprocesses.time.time", side_effect=[0, 0, 0, 6]),
+            self.assertRaises(CapturedIdleTimeout),
+        ):
+            run_captured(
+                ["fixture"],
+                cwd=Path("/tmp"),
+                input_text="request",
+                timeout_seconds=30,
+                idle_timeout_seconds=5,
+            )
+
+    def test_captured_progress_refreshes_the_idle_deadline(self) -> None:
+        partial = subprocess.TimeoutExpired(["fixture"], 5, output="", stderr="progress\n")
+        process = Mock(pid=334, returncode=0)
+        process.communicate.side_effect = [partial, ("result", "progress\n")]
+
+        with (
+            patch("isv_readiness.subprocesses.subprocess.Popen", return_value=process),
+            patch("isv_readiness.subprocesses.time.time", side_effect=[0, 0, 0, 4, 4, 8]),
+        ):
+            result = run_captured(
+                ["fixture"],
+                cwd=Path("/tmp"),
+                input_text="request",
+                timeout_seconds=30,
+                idle_timeout_seconds=5,
+            )
+
+        self.assertEqual(result.stdout, "result")
+        self.assertEqual(process.communicate.call_count, 2)
 
     @unittest.skipUnless(os.name == "posix", "process-group cleanup is POSIX-specific")
     def test_timeout_kills_and_reaps_the_process_group(self) -> None:

@@ -51,9 +51,10 @@ instead of silently pulling different tests into an active engagement.
 
 ```mermaid
 flowchart TD
-    Catalog[Pinned suite catalog] --> Pack[Bounded qualification pack]
+    Catalog[Pinned suite catalog] --> Pack[Complete qualification pack]
     Context[Redacted ISV evidence] --> Pack
     Guide[Complete NCP reference guide] --> Pack
+    InferenceRA[Complete Inference Reference Architecture<br/>with prose-rendered visuals] --> Pack
     Runs[Prior empirical evidence] --> Pack
     Pack --> Generator[Replaceable generator]
     Generator --> Harden[Schema and scope hardening]
@@ -71,12 +72,25 @@ the proposal to remain a qualify-stage draft and requires its domains to equal
 the domains declared during `init`. The SME edits the proposal when facts are
 unresolved. Only an explicit approval promotes the reviewed document.
 
+Before approval, the CLI displays both the domain-default diff and effective
+pinned-check counts. Each catalog check is resolved through the profile's
+step, validation-category, and validation-class selectors. The resulting
+per-domain and total `covered/test`, `out_of_scope/skip`, and other counts make
+partial-domain capability exceptions visible even when the domain default is
+skipped.
+
 Qualification receives the complete NCP Software Reference Guide collection
-published in NVIDIA's documentation index. The collection is required and is
-accepted only when every indexed guide page is fetched. Suite catalogs,
-authoritative ISV evidence, and that reference collection are never silently
-shortened: packing fails closed when the configured limit cannot hold them.
-GitHub issues are not a supported qualification source.
+published in NVIDIA's documentation index and the complete NVIDIA Inference
+Reference Architecture. Both are required for every ISV; no offering flag or
+automatic capability inference controls their inclusion. The reference-guide
+collection is accepted only when every indexed guide page is fetched. The
+Inference Reference Architecture keeps its original Mermaid source and appends
+a deterministic prose rendering of every visual's nodes, groups, and
+relationships. Suite catalogs, authoritative ISV evidence, and both reference
+sources are never silently shortened. Qualification imposes no separate
+character limit; the selected generator's declared byte capacity is checked
+against the complete serialized request before invocation. GitHub issues are
+not a supported qualification source.
 
 The profile is deliberately small:
 
@@ -162,6 +176,17 @@ still read an older sibling Kubernetes wrapper for compatibility.
 Declining the patch removes only its generated review markers; the next
 validation run replaces the scratch copy from the unchanged provider and
 generates a new candidate rather than resuming the rejected review.
+
+The generator boundary is a versioned stdin/stdout protocol rather than a
+Codex- or Claude-specific workflow. Built-in aliases resolve to the packaged
+reference adapters. A local operator configuration may register any adapter
+command, explicitly allow environment-variable names, and declare total/idle
+deadlines and maximum request bytes. An executable path can be selected
+directly. When no callable adapter exists, file exchange exports the identical
+complete request and imports one JSON response through the same schema, hash,
+scope, static-verification, and human-review guards. Validation imports at most
+one candidate before producing a review, so a pause between external-agent
+turns cannot discard staged work.
 
 Each generation pack includes the exact declared runtime environment names and
 the other edit-eligible unresolved validation rows in the selected adapter
@@ -251,10 +276,13 @@ same adapter contract requires coordinated wiring or timeout changes. The
 existing path, hash, candidate-content, and isolated-rescan guards apply to
 every included file.
 
-The shared generator boundary gives the single schema-constrained Codex call
-1,680 seconds, each of Claude's possible two schema-correction attempts 840
-seconds, and the adapter 1,800 seconds. Either route retains 120 seconds of
-outer headroom. All deadlines also expire across macOS sleep.
+The packaged Codex adapter uses one schema-constrained call with a 1,680-second
+deadline. The packaged Claude adapter owns up to two schema-correction attempts
+of 840 seconds each. These attempt counts are adapter behavior, not a universal
+workflow limit. The default outer adapter deadline is 1,800 seconds; a local
+registration may increase it, within the eight-hour safety ceiling, and may
+add an idle deadline refreshed by adapter output. All deadlines also expire
+across macOS sleep.
 Timeout, Ctrl+C, and SIGTERM first give an adapter a short cleanup window so it
 can reap a nested model session, then force-kill and close inherited pipes if
 cleanup does not finish. A model timeout stops the run as generator
@@ -266,6 +294,9 @@ Generator children receive only the minimal process environment, explicitly
 declared generator inputs, and the non-secret `USER` identity needed for macOS
 Keychain-backed CLI authentication. Authentication material itself is neither
 forwarded explicitly nor added to context.
+Before invocation, the core compares the complete serialized request with the
+adapter's declared byte capacity. An incompatible adapter fails clearly without
+receiving a shortened request.
 
 `validate` invokes live execution one domain at a time internally, while the ISV
 runs one command for the entire owned scope. The explicit confirmation is the

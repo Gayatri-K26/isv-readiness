@@ -9,14 +9,19 @@ from pathlib import Path
 
 from isv_readiness.context import (
     QUALIFICATION_MAPPING_RULES,
-    ContextError,
     build_qualify_pack,
     sync_context_sources,
 )
-from isv_readiness.project import DEFAULT_NSRG_URL, build_bootstrap_plan, execute_bootstrap
+from isv_readiness.project import (
+    DEFAULT_INFERENCE_RA_URL,
+    DEFAULT_NSRG_URL,
+    build_bootstrap_plan,
+    execute_bootstrap,
+)
 from isv_readiness.qualify import (
     QualifyError,
     build_qualify_catalog,
+    effective_check_summary,
     empirical_conflicts,
     profile_draft_diff,
     run_profile_draft,
@@ -129,6 +134,7 @@ class QualifyCatalogTests(unittest.TestCase):
         self.assertEqual(vm["steps"], ["launch_instance", "terminate_instance"])
         by_name = {check["name"]: check for check in vm["checks"]}
         self.assertEqual(by_name["VmLaunchCheck"]["test_id"], "VM01-01")
+        self.assertEqual(by_name["VmLaunchCheck"]["category"], "vm")
         self.assertEqual(by_name["VmLaunchCheck-terminate"]["check"], "VmLaunchCheck")
         self.assertEqual(by_name["VmLaunchCheck"]["description"], CATALOG_PAYLOAD["entries"][0]["description"])
 
@@ -192,7 +198,7 @@ class AuthoritativeWholeTests(unittest.TestCase):
             self.assertFalse(item["truncated"])
             self.assertIn("unrelated billing paragraph 399", item["content"])
 
-    def test_qualify_keeps_the_complete_reference_guide_or_fails_closed(self) -> None:
+    def test_qualify_keeps_complete_references_beyond_the_old_character_limit(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             workspace, project, manifest = _project(Path(tempdir))
             (workspace / "openapi.yaml").write_text("paths: {}\n", encoding="utf-8")
@@ -205,7 +211,7 @@ class AuthoritativeWholeTests(unittest.TestCase):
                     return (
                         b"- [Introduction](https://docs.nvidia.com/dsx/ncp/software-reference-guide/introduction.md):"
                     )
-                return ("VM lifecycle reference\n" + "x" * 14_000 + guide_tail).encode()
+                return ("VM lifecycle reference\n" + "x" * 310_000 + guide_tail).encode()
 
             sync_context_sources(project, manifest, cache, fetcher=fetcher)
             catalog = build_qualify_catalog(IsvctlAdapter(Path("/tmp"), runner=_isvctl_runner), ["vm"])
@@ -214,9 +220,12 @@ class AuthoritativeWholeTests(unittest.TestCase):
             item = next(item for item in pack["items"] if item["source_id"] == "nsrg")
             self.assertFalse(item["truncated"])
             self.assertIn(guide_tail, item["content"])
+            inference = next(item for item in pack["items"] if item["source_id"] == "inference_ra")
+            self.assertFalse(inference["truncated"])
+            self.assertIn(guide_tail, inference["content"])
+            self.assertIsNone(pack["budget"]["max_chars"])
+            self.assertGreater(pack["budget"]["used_chars"], 300_000)
             self.assertEqual(pack["budget"]["omitted_items"], 0)
-            with self.assertRaisesRegex(ContextError, "refusing to truncate evidence"):
-                build_qualify_pack(project, catalog, cache_dir=cache, max_chars=4_000)
 
 
 class ProfileDraftTests(unittest.TestCase):
@@ -308,6 +317,37 @@ class RatificationAidTests(unittest.TestCase):
         self.assertEqual(profile_draft_diff(current, draft), ["vm: coverage covered->gap"])
         self.assertEqual(profile_draft_diff(None, draft), ["vm: added (coverage=gap, owned=True)"])
 
+    def test_effective_check_summary_counts_capabilities_over_domain_defaults(self) -> None:
+        mapped_counts = {"vm": 27, "network": 27, "security": 28}
+        raw = _profile_payload(tuple(mapped_counts))
+        catalog_domains = {}
+        for domain in raw["domains"]:
+            name = domain["domain"]
+            domain["coverage"] = "out_of_scope"
+            domain["validation_mode"] = "skip"
+            domain["capabilities"] = [
+                {
+                    "id": f"{name}-mapped",
+                    "name": f"{name} mapped checks",
+                    "selectors": {"validation_classes": ["MappedCheck*"]},
+                    "coverage": "covered",
+                    "validation_mode": "test",
+                }
+            ]
+            checks = [
+                {"name": f"MappedCheck{index}", "check": f"MappedCheck{index}"}
+                for index in range(mapped_counts[name])
+            ]
+            checks.append({"name": "UnmatchedCheck", "check": "UnmatchedCheck"})
+            catalog_domains[name] = {"checks": checks}
+
+        summary = effective_check_summary(
+            parse_solution_profile(raw),
+            {"domains": catalog_domains},
+        )
+
+        self.assertEqual(summary[-1], "total: 82 covered/test, 3 out_of_scope/skip, 0 other (85 total)")
+
 
 def _offline_fetcher(url: str, headers: Mapping[str, str]) -> bytes:
     del headers
@@ -315,6 +355,8 @@ def _offline_fetcher(url: str, headers: Mapping[str, str]) -> bytes:
         return b"- [Introduction](https://docs.nvidia.com/dsx/ncp/software-reference-guide/introduction.md):"
     if url.endswith("introduction.md"):
         return b"VM lifecycle reference guidance"
+    if url == DEFAULT_INFERENCE_RA_URL:
+        return b"# Complete Inference Reference Architecture\n\nInference validation guidance."
     raise OSError(f"network unreachable: {url}")
 
 

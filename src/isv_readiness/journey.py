@@ -14,6 +14,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -27,10 +28,19 @@ from isv_readiness.context import (
 )
 from isv_readiness.decision import validation_profile_issues
 from isv_readiness.fixes import FixGuardrailError
+from isv_readiness.generators import (
+    FileExchangeRunner,
+    GeneratorConfigurationError,
+    GeneratorExchangeError,
+    GeneratorRequestExported,
+    GeneratorSpec,
+    resolve_generator_spec,
+)
 from isv_readiness.project import ProjectError, load_project
 from isv_readiness.qualify import (
     QualifyError,
     build_qualify_catalog,
+    effective_check_summary,
     empirical_conflicts,
     profile_draft_diff,
     run_profile_draft,
@@ -41,13 +51,13 @@ from isv_readiness.validation_adapter import IsvctlAdapter, ValidationAdapterErr
 
 Confirm = Callable[[str], bool]
 
-_GENERATOR_ALIASES = {
-    "claude": "gapctl-claude-generator",
-    "codex": "gapctl-codex-generator",
-}
-
-
-def cmd_qualify(*, generator: str = "codex", confirm: Confirm | None = None) -> int:
+def cmd_qualify(
+    *,
+    generator: str = "codex",
+    generator_config: Path | None = None,
+    generator_response: Path | None = None,
+    confirm: Confirm | None = None,
+) -> int:
     """Draft and ratify the declared scope through one resumable command."""
 
     try:
@@ -65,9 +75,16 @@ def cmd_qualify(*, generator: str = "codex", confirm: Confirm | None = None) -> 
 
     qualification_dir = project_path.parent / ".gapctl" / "qualification"
     proposal_path = qualification_dir / "solution-profile.proposed.yaml"
+    catalog: dict[str, Any] | None = None
     if not proposal_path.exists():
         print("Building an evidence-grounded qualification proposal...")
         try:
+            generator_spec, generator_runner = _generator_runtime(
+                generator,
+                config_path=generator_config,
+                request_path=qualification_dir / "generator-request.json",
+                response_path=generator_response,
+            )
             qualification_dir.mkdir(parents=True, exist_ok=True)
             cache_dir = project_path.parent / ".gapctl" / "context-cache"
             cached_records = load_context_records(cache_dir)
@@ -89,11 +106,25 @@ def cmd_qualify(*, generator: str = "codex", confirm: Confirm | None = None) -> 
             pack = build_qualify_pack(project, catalog, cache_dir=cache_dir)
             raw = run_profile_draft(
                 pack,
-                command=[_resolve_generator(generator)],
+                command=generator_spec.command,
                 cwd=project_path.parent,
+                pass_env=generator_spec.pass_env,
+                timeout_seconds=generator_spec.timeout_seconds,
+                idle_timeout_seconds=generator_spec.idle_timeout_seconds,
+                max_request_bytes=generator_spec.max_request_bytes,
+                runner=generator_runner,
             )
             proposal_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+        except GeneratorRequestExported as exc:
+            print(f"Generator request written: {exc.path}")
+            print(
+                "Give this complete JSON request to any agent, save its JSON response, then run "
+                "`gapctl qualify --generator-response <response.json>`."
+            )
+            return 1
         except (
+            GeneratorConfigurationError,
+            GeneratorExchangeError,
             OSError,
             json.JSONDecodeError,
             subprocess.SubprocessError,
@@ -110,6 +141,10 @@ def cmd_qualify(*, generator: str = "codex", confirm: Confirm | None = None) -> 
 
     try:
         proposal = load_solution_profile(proposal_path)
+        if catalog is None:
+            catalog = build_qualify_catalog(
+                IsvctlAdapter(project.validation_root(project_path)), project.assessment.domains
+            )
         conflicts = empirical_conflicts(proposal, project_path.parent / ".gapctl" / "runs")
         if conflicts:
             for conflict in conflicts:
@@ -119,12 +154,22 @@ def cmd_qualify(*, generator: str = "codex", confirm: Confirm | None = None) -> 
         promoted_raw = _promoted_profile(proposal_path)
         promoted = parse_solution_profile(promoted_raw)
         issues = validation_profile_issues(promoted, project.assessment.domains)
-    except (OSError, TypeError, SolutionProfileError) as exc:
+        check_summary = effective_check_summary(proposal, catalog)
+    except (
+        OSError,
+        TypeError,
+        QualifyError,
+        SolutionProfileError,
+        ValidationAdapterError,
+    ) as exc:
         print(str(exc), file=sys.stderr)
         return 2
 
     print("\nProposed scope changes:")
     for line in profile_draft_diff(active, proposal) or ["no domain differences"]:
+        print(f"  {line}")
+    print("\nEffective pinned check coverage:")
+    for line in check_summary:
         print(f"  {line}")
     if issues:
         print("\nThe proposal still has unresolved qualification decisions:")
@@ -152,7 +197,13 @@ def cmd_qualify(*, generator: str = "codex", confirm: Confirm | None = None) -> 
     return 0
 
 
-def cmd_validate(*, generator: str = "codex", confirm: Confirm | None = None) -> int:
+def cmd_validate(
+    *,
+    generator: str = "codex",
+    generator_config: Path | None = None,
+    generator_response: Path | None = None,
+    confirm: Confirm | None = None,
+) -> int:
     """Close static gaps, obtain review, and run every owned domain."""
 
     try:
@@ -175,7 +226,16 @@ def cmd_validate(*, generator: str = "codex", confirm: Confirm | None = None) ->
         return 1
 
     ask = confirm or _confirm
-    generator_command = [_resolve_generator(generator)]
+    try:
+        generator_spec, generator_runner = _generator_runtime(
+            generator,
+            config_path=generator_config,
+            request_path=project_path.parent / ".gapctl" / "generator-request.json",
+            response_path=generator_response,
+        )
+    except GeneratorConfigurationError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     for domain in project.assessment.domains:
         work_dir = project_path.parent / ".gapctl" / "work" / domain
         while True:
@@ -184,11 +244,25 @@ def cmd_validate(*, generator: str = "codex", confirm: Confirm | None = None) ->
                     project_path,
                     domain=domain,
                     work_dir=work_dir,
-                    generator_command=generator_command,
+                    generator_command=generator_spec.command,
+                    generator_pass_env=generator_spec.pass_env,
+                    generator_runner=generator_runner,
+                    generator_timeout_seconds=generator_spec.timeout_seconds,
+                    generator_idle_timeout_seconds=generator_spec.idle_timeout_seconds,
+                    generator_max_request_bytes=generator_spec.max_request_bytes,
+                    max_generator_calls=1 if generator_response is not None else None,
                     max_iterations=50,
                     apply=False,
                 )
+            except GeneratorRequestExported as exc:
+                print(f"Generator request written: {exc.path}")
+                print(
+                    "Give this complete JSON request to any agent, save its JSON response, then run "
+                    "`gapctl validate --generator-response <response.json>`."
+                )
+                return 1
             except (
+                GeneratorExchangeError,
                 OSError,
                 subprocess.SubprocessError,
                 AutoWorkflowError,
@@ -213,7 +287,13 @@ def cmd_validate(*, generator: str = "codex", confirm: Confirm | None = None) ->
                         project_path,
                         domain=domain,
                         work_dir=work_dir,
-                        generator_command=generator_command,
+                        generator_command=generator_spec.command,
+                        generator_pass_env=generator_spec.pass_env,
+                        generator_runner=generator_runner,
+                        generator_timeout_seconds=generator_spec.timeout_seconds,
+                        generator_idle_timeout_seconds=generator_spec.idle_timeout_seconds,
+                        generator_max_request_bytes=generator_spec.max_request_bytes,
+                        max_generator_calls=1 if generator_response is not None else None,
                         max_iterations=50,
                         apply=True,
                         approval_patch_sha256=review.patch_sha256,
@@ -322,12 +402,27 @@ def _promoted_profile(path: Path) -> dict:
     return raw
 
 
+def _generator_runtime(
+    name: str,
+    *,
+    config_path: Path | None,
+    request_path: Path,
+    response_path: Path | None,
+) -> tuple[GeneratorSpec, FileExchangeRunner | None]:
+    spec = resolve_generator_spec(
+        name,
+        executable_dir=Path(sys.executable).parent,
+        config_path=config_path,
+    )
+    if spec.name == "export" or response_path is not None:
+        return spec, FileExchangeRunner(request_path, response_path)
+    return spec, None
+
+
 def _resolve_generator(name: str) -> str:
-    executable = _GENERATOR_ALIASES.get(name)
-    if executable is None:
-        return name
-    sibling = Path(sys.executable).parent / executable
-    return str(sibling) if sibling.is_file() else executable
+    """Backward-compatible executable resolver used by lower-level callers."""
+
+    return resolve_generator_spec(name, executable_dir=Path(sys.executable).parent).command[0]
 
 
 def _file_sha256(path: Path) -> str:

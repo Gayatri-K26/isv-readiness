@@ -76,9 +76,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     qualify_parser.add_argument(
         "--generator",
-        choices=("codex", "claude"),
         default="codex",
-        help="Profile generator (default: codex)",
+        help="Registered adapter name, executable path, codex, claude, or export (default: codex)",
+    )
+    qualify_parser.add_argument(
+        "--generator-config",
+        type=Path,
+        default=None,
+        help="Override the local generator registry path",
+    )
+    qualify_parser.add_argument(
+        "--generator-response",
+        type=Path,
+        default=None,
+        help="JSON response to the exact request previously written by --generator export",
     )
     qualify_parser.set_defaults(handler=_qualify)
 
@@ -88,9 +99,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     validate_parser.add_argument(
         "--generator",
-        choices=("codex", "claude"),
         default="codex",
-        help="Provider implementation generator (default: codex)",
+        help="Registered adapter name, executable path, codex, claude, or export (default: codex)",
+    )
+    validate_parser.add_argument(
+        "--generator-config",
+        type=Path,
+        default=None,
+        help="Override the local generator registry path",
+    )
+    validate_parser.add_argument(
+        "--generator-response",
+        type=Path,
+        default=None,
+        help="JSON response to the exact request previously written by --generator export",
     )
     validate_parser.set_defaults(handler=_validate)
 
@@ -120,11 +142,19 @@ def _init(args: argparse.Namespace) -> int:
 
 
 def _qualify(args: argparse.Namespace) -> int:
-    return cmd_qualify(generator=args.generator)
+    return cmd_qualify(
+        generator=args.generator,
+        generator_config=args.generator_config,
+        generator_response=args.generator_response,
+    )
 
 
 def _validate(args: argparse.Namespace) -> int:
-    return cmd_validate(generator=args.generator)
+    return cmd_validate(
+        generator=args.generator,
+        generator_config=args.generator_config,
+        generator_response=args.generator_response,
+    )
 
 
 def _publish(args: argparse.Namespace) -> int:

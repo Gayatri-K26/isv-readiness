@@ -16,6 +16,10 @@ class _TerminationRequested(BaseException):
     """Turn SIGTERM into a cleanup path before the process exits."""
 
 
+class CapturedIdleTimeout(subprocess.TimeoutExpired):
+    """Raised when a captured process produces no output before its idle deadline."""
+
+
 def _raise_termination(_signum: int, _frame: object) -> None:
     raise _TerminationRequested()
 
@@ -26,6 +30,7 @@ def run_captured(
     cwd: Path,
     input_text: str,
     timeout_seconds: int,
+    idle_timeout_seconds: int | None = None,
     environment: Mapping[str, str] | None = None,
     merge_stderr: bool = False,
 ) -> subprocess.CompletedProcess[str]:
@@ -53,6 +58,7 @@ def run_captured(
                 command=command,
                 input_text=input_text,
                 timeout_seconds=timeout_seconds,
+                idle_timeout_seconds=idle_timeout_seconds,
             )
         except subprocess.TimeoutExpired:
             # Give an adapter a short SIGTERM window so it can stop a nested
@@ -74,15 +80,24 @@ def _communicate_with_wall_timeout(
     command: Sequence[str],
     input_text: str,
     timeout_seconds: int,
+    idle_timeout_seconds: int | None = None,
 ) -> tuple[str, str]:
-    """Capture output with a deadline that also expires across macOS sleep."""
+    """Capture output with total and optional inactivity deadlines."""
 
     deadline = time.time() + timeout_seconds
+    idle_deadline = time.time() + idle_timeout_seconds if idle_timeout_seconds is not None else None
+    observed_output = (0, 0)
     pending_input: str | None = input_text
     while True:
-        remaining = deadline - time.time()
+        now = time.time()
+        remaining = deadline - now
         if remaining <= 0:
             raise subprocess.TimeoutExpired(list(command), timeout_seconds)
+        if idle_deadline is not None:
+            idle_remaining = idle_deadline - now
+            if idle_remaining <= 0:
+                raise CapturedIdleTimeout(list(command), idle_timeout_seconds)
+            remaining = min(remaining, idle_remaining)
         try:
             return process.communicate(
                 pending_input,
@@ -92,13 +107,29 @@ def _communicate_with_wall_timeout(
             # communicate may be resumed after a timeout, but stdin may be
             # supplied only on its first call.
             pending_input = None
-            if time.time() >= deadline:
+            current_output = (_captured_size(exc.output), _captured_size(exc.stderr))
+            if idle_deadline is not None and current_output != observed_output:
+                observed_output = current_output
+                idle_deadline = time.time() + idle_timeout_seconds
+            now = time.time()
+            if now >= deadline:
                 raise subprocess.TimeoutExpired(
                     list(command),
                     timeout_seconds,
                     output=exc.output,
                     stderr=exc.stderr,
                 ) from exc
+            if idle_deadline is not None and now >= idle_deadline:
+                raise CapturedIdleTimeout(
+                    list(command),
+                    idle_timeout_seconds,
+                    output=exc.output,
+                    stderr=exc.stderr,
+                ) from exc
+
+
+def _captured_size(value: str | bytes | None) -> int:
+    return len(value) if value is not None else 0
 
 
 def _stop_and_reap(process: subprocess.Popen[str]) -> None:

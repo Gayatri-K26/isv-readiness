@@ -10,6 +10,17 @@ guardrails, verification, and application as separate stages.
 
 - Treat `ai-cloud-validation` as the source of truth for configuration validity
   and test outcomes.
+- Always include the complete NVIDIA Inference Reference Architecture as
+  qualification reference context for every ISV. Do not gate it on an
+  ISV-facing flag or infer an inference capability merely because the
+  architecture is present.
+- Preserve the Inference Reference Architecture whole. Keep every Mermaid
+  diagram and provide an agent-readable prose description of its nodes,
+  groups, and relationships; never replace the source with a summary.
+- Use the Inference Reference Architecture to interpret architecture,
+  component interactions, and validation considerations only. It cannot prove
+  an ISV capability, require every described component, expand declared
+  ownership, or override pinned validation contracts or empirical run results.
 - Do not edit NVIDIA-owned suites, validation classes, catalog code, or engine
   code from this repository.
 - Limit generated fixes to profile-approved provider scripts, the selected
@@ -28,6 +39,16 @@ guardrails, verification, and application as separate stages.
 - Keep credentials, private source, and infrastructure execution inside the
   authorized environment. Do not add secrets to candidates, patches, reports,
   fixtures, or logs.
+- Keep the generator protocol agent-neutral. Built-in names are aliases only;
+  registered adapters, explicit executables, and exported file exchange must
+  receive the same complete request and pass the same schema, hash, scope,
+  verification, and review gates.
+- Do not impose one model-attempt count on every adapter. Model-specific
+  correction attempts belong inside the adapter. The core owns bounded total
+  and optional idle deadlines, complete-request size capability checks,
+  process-tree cleanup, and deterministic candidate retry limits.
+- Never truncate required context to fit an adapter. Reject the adapter before
+  invocation when its declared request capacity is insufficient.
 
 ## Implementation Conventions
 

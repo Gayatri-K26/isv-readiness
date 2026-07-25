@@ -28,8 +28,10 @@ The intended installation shape is:
 uv tool install "git+https://<approved-repository>/isv-readiness.git@v0.1.0"
 ```
 
-Installation provides `gapctl` and its Codex and Claude generator adapters. It
-does not clone `ai-cloud-validation`; that happens during `gapctl init`.
+Installation provides `gapctl` plus Codex and Claude reference adapters. Any
+agent can participate through the same versioned adapter protocol, a locally
+registered executable, or complete-request file exchange. Installation does
+not clone `ai-cloud-validation`; that happens during `gapctl init`.
 
 ## Complete ISV journey
 
@@ -55,13 +57,14 @@ cd acme-readiness
 - records the exact validation commit in `isv-project.yaml`;
 - builds the NVIDIA check catalog for the declared domains;
 - scaffolds the provider-owned scripts and configuration;
-- imports and redacts the declared API specification and the complete NVIDIA
-  NCP Software Reference Guide from NVIDIA's published documentation index;
+- imports and redacts the declared API specification, the complete NVIDIA NCP
+  Software Reference Guide from NVIDIA's published documentation index, and
+  the complete NVIDIA Inference Reference Architecture;
 - creates the initial draft solution profile.
 
 GitHub issues are not qualification sources. The pinned executable contracts,
-the ISV's own evidence, the complete reference guide, and recorded runs are the
-qualification inputs.
+the ISV's own evidence, both complete NVIDIA references, and recorded runs are
+the qualification inputs.
 
 When `--api` is supplied, `validate` injects that value into provider scripts as
 `ISV_API_BASE_URL`; the operator does not need to export it separately.
@@ -90,14 +93,28 @@ and creates:
 ```
 
 The qualification pack keeps the suite catalogs, authoritative ISV evidence,
-and NCP Software Reference Guide whole. The complete guide is a required
-qualification source. If a page cannot be imported or the sources do not fit
-the guarded context limit, `qualify` stops with an error instead of silently
-continuing with missing, omitted, or truncated material.
+NCP Software Reference Guide, and Inference Reference Architecture whole. Both
+NVIDIA references are required qualification sources. The Inference Reference
+Architecture is included for every ISV without a special flag. Its original
+Mermaid diagrams are preserved and accompanied by deterministic prose
+descriptions of their nodes, groups, and relationships. If a required page
+cannot be imported, `qualify` stops instead of silently continuing with
+missing material. Qualification has no separate character limit and never
+omits or truncates pack items. The selected generator's configurable byte
+capacity applies to the complete serialized request; an undersized adapter is
+rejected before invocation. Older project manifests receive the standard
+Inference Reference Architecture source when loaded; the manifest is not
+silently rewritten.
 
 The ISV SME reviews that file. Unresolved ownership or coverage decisions stop
 the command and remain visible. Edit the proposal and run the same command
 again; there is no separate profile, draft, or approval command.
+
+The review output shows domain-default changes and then resolves every pinned
+check through the proposed capability selectors. Per-domain and total counts
+distinguish effective `covered/test`, `out_of_scope/skip`, and other outcomes,
+so a partial-domain skip default is not mistaken for skipping its mapped
+`covered/test` exceptions.
 
 Qualification does not treat a declared domain as proof that every check in
 that domain is supported. A `covered/test` domain default is proposed only when
@@ -113,11 +130,57 @@ approval. Approval promotes the exact reviewed proposal to
 The generator may propose scope, but it cannot approve ownership or expand the
 domains declared during `init`.
 
-Claude can be selected without changing the workflow:
+The selected agent is not part of ISV scope. Codex and Claude are built-in
+aliases:
 
 ```bash
 gapctl qualify --generator claude
 ```
+
+Any executable that reads one request JSON object from stdin and writes one
+schema-valid response JSON object to stdout can be selected directly:
+
+```bash
+gapctl qualify --generator /opt/company/bin/gapctl-internal-agent
+```
+
+Reusable local adapters are registered outside the ISV project in
+`~/.config/gapctl/generators.yaml` (or the path named by
+`GAPCTL_GENERATORS_CONFIG`):
+
+```yaml
+generators:
+  internal-agent:
+    protocol_version: "0.1.0"
+    command:
+      - /opt/company/bin/gapctl-internal-agent
+      - --profile
+      - isv-readiness
+    pass_env:
+      - INTERNAL_AGENT_TOKEN
+    timeout_seconds: 7200
+    idle_timeout_seconds: 900
+    max_request_bytes: 8000000
+```
+
+Only environment-variable names are configured. Values remain in the local
+process environment. The total deadline may be configured up to eight hours;
+an optional idle deadline is refreshed by adapter output, normally progress on
+stderr. Model-specific correction attempts belong inside the adapter.
+
+When the ISV's agent has no callable CLI, export the same complete request:
+
+```bash
+gapctl qualify --generator export
+# Give .gapctl/qualification/generator-request.json to the available agent.
+gapctl qualify --generator-response ./agent-response.json
+```
+
+The imported response must match the exact exported request and passes the same
+schema, source, scope, and SME review gates. Validation change sets also remain
+bound to their gap and context-pack hashes. The request is rejected before
+invocation when it exceeds an adapter's declared capacity; required context is
+never truncated.
 
 ### 3. Validate
 
@@ -192,21 +255,32 @@ If review or live execution is deferred, run `gapctl validate` again. It resumes
 an existing statically verified candidate patch instead of regenerating a
 different patch before approval.
 
-Claude can be selected with:
+The same built-in, registered, executable, and file-exchange routes apply to
+validation:
 
 ```bash
 gapctl validate --generator claude
+
+gapctl validate --generator internal-agent
+
+gapctl validate --generator export
+# Give .gapctl/generator-request.json to the available agent.
+gapctl validate --generator-response ./agent-response.json
 ```
+
+File exchange imports at most one generated candidate per invocation so its
+verified scratch change reaches the normal patch review gate before another
+agent request is exported.
 
 On macOS, gapctl passes the non-secret `USER` process identity to generator
 adapters so Claude can retrieve an existing SSO session from Keychain. Claude
 credentials remain outside gapctl and are never copied into project files or
 generation context.
 
-A model or adapter timeout stops the current validation run immediately. It is
-an infrastructure failure, not evidence about an ISV capability, so gapctl does
-not spend the provider retry budget repeating the identical request. No real
-provider file is changed.
+A model or adapter total/idle timeout stops the current validation run
+immediately. It is an infrastructure failure, not evidence about an ISV
+capability, so gapctl does not spend the provider retry budget repeating the
+identical request. No real provider file is changed.
 
 Live `isvctl` execution uses the same process-group cleanup boundary. A timeout,
 Ctrl+C, or SIGTERM terminates and reaps the active validation process and its

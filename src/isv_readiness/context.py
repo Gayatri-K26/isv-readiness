@@ -19,6 +19,7 @@ import yaml
 
 from isv_readiness.decision import adapter_contract_unit, decide_gap
 from isv_readiness.project import (
+    DEFAULT_INFERENCE_RA_URL,
     DEFAULT_NSRG_URL,
     MINIMAL_PROCESS_ENV,
     ContextSource,
@@ -39,6 +40,9 @@ NCP_GUIDE_PAGE_PREFIXES = (
     "https://docs.nvidia.com/dsx/ncp/part-2-software-components/",
 )
 NCP_GUIDE_LINK_RE = re.compile(r"\[([^\]]+)\]\((https://docs\.nvidia\.com/dsx/ncp/[^)]+\.md)\)")
+MERMAID_BLOCK_RE = re.compile(r"```mermaid\s*\n(.*?)```", re.DOTALL)
+MERMAID_NODE_RE = re.compile(r'\b([A-Za-z][A-Za-z0-9_]*)\s*\[(?:"([^"]*)"|([^\]]*))\]')
+MERMAID_SUBGRAPH_RE = re.compile(r'^\s*subgraph\s+([A-Za-z][A-Za-z0-9_]*)\s*\[(?:"([^"]*)"|([^\]]*))\]')
 QUALIFICATION_MAPPING_RULES = (
     "Match capabilities explicitly declared by the ISV's supplied interfaces and "
     "documentation to the closest applicable checks in each declared domain.",
@@ -517,7 +521,6 @@ def build_qualify_pack(
     catalog: Mapping[str, Any],
     *,
     cache_dir: Path,
-    max_chars: int = 300_000,
 ) -> dict[str, Any]:
     """Build the profile-scoped evidence pack for qualify-phase drafting.
 
@@ -525,8 +528,6 @@ def build_qualify_pack(
     suite catalog (what NVIDIA demands), the cached API spec and guidance
     (what the ISV exposes), and the latest recorded run per domain.
     """
-    if max_chars < 4_000:
-        raise ContextError("Context budget must be at least 4000 characters.")
     domains = catalog.get("domains")
     if not isinstance(domains, Mapping) or not domains:
         raise ContextError("Qualify catalog contains no domains.")
@@ -556,7 +557,8 @@ def build_qualify_pack(
             preserve_reference=True,
         )
     )
-    items, used, omitted = _fit_budget(candidates, max_chars, allow_truncation=False)
+    items = sorted(candidates, key=lambda item: (_trust_rank(item.trust), item.source_id, item.origin))
+    used = sum(len(item.content) for item in items)
 
     pack = {
         "schema_version": CONTEXT_PACK_SCHEMA_VERSION,
@@ -582,12 +584,14 @@ def build_qualify_pack(
             "Treat ai-cloud-validation suites and validation classes as read-only source-of-truth contracts.",
             *QUALIFICATION_MAPPING_RULES,
             "Use the NCP Software Reference Guide to interpret capabilities and architecture only; it cannot expand ISV ownership or override the pinned validation contracts.",
+            "Use the complete NVIDIA Inference Reference Architecture as reference context for architecture, component interactions, and validation considerations. It applies as review context to every qualification, but it does not prove that an ISV supplies an inference capability, require every described component, expand declared ownership, or override pinned validation contracts.",
+            "For each Inference Reference Architecture Mermaid visual, read the appended agent-readable description together with the preserved original diagram. Treat both as reference guidance, never as empirical or authoritative ISV evidence.",
             "Ownership fields are suggestions for SME review; never add domains or invent scope beyond the declared domains.",
             "Prior-run artifacts are empirical evidence of runtime behavior; when they conflict with declared sources or profile claims, trust the run results.",
             "Never place credential values in source, patches, prompts, reports, or logs.",
         ],
         "items": [_jsonable(asdict(item)) for item in items],
-        "budget": {"max_chars": max_chars, "used_chars": used, "omitted_items": omitted},
+        "budget": {"max_chars": None, "used_chars": used, "omitted_items": 0},
     }
     _validate_against_schema(pack, "qualify-pack.schema.json", "qualify pack")
     return pack
@@ -1115,6 +1119,8 @@ def _sync_source(
         text = _decode_bytes(raw, source.location)
         if _looks_like_html(text):
             text = _html_to_text(text)
+        if source.location == DEFAULT_INFERENCE_RA_URL:
+            text = _annotate_mermaid_visuals(text)
         return _record(source, source.location, _redact_text(text))
 
     paths = _source_paths(project, manifest_path, source)
@@ -1164,6 +1170,77 @@ def _fetch_ncp_software_reference_guide(fetcher: Fetcher) -> str:
     if len(content.encode("utf-8")) > MAX_SOURCE_BYTES:
         raise ContextError(f"NCP Software Reference Guide exceeds {MAX_SOURCE_BYTES} bytes")
     return content
+
+
+def _annotate_mermaid_visuals(markdown: str) -> str:
+    """Preserve every Mermaid diagram and append a complete prose rendering.
+
+    The official Inference RA publishes its visuals as Mermaid source. Models
+    receive that source unchanged plus deterministic node, group, and
+    relationship descriptions, so visual information is not lost in a
+    text-only qualification context.
+    """
+
+    def annotate(match: re.Match[str]) -> str:
+        diagram = match.group(1)
+        groups: list[tuple[str, str]] = []
+        for line in diagram.splitlines():
+            group = MERMAID_SUBGRAPH_RE.match(line)
+            if group:
+                groups.append(
+                    (
+                        group.group(1),
+                        _plain_mermaid_label(group.group(2) or group.group(3) or group.group(1)),
+                    )
+                )
+        group_aliases = {alias for alias, _label in groups}
+        aliases: dict[str, str] = {}
+        for node in MERMAID_NODE_RE.finditer(diagram):
+            if node.group(1) not in group_aliases:
+                aliases[node.group(1)] = _plain_mermaid_label(node.group(2) or node.group(3) or node.group(1))
+        relationships = [
+            _describe_mermaid_relationship(line.strip(), aliases)
+            for line in diagram.splitlines()
+            if _is_mermaid_relationship(line)
+        ]
+        description = [
+            "Agent-readable visual description:",
+            "Nodes: " + "; ".join(f"{alias} means {label}" for alias, label in aliases.items()) + ".",
+        ]
+        if groups:
+            description.append("Groups: " + "; ".join(label for _alias, label in groups) + ".")
+        if relationships:
+            description.append("Relationships: " + "; ".join(relationships) + ".")
+        return match.group(0) + "\n\n" + "\n".join(description)
+
+    return MERMAID_BLOCK_RE.sub(annotate, markdown)
+
+
+def _plain_mermaid_label(label: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<br\s*/?>", " — ", label, flags=re.IGNORECASE)).strip()
+
+
+def _is_mermaid_relationship(line: str) -> bool:
+    stripped = line.strip()
+    return bool(
+        stripped
+        and not stripped.startswith(("%%", "flowchart", "subgraph"))
+        and ("--" in stripped or ".->" in stripped)
+    )
+
+
+def _describe_mermaid_relationship(line: str, aliases: Mapping[str, str]) -> str:
+    described = line
+    for alias in sorted(aliases, key=len, reverse=True):
+        described = re.sub(rf"\b{re.escape(alias)}\b", aliases[alias], described)
+    described = re.sub(r"\s*<-->\s*", " has a bidirectional connection with ", described)
+    described = re.sub(
+        r"\s*-\.\s*([^.\n]+?)\s*\.-?>\s*",
+        r" has a dotted \1 relationship to ",
+        described,
+    )
+    described = re.sub(r"\s*-->\s*", " leads to ", described)
+    return re.sub(r"\s+", " ", described).strip()
 
 
 def _local_gap_items(
@@ -1260,8 +1337,8 @@ def _cached_items(
         )
         if record.trust == "authoritative" or (preserve_reference and record.trust == "reference"):
             # Qualification receives authoritative ISV evidence and reference
-            # architecture whole. Its budget fails closed instead of silently
-            # shortening either source.
+            # architecture whole. The generator boundary rejects a complete
+            # request it cannot carry instead of shortening either source.
             excerpt = text
         else:
             # Guidance earns its budget by matching the selected scope.

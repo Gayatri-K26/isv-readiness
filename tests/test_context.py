@@ -16,6 +16,7 @@ from isv_readiness.context import (
     sync_context_sources,
 )
 from isv_readiness.project import (
+    DEFAULT_INFERENCE_RA_URL,
     DEFAULT_NSRG_URL,
     build_bootstrap_plan,
     execute_bootstrap,
@@ -70,6 +71,7 @@ class ContextTests(unittest.TestCase):
             by_id = {record.source_id: record for record in records}
 
             self.assertEqual(by_id["nsrg"].status, "error")
+            self.assertEqual(by_id["inference_ra"].status, "error")
             self.assertEqual(by_id["primary_api_spec"].status, "synced")
             self.assertNotIn("validation_issues", by_id)
             self.assertNotIn("super-secret", json.dumps(by_id["primary_api_spec"].content))
@@ -356,6 +358,47 @@ class ContextTests(unittest.TestCase):
                 project, manifest, report, gap_id="gap_0123456789ab", cache_dir=cache, environment={}
             )
             self.assertNotIn("nsrg", [item.source_id for item in pack.items])
+
+    def test_inference_ra_is_preserved_whole_with_agent_readable_visuals(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            workspace, project, manifest = _project(Path(tempdir), existing_provider=True)
+            (workspace / "openapi.yaml").write_text("paths: {}\n", encoding="utf-8")
+            cache = workspace / ".gapctl" / "context-cache"
+            tail = "END-OF-INFERENCE-RA"
+            source = (
+                "# Inference RA\n\n"
+                "```mermaid\n"
+                "flowchart LR\n"
+                '    client["Client"]\n'
+                '    router["Dynamo Router"]\n'
+                '    workers["GPU Workers<br />Prefill And Decode"]\n'
+                '    evidence["Acceptance Evidence"]\n'
+                "    client --> router --> workers\n"
+                "    evidence -. gates .-> router\n"
+                "```\n\n"
+                + ("complete architecture context\n" * 700)
+                + tail
+            )
+
+            def fetcher(url: str, headers: dict[str, str]) -> bytes:
+                del headers
+                if url == DEFAULT_NSRG_URL:
+                    return _guide_index("introduction")
+                if url == DEFAULT_INFERENCE_RA_URL:
+                    return source.encode()
+                return b"VM lifecycle reference guidance."
+
+            sync_context_sources(project, manifest, cache, fetcher=fetcher)
+            raw = json.loads((cache / "inference_ra.json").read_text(encoding="utf-8"))
+            self.assertIn(tail, raw["content"])
+            self.assertIn("```mermaid", raw["content"])
+            self.assertIn("Agent-readable visual description:", raw["content"])
+            self.assertIn("client means Client", raw["content"])
+            self.assertIn("Client leads to Dynamo Router leads to GPU Workers", raw["content"])
+            self.assertIn(
+                "Acceptance Evidence has a dotted gates relationship to Dynamo Router",
+                raw["content"],
+            )
 
 
 def _guide_index(*slugs: str) -> bytes:

@@ -16,11 +16,13 @@ from isv_readiness.context import (
 from isv_readiness.fixes import FixGuardrailError
 from isv_readiness.generator_limits import (
     GENERATOR_ADAPTER_TIMEOUT_SECONDS,
+    MAX_GENERATOR_REQUEST_BYTES,
     MAX_GENERATOR_TIMEOUT_SECONDS,
 )
+from isv_readiness.generators import DEFAULT_GENERATOR_MAX_REQUEST_BYTES
 from isv_readiness.project import MINIMAL_PROCESS_ENV
 from isv_readiness.schema import load_schema
-from isv_readiness.subprocesses import run_captured
+from isv_readiness.subprocesses import CapturedIdleTimeout, run_captured
 
 DEFAULT_GENERATOR_TIMEOUT_SECONDS = GENERATOR_ADAPTER_TIMEOUT_SECONDS
 GENERATOR_PROCESS_ENV = (*MINIMAL_PROCESS_ENV, "USER")
@@ -42,6 +44,8 @@ def dispatch_generator(
     cwd: Path,
     pass_env: Sequence[str] = (),
     timeout_seconds: int = DEFAULT_GENERATOR_TIMEOUT_SECONDS,
+    idle_timeout_seconds: int | None = None,
+    max_request_bytes: int = DEFAULT_GENERATOR_MAX_REQUEST_BYTES,
     runner: GeneratorRunner | None = None,
     environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -55,6 +59,14 @@ def dispatch_generator(
         raise FixGuardrailError("Generator command must contain at least one non-empty argument.")
     if timeout_seconds < 1 or timeout_seconds > MAX_GENERATOR_TIMEOUT_SECONDS:
         raise FixGuardrailError(f"Generator timeout must be between 1 and {MAX_GENERATOR_TIMEOUT_SECONDS} seconds.")
+    if idle_timeout_seconds is not None and (
+        idle_timeout_seconds < 1 or idle_timeout_seconds > timeout_seconds
+    ):
+        raise FixGuardrailError("Generator idle timeout must be positive and no greater than its total timeout.")
+    if max_request_bytes < 1 or max_request_bytes > MAX_GENERATOR_REQUEST_BYTES:
+        raise FixGuardrailError(
+            f"Generator max request size must be between 1 and {MAX_GENERATOR_REQUEST_BYTES} bytes."
+        )
     source_env = environment if environment is not None else os.environ
     child_env = {
         name: source_env[name]
@@ -66,9 +78,30 @@ def dispatch_generator(
             raise FixGuardrailError("Generator environment inputs must be variable names, not assignments.")
         if source_env.get(name):
             child_env[name] = source_env[name]
-    run = runner or _default_runner
+    serialized_request = json.dumps(request, sort_keys=True)
+    request_bytes = len(serialized_request.encode("utf-8"))
+    if request_bytes > max_request_bytes:
+        raise GeneratorInfrastructureError(
+            f"Complete generator request is {request_bytes} bytes, exceeding this adapter's "
+            f"{max_request_bytes}-byte capability. Select an adapter with a larger context capacity; "
+            "the request was not truncated."
+        )
     try:
-        result = run(command, cwd.resolve(), json.dumps(request, sort_keys=True), child_env, timeout_seconds)
+        if runner is None:
+            result = _default_runner(
+                command,
+                cwd.resolve(),
+                serialized_request,
+                child_env,
+                timeout_seconds,
+                idle_timeout_seconds=idle_timeout_seconds,
+            )
+        else:
+            result = runner(command, cwd.resolve(), serialized_request, child_env, timeout_seconds)
+    except CapturedIdleTimeout as exc:
+        raise GeneratorInfrastructureError(
+            f"Generator adapter produced no output for {idle_timeout_seconds} seconds."
+        ) from exc
     except subprocess.TimeoutExpired as exc:
         raise GeneratorInfrastructureError(
             f"Generator adapter timed out after {timeout_seconds} seconds."
@@ -99,6 +132,8 @@ def run_generator(
     cwd: Path,
     pass_env: Sequence[str] = (),
     timeout_seconds: int = DEFAULT_GENERATOR_TIMEOUT_SECONDS,
+    idle_timeout_seconds: int | None = None,
+    max_request_bytes: int = DEFAULT_GENERATOR_MAX_REQUEST_BYTES,
     runner: GeneratorRunner | None = None,
     environment: Mapping[str, str] | None = None,
 ) -> ChangeSet:
@@ -154,6 +189,8 @@ def run_generator(
         cwd=cwd,
         pass_env=pass_env,
         timeout_seconds=timeout_seconds,
+        idle_timeout_seconds=idle_timeout_seconds,
+        max_request_bytes=max_request_bytes,
         runner=runner,
         environment=environment,
     )
@@ -171,6 +208,8 @@ def _default_runner(
     request: str,
     environment: Mapping[str, str],
     timeout_seconds: int,
+    *,
+    idle_timeout_seconds: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return run_captured(
         command,
@@ -178,4 +217,5 @@ def _default_runner(
         input_text=request,
         environment=environment,
         timeout_seconds=timeout_seconds,
+        idle_timeout_seconds=idle_timeout_seconds,
     )

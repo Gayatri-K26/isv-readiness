@@ -24,6 +24,7 @@ from isv_readiness.solution_profile import (
 PROJECT_SCHEMA_VERSION = "0.1.0"
 DEFAULT_VALIDATION_URL = "https://github.com/NVIDIA/ai-cloud-validation.git"
 DEFAULT_NSRG_URL = "https://docs.nvidia.com/dsx/ncp/llms.txt"
+DEFAULT_INFERENCE_RA_URL = "https://docs.nvidia.com/dsx/ncp/inference-ra/home.md"
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 MINIMAL_PROCESS_ENV = ("HOME", "PATH", "SSL_CERT_FILE", "TMPDIR")
 
@@ -264,6 +265,16 @@ def execute_bootstrap(
             labels=(),
             query=None,
         ),
+        ContextSource(
+            id="inference_ra",
+            kind="web_url",
+            location=DEFAULT_INFERENCE_RA_URL,
+            trust="reference",
+            required=True,
+            domains=plan.domains,
+            labels=("inference", "reference_architecture"),
+            query=None,
+        ),
     ]
     if plan.api_base_url or plan.api_spec:
         apis = (
@@ -328,12 +339,42 @@ def execute_bootstrap(
 def load_project(path: Path) -> ReadinessProject:
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     validate_project(raw)
+    domains = tuple(raw["assessment"]["domains"])
+    context_sources = tuple(
+        ContextSource(
+            id=item["id"],
+            kind=item["kind"],
+            location=item["location"],
+            trust=item["trust"],
+            required=item["required"],
+            domains=tuple(item["domains"]),
+            labels=tuple(item["labels"]),
+            query=item["query"],
+        )
+        for item in raw["context_sources"]
+    )
+    if not any(
+        source.id == "inference_ra" or source.location == DEFAULT_INFERENCE_RA_URL
+        for source in context_sources
+    ):
+        context_sources += (
+            ContextSource(
+                id="inference_ra",
+                kind="web_url",
+                location=DEFAULT_INFERENCE_RA_URL,
+                trust="reference",
+                required=True,
+                domains=domains,
+                labels=("inference", "reference_architecture"),
+                query=None,
+            ),
+        )
     return ReadinessProject(
         schema_version=raw["schema_version"],
         validation=ValidationCheckout(**raw["validation"]),
         provider=ProviderProject(**raw["provider"]),
         assessment=Assessment(
-            domains=tuple(raw["assessment"]["domains"]),
+            domains=domains,
             profile=raw["assessment"]["profile"],
         ),
         apis=tuple(
@@ -348,19 +389,7 @@ def load_project(path: Path) -> ReadinessProject:
             )
             for item in raw["apis"]
         ),
-        context_sources=tuple(
-            ContextSource(
-                id=item["id"],
-                kind=item["kind"],
-                location=item["location"],
-                trust=item["trust"],
-                required=item["required"],
-                domains=tuple(item["domains"]),
-                labels=tuple(item["labels"]),
-                query=item["query"],
-            )
-            for item in raw["context_sources"]
-        ),
+        context_sources=context_sources,
         execution=ExecutionPolicy(
             run_environment=raw["execution"]["run_environment"],
             allow_live_runs=raw["execution"]["allow_live_runs"],

@@ -51,6 +51,17 @@ class GeneratorAdapterTests(unittest.TestCase):
                 runner=timed_out,
             )
 
+    def test_rejects_adapter_request_limit_without_truncating_context(self) -> None:
+        request = {"complete_context": "x" * 100}
+        with self.assertRaisesRegex(GeneratorInfrastructureError, "was not truncated"):
+            dispatch_generator(
+                request,
+                command=["fixture"],
+                cwd=Path("/tmp"),
+                max_request_bytes=20,
+                runner=lambda *args: self.fail("oversized request must not invoke the adapter"),
+            )
+
     def test_nonzero_generator_exit_reports_the_actual_error_tail(self) -> None:
         def failed(command, cwd, request, environment, timeout):
             del cwd, request, environment, timeout

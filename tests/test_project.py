@@ -9,6 +9,7 @@ import jsonschema
 import yaml
 
 from isv_readiness.project import (
+    DEFAULT_INFERENCE_RA_URL,
     DEFAULT_NSRG_URL,
     ProjectError,
     build_bootstrap_plan,
@@ -53,9 +54,15 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertEqual(project.provider.state, "existing")
             self.assertFalse(project.execution.allow_live_runs)
             self.assertEqual(project.apis[0].auth_env, ("ACME_TOKEN",))
-            self.assertEqual([source.id for source in project.context_sources], ["nsrg", "primary_api_spec"])
+            self.assertEqual(
+                [source.id for source in project.context_sources],
+                ["nsrg", "inference_ra", "primary_api_spec"],
+            )
             self.assertEqual(project.context_sources[0].location, DEFAULT_NSRG_URL)
             self.assertTrue(project.context_sources[0].required)
+            self.assertEqual(project.context_sources[1].location, DEFAULT_INFERENCE_RA_URL)
+            self.assertEqual(project.context_sources[1].trust, "reference")
+            self.assertTrue(project.context_sources[1].required)
             profile = load_solution_profile(project.resolve_path(plan.manifest_path, project.assessment.profile))
             self.assertEqual(profile.resolve("vm").action, "implement_or_fix_adapter")
             self.assertEqual(load_project(plan.manifest_path), project)
@@ -85,6 +92,32 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertTrue(commands[0][:4] == ("git", "clone", "--branch", "main"))
             self.assertEqual(project.provider.state, "new")
             self.assertTrue(plan.manifest_path.exists())
+
+    def test_loading_legacy_project_adds_standard_inference_reference_in_memory(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            workspace = Path(tempdir) / "workspace"
+            checkout = workspace / "ai-cloud-validation"
+            _make_checkout(checkout, provider="acme")
+            plan = build_bootstrap_plan(
+                workspace,
+                provider_name="acme",
+                domains=["vm"],
+                validation_root=checkout,
+            )
+            execute_bootstrap(plan, runner=_git_runner)
+            raw = yaml.safe_load(plan.manifest_path.read_text(encoding="utf-8"))
+            raw["context_sources"] = [
+                source for source in raw["context_sources"] if source["id"] != "inference_ra"
+            ]
+            plan.manifest_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+            loaded = load_project(plan.manifest_path)
+
+            inference = next(source for source in loaded.context_sources if source.id == "inference_ra")
+            self.assertEqual(inference.location, DEFAULT_INFERENCE_RA_URL)
+            self.assertEqual(inference.domains, ("vm",))
+            persisted = yaml.safe_load(plan.manifest_path.read_text(encoding="utf-8"))
+            self.assertNotIn("inference_ra", [source["id"] for source in persisted["context_sources"]])
 
     def test_rejects_secret_values_as_credential_names_and_bad_checkouts(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
