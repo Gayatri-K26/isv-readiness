@@ -237,6 +237,7 @@ def cmd_validate(
         print(str(exc), file=sys.stderr)
         return 2
     for domain in project.assessment.domains:
+        print(f"\n--- {domain} ---")
         work_dir = project_path.parent / ".gapctl" / "work" / domain
         while True:
             try:
@@ -377,7 +378,8 @@ def _pending_review(work_dir: Path, domain: str) -> AutoReview | None:
             changed_files=(),
             reason=str(raw["reason"]),
         )
-    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        print(f"Warning: stored {domain} review state unreadable ({exc}); regenerating.", file=sys.stderr)
         return None
 
 

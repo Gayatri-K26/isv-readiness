@@ -7,8 +7,11 @@ import json
 import math
 import os
 import re
+import time
+import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from html.parser import HTMLParser
 from pathlib import Path
@@ -267,8 +270,12 @@ def load_context_records(cache_dir: Path) -> tuple[ContextRecord, ...]:
     for path in sorted(cache_dir.glob("*.json")):
         if path.name == "index.json":
             continue
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        records.append(ContextRecord(**raw))
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            records.append(ContextRecord(**raw))
+        except (json.JSONDecodeError, KeyError, TypeError):
+            # Stale or corrupt cache file; context_cache_is_current will detect the mismatch
+            continue
     return tuple(records)
 
 
@@ -1121,7 +1128,7 @@ def _sync_source(
             text = _html_to_text(text)
         if source.location == DEFAULT_INFERENCE_RA_URL:
             text = _annotate_mermaid_visuals(text)
-        return _record(source, source.location, _redact_text(text))
+        return _record(source, source.location, redact_text(text))
 
     paths = _source_paths(project, manifest_path, source)
     if source.kind == "local_tree":
@@ -1163,9 +1170,11 @@ def _fetch_ncp_software_reference_guide(fetcher: Fetcher) -> str:
         raise ContextError(f"NCP guide index listed no software-reference pages: {DEFAULT_NSRG_URL}")
 
     sections = [f"# Complete NCP Software Reference Guide\n\nIndex: {DEFAULT_NSRG_URL}\nPages: {len(pages)}"]
-    for title, url in pages:
-        page = _decode_bytes(fetcher(url, headers), url)
-        sections.append(f"# {title}\n\nSource: {url}\n\n{_redact_text(page)}")
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        fetched = list(pool.map(lambda args: fetcher(args[1], headers), pages))
+    for (title, url), raw in zip(pages, fetched):
+        page = _decode_bytes(raw, url)
+        sections.append(f"# {title}\n\nSource: {url}\n\n{redact_text(page)}")
     content = "\n\n---\n\n".join(sections)
     if len(content.encode("utf-8")) > MAX_SOURCE_BYTES:
         raise ContextError(f"NCP Software Reference Guide exceeds {MAX_SOURCE_BYTES} bytes")
@@ -1409,7 +1418,7 @@ def _read_text(path: Path) -> str:
     raw = path.read_bytes()
     if len(raw) > MAX_SOURCE_BYTES:
         raise ContextError(f"Context file exceeds {MAX_SOURCE_BYTES} bytes: {path}")
-    return _redact_text(raw.decode("utf-8"))
+    return redact_text(raw.decode("utf-8"))
 
 
 def _read_capped_tail(path: Path) -> str:
@@ -1420,7 +1429,7 @@ def _read_capped_tail(path: Path) -> str:
     rather than fatal.
     """
     raw = path.read_bytes()[-MAX_SOURCE_BYTES:]
-    return _redact_text(raw.decode("utf-8", errors="replace"))
+    return redact_text(raw.decode("utf-8", errors="replace"))
 
 
 def _decode_bytes(raw: bytes, origin: str) -> str:
@@ -1472,16 +1481,11 @@ class _VisibleTextParser(HTMLParser):
             self.chunks.append(data.strip())
 
 
-def _redact_text(text: str) -> str:
+def redact_text(text: str) -> str:
     text = PRIVATE_KEY_RE.sub("[REDACTED PRIVATE KEY]", text)
     text = SECRET_ASSIGNMENT_RE.sub(r"\1[REDACTED]", text)
     text = BEARER_RE.sub("Bearer [REDACTED]", text)
     return AWS_KEY_RE.sub("[REDACTED AWS KEY]", text)
-
-
-def redact_text(text: str) -> str:
-    """Redact common credential forms before persisting external command output."""
-    return _redact_text(text)
 
 
 def _decode_json_or_text(text: str) -> Any:
@@ -1573,7 +1577,7 @@ def _jsonable(value: Any) -> Any:
 
 def _redact_content(value: Any) -> Any:
     if isinstance(value, str):
-        return _redact_text(value)
+        return redact_text(value)
     if isinstance(value, list):
         return [_redact_content(item) for item in value]
     if isinstance(value, dict):
@@ -1589,9 +1593,17 @@ def _redact_content(value: Any) -> Any:
 
 
 def _fetch_url(url: str, headers: Mapping[str, str]) -> bytes:
-    request = urllib.request.Request(url, headers=dict(headers))
-    with urllib.request.urlopen(request, timeout=30) as response:
-        return response.read(MAX_SOURCE_BYTES + 1)
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        if attempt:
+            time.sleep(2 ** attempt)
+        try:
+            request = urllib.request.Request(url, headers=dict(headers))
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return response.read(MAX_SOURCE_BYTES + 1)
+        except urllib.error.URLError as exc:
+            last_exc = exc
+    raise ContextError(f"Failed to fetch {url} after 3 attempts: {last_exc}") from last_exc
 
 
 def _unexpected_cache_check_fetch(url: str, headers: Mapping[str, str]) -> bytes:

@@ -273,6 +273,9 @@ def _call_name(node: ast.AST) -> str:
 
 
 def _shell_environment_names(text: str) -> set[str]:
+    # Intentionally uppercase-only: all provider credential and API env vars must be uppercase
+    # by convention. Lowercase references ($path, $home) are ignored; they represent shell
+    # internals or script-local variables that are not part of the provider env contract.
     names = set(re.findall(r"\$\{([A-Z_][A-Z0-9_]*)[^}]*\}", text))
     names.update(re.findall(r"(?<!\$)\$([A-Z_][A-Z0-9_]*)", text))
     return names

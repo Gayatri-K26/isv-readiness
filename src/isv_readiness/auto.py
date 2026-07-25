@@ -594,13 +594,14 @@ def _scan(provider_repo: Path, validation_root: Path, domain: str, profile) -> d
     return report.to_dict()
 
 
-def _load_profile(project: ReadinessProject, project_path: Path):
+def _load_profile(project: ReadinessProject, project_path: Path) -> Any:
     if not project.assessment.profile:
         return None
     return load_solution_profile(project.resolve_path(project_path, project.assessment.profile))
 
 
 def _changed_files(original: Path, scratch: Path) -> list[ChangedFile]:
+    # Deletions are outside the allowed change-set schema; only additions and replacements are tracked.
     changed: list[ChangedFile] = []
     for candidate in sorted(scratch.rglob("*")):
         if not candidate.is_file():

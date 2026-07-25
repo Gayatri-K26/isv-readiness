@@ -131,7 +131,6 @@ def build_change_proposal(
     allowed_environment: Sequence[str] | None = None,
     contract_constraints: Mapping[str, float] | None = None,
 ) -> ChangeProposal:
-    validate_change_set(change_set.to_dict())
     row = select_gap(report, change_set.gap_id)
     _authorize_selected_gap(row, change_set.gap_id)
     domain_value = row.get("domain")
