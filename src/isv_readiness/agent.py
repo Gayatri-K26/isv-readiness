@@ -270,6 +270,16 @@ def _prepare_next_change(
         pass_env=generator_pass_env,
         runner=generator_runner,
         environment=environment,
+        protected_roots=(
+            project_path,
+            project.validation_root(project_path),
+            project.provider_root(project_path),
+            *(
+                (project.resolve_path(project_path, project.assessment.profile),)
+                if project.assessment.profile
+                else ()
+            ),
+        ),
     )
     changes_path = work_dir / f"changes-{state.iteration:03d}-{gap_id}.json"
     _write_json(changes_path, change_set.to_dict())

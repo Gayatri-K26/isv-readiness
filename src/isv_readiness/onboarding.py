@@ -24,6 +24,7 @@ DOMAIN_CONFIG_FILES = {
     "observability": "observability.yaml",
     "security": "security.yaml",
     "slurm": "slurm.yaml",
+    "storage": "storage.yaml",
     "vm": "vm.yaml",
 }
 
@@ -65,6 +66,11 @@ DOMAIN_REQUIRED_INPUTS = {
     "slurm": (
         "Slurm controller access and test partition",
         "GPU scheduling, container runtime, and workload policy",
+    ),
+    "storage": (
+        "block, home-directory, and high-speed storage APIs or CLIs",
+        "test volume, snapshot, filesystem, quota, RDMA, and cleanup ownership",
+        "storage credentials, test capacity, and destructive-operation boundaries",
     ),
     "vm": (
         "VM lifecycle API and authentication",

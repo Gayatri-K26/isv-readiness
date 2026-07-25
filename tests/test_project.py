@@ -32,6 +32,24 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertTrue(plan.clone_required)
             self.assertEqual(plan.domains, ("vm", "kubernetes"))
 
+    def test_storage_is_a_supported_project_domain(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            workspace = Path(tempdir) / "workspace"
+            checkout = workspace / "ai-cloud-validation"
+            _make_checkout(checkout)
+            plan = build_bootstrap_plan(
+                workspace,
+                provider_name="acme",
+                domains=["storage"],
+                validation_root=checkout,
+            )
+
+            project = execute_bootstrap(plan, runner=_git_runner)
+
+            self.assertEqual(project.assessment.domains, ("storage",))
+            profile = load_solution_profile(project.resolve_path(plan.manifest_path, project.assessment.profile))
+            self.assertEqual(profile.domains[0].domain, "storage")
+
     def test_existing_checkout_writes_pinned_scoped_project(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             workspace = Path(tempdir) / "workspace"

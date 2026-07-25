@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,6 +18,24 @@ from isv_readiness.generator_limits import (
 
 
 class GeneratorAdapterTests(unittest.TestCase):
+    def test_callable_adapter_runs_outside_the_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            workspace = Path(tempdir)
+            adapter = workspace / "adapter.py"
+            adapter.write_text(
+                "import json, os\nprint(json.dumps({'cwd': os.getcwd()}))\n",
+                encoding="utf-8",
+            )
+
+            output = dispatch_generator(
+                {"output_schema": {}},
+                command=[sys.executable, str(adapter)],
+                cwd=workspace,
+            )
+
+            self.assertNotEqual(Path(output["cwd"]), workspace.resolve())
+            self.assertFalse(Path(output["cwd"]).exists())
+
     def test_generator_timeout_is_classified_as_infrastructure_failure(self) -> None:
         def timed_out(command, cwd, request, environment, timeout):
             del cwd, request, environment
@@ -74,6 +93,27 @@ class GeneratorAdapterTests(unittest.TestCase):
                 cwd=Path("/tmp"),
                 runner=failed,
             )
+
+    def test_generator_cannot_modify_protected_workspace_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            protected = Path(tempdir) / "provider"
+            protected.mkdir()
+            target = protected / "config.yaml"
+            target.write_text("original\n", encoding="utf-8")
+
+            def mutating_runner(command, cwd, request, environment, timeout):
+                del cwd, request, environment, timeout
+                target.write_text("bypassed review\n", encoding="utf-8")
+                return subprocess.CompletedProcess(command, 0, "{}", "")
+
+            with self.assertRaisesRegex(FixGuardrailError, "modified protected workspace content"):
+                dispatch_generator(
+                    {"output_schema": {}},
+                    command=["fixture"],
+                    cwd=Path(tempdir),
+                    runner=mutating_runner,
+                    protected_roots=[protected],
+                )
 
     def test_generator_receives_contract_and_returns_hash_bound_change_set(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:

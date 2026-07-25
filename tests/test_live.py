@@ -10,7 +10,13 @@ from unittest.mock import patch
 import jsonschema
 import yaml
 
-from isv_readiness.live import LiveRunError, _default_runner, _domain_config, run_live_domain
+from isv_readiness.live import (
+    LiveRunError,
+    _default_runner,
+    _domain_config,
+    _junit_validation_names,
+    run_live_domain,
+)
 from isv_readiness.project import build_bootstrap_plan, execute_bootstrap, load_project
 from isv_readiness.schema import load_schema
 
@@ -20,6 +26,23 @@ COMMIT = "c" * 40
 
 
 class LiveRunTests(unittest.TestCase):
+    def test_junit_coverage_ignores_injected_subtest_cases(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            junit = Path(tempdir) / "junit.xml"
+            junit.write_text(
+                '<testsuite tests="3">'
+                '<testcase name="test_validation[GpuCheck]" />'
+                '<testcase name="test_validation[GpuCheck]::gpu-0" />'
+                '<testcase name="StepSuccessCheck" />'
+                "</testsuite>",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                _junit_validation_names(junit),
+                ("GpuCheck", "StepSuccessCheck"),
+            )
+
     def test_default_runner_uses_process_group_cleanup_boundary(self) -> None:
         expected = subprocess.CompletedProcess(["isvctl"], 0, "output", None)
         environment = {"PATH": "/bin"}
@@ -130,8 +153,11 @@ class LiveRunTests(unittest.TestCase):
         cases = [
             # (junit body, expected success)
             (
-                '<testsuite tests="2">'
+                '<testsuite tests="5">'
                 '<testcase name="test_vm[InstanceCreatedCheck]" />'
+                '<testcase name="test_vm[InstanceListCheck]" />'
+                '<testcase name="test_vm[InstanceStateCheck]" />'
+                '<testcase name="test_vm[StepSuccessCheck]" />'
                 '<testcase name="test_vm[GpuCheck]"><skipped message="excluded by label: ssh" /></testcase>'
                 "</testsuite>",
                 True,
@@ -170,6 +196,42 @@ class LiveRunTests(unittest.TestCase):
                     environment={"PATH": "/bin", "HOME": "/home/test", "ACME_TOKEN": "x", "ACME_REGION": "west"},
                 )
                 self.assertEqual(result.success, expected, f"junit={junit_body[:60]}")
+
+    def test_full_domain_run_fails_closed_when_junit_omits_expected_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            project, manifest = _project(Path(tempdir), allow_live=True)
+
+            def runner(command, cwd, environment, timeout):
+                del cwd, environment, timeout
+                junit = Path(command[command.index("--junitxml") + 1])
+                junit.write_text(
+                    '<testsuite tests="1"><testcase name="test_vm[InstanceCreatedCheck]" /></testsuite>',
+                    encoding="utf-8",
+                )
+                return subprocess.CompletedProcess(command, 0, "PASS\n", "")
+
+            result = run_live_domain(
+                project,
+                manifest,
+                domain="vm",
+                artifacts_dir=Path(tempdir) / "artifacts",
+                explicit_authorization=True,
+                runner=runner,
+                commit_resolver=lambda root: COMMIT,
+                environment={"PATH": "/bin", "HOME": "/home/test", "ACME_TOKEN": "x", "ACME_REGION": "west"},
+            )
+
+            missing = [
+                row
+                for row in result.report["rows"]
+                if row.get("enrichment", {}).get("contract_error") == "missing_junit_result"
+            ]
+            self.assertFalse(result.success)
+            self.assertEqual(
+                {row["validation_class"] for row in missing},
+                {"InstanceListCheck", "InstanceStateCheck", "StepSuccessCheck"},
+            )
+            self.assertIn("error", result.selected_statuses)
 
     def test_live_run_rejects_checkout_drift_and_missing_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:

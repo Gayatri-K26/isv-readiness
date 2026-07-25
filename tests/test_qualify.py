@@ -126,9 +126,9 @@ def _draft_runner(payload: Mapping) -> object:
 class QualifyCatalogTests(unittest.TestCase):
     def test_catalog_distills_checks_and_canonicalizes_domains(self) -> None:
         adapter = IsvctlAdapter(Path("/tmp"), runner=_isvctl_runner)
-        catalog = build_qualify_catalog(adapter, ["vm", "k8s"])
+        catalog = build_qualify_catalog(adapter, ["vm", "k8s", "storage"])
 
-        self.assertEqual(sorted(catalog["domains"]), ["kubernetes", "vm"])
+        self.assertEqual(sorted(catalog["domains"]), ["kubernetes", "storage", "vm"])
         vm = catalog["domains"]["vm"]
         self.assertEqual(vm["suite"], "isvctl/configs/suites/vm.yaml")
         self.assertEqual(vm["steps"], ["launch_instance", "terminate_instance"])
@@ -137,6 +137,10 @@ class QualifyCatalogTests(unittest.TestCase):
         self.assertEqual(by_name["VmLaunchCheck"]["category"], "vm")
         self.assertEqual(by_name["VmLaunchCheck-terminate"]["check"], "VmLaunchCheck")
         self.assertEqual(by_name["VmLaunchCheck"]["description"], CATALOG_PAYLOAD["entries"][0]["description"])
+        self.assertEqual(
+            catalog["domains"]["storage"]["suite"],
+            "isvctl/configs/suites/storage.yaml",
+        )
 
     def test_catalog_rejects_unknown_domain(self) -> None:
         adapter = IsvctlAdapter(Path("/tmp"), runner=_isvctl_runner)

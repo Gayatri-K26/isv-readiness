@@ -169,6 +169,11 @@ The generator never writes the provider directly. It returns a schema-valid
 change set bound to the context pack hash. Verification applies the change in a
 scratch copy and rescans it. The operator sees one combined patch per domain.
 Application recomputes the patch and refuses any hash mismatch.
+Callable adapters execute from an empty temporary working directory. Before and
+after every successful, failed, or timed-out adapter call, gapctl fingerprints
+the manifest, reviewed profile, provider tree, validation tree, and any active
+scratch provider. A direct mutation outside the JSON response is a guardrail
+failure and the candidate cannot advance to review or application.
 Scaffolding keeps every generated domain config inside the provider directory,
 including `config/kubernetes.yaml`, so scratch verification and atomic apply
 operate on one complete provider-owned tree. The scanner and live runner can

@@ -144,6 +144,12 @@ schema-valid response JSON object to stdout can be selected directly:
 gapctl qualify --generator /opt/company/bin/gapctl-internal-agent
 ```
 
+Callable adapters run from an empty temporary working directory. They must not
+write the project, provider, pinned validation checkout, reviewed profile, or
+scratch provider directly; gapctl fingerprints those protected paths around
+each call and rejects any adapter that bypasses the JSON change-set protocol.
+Use absolute paths for adapter scripts and other file arguments.
+
 Reusable local adapters are registered outside the ISV project in
 `~/.config/gapctl/generators.yaml` (or the path named by
 `GAPCTL_GENERATORS_CONFIG`):

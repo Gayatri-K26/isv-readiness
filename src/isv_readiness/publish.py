@@ -35,6 +35,7 @@ _DOMAIN_TO_PLATFORM = {
     "image_registry": "IMAGE_REGISTRY",
     "observability": "OBSERVABILITY",
     "security": "SECURITY",
+    "storage": "STORAGE",
 }
 CommitResolver = Callable[[Path], str]
 

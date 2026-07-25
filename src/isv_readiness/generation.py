@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -26,6 +28,7 @@ from isv_readiness.subprocesses import CapturedIdleTimeout, run_captured
 
 DEFAULT_GENERATOR_TIMEOUT_SECONDS = GENERATOR_ADAPTER_TIMEOUT_SECONDS
 GENERATOR_PROCESS_ENV = (*MINIMAL_PROCESS_ENV, "USER")
+_SNAPSHOT_IGNORED_DIRS = frozenset({".git", ".venv", "__pycache__", ".pytest_cache", "node_modules"})
 
 GeneratorRunner = Callable[
     [Sequence[str], Path, str, Mapping[str, str], int],
@@ -48,6 +51,7 @@ def dispatch_generator(
     max_request_bytes: int = DEFAULT_GENERATOR_MAX_REQUEST_BYTES,
     runner: GeneratorRunner | None = None,
     environment: Mapping[str, str] | None = None,
+    protected_roots: Sequence[Path] = (),
 ) -> dict[str, Any]:
     """Run a generator adapter under the shared guardrails and return its JSON object.
 
@@ -86,26 +90,34 @@ def dispatch_generator(
             f"{max_request_bytes}-byte capability. Select an adapter with a larger context capacity; "
             "the request was not truncated."
         )
+    protected_before = _snapshot_protected_roots(protected_roots)
     try:
         if runner is None:
-            result = _default_runner(
-                command,
-                cwd.resolve(),
-                serialized_request,
-                child_env,
-                timeout_seconds,
-                idle_timeout_seconds=idle_timeout_seconds,
-            )
+            with tempfile.TemporaryDirectory(prefix="gapctl-generator-") as tempdir:
+                result = _default_runner(
+                    command,
+                    Path(tempdir),
+                    serialized_request,
+                    child_env,
+                    timeout_seconds,
+                    idle_timeout_seconds=idle_timeout_seconds,
+                )
         else:
             result = runner(command, cwd.resolve(), serialized_request, child_env, timeout_seconds)
     except CapturedIdleTimeout as exc:
+        _reject_protected_root_mutation(protected_before, protected_roots)
         raise GeneratorInfrastructureError(
             f"Generator adapter produced no output for {idle_timeout_seconds} seconds."
         ) from exc
     except subprocess.TimeoutExpired as exc:
+        _reject_protected_root_mutation(protected_before, protected_roots)
         raise GeneratorInfrastructureError(
             f"Generator adapter timed out after {timeout_seconds} seconds."
         ) from exc
+    except BaseException:
+        _reject_protected_root_mutation(protected_before, protected_roots)
+        raise
+    _reject_protected_root_mutation(protected_before, protected_roots)
     if result.returncode != 0:
         details = (result.stderr or result.stdout or "").strip()
         if len(details) > 2000:
@@ -136,6 +148,7 @@ def run_generator(
     max_request_bytes: int = DEFAULT_GENERATOR_MAX_REQUEST_BYTES,
     runner: GeneratorRunner | None = None,
     environment: Mapping[str, str] | None = None,
+    protected_roots: Sequence[Path] = (),
 ) -> ChangeSet:
     gap = context_pack.get("gap") or {}
     gap_id = gap.get("id")
@@ -193,6 +206,7 @@ def run_generator(
         max_request_bytes=max_request_bytes,
         runner=runner,
         environment=environment,
+        protected_roots=protected_roots,
     )
     validate_change_set(raw)
     if raw["gap_id"] != gap_id:
@@ -219,3 +233,68 @@ def _default_runner(
         timeout_seconds=timeout_seconds,
         idle_timeout_seconds=idle_timeout_seconds,
     )
+
+
+def _snapshot_protected_roots(paths: Sequence[Path]) -> dict[str, str]:
+    """Hash protected workspace content without following mutable dependency trees."""
+    snapshot: dict[str, str] = {}
+    for index, raw_root in enumerate(paths):
+        root = raw_root.expanduser().resolve()
+        prefix = f"{index}:{root}"
+        if not root.exists():
+            snapshot[prefix] = "<missing>"
+            continue
+        if root.is_file() or root.is_symlink():
+            snapshot[prefix] = _path_digest(root)
+            continue
+        snapshot[prefix] = "<directory>"
+        for current, dirnames, filenames in os.walk(root, followlinks=False):
+            dirnames[:] = sorted(name for name in dirnames if name not in _SNAPSHOT_IGNORED_DIRS)
+            current_path = Path(current)
+            for name in dirnames:
+                path = current_path / name
+                relative = path.relative_to(root)
+                snapshot[f"{prefix}/{relative.as_posix()}"] = (
+                    _path_digest(path) if path.is_symlink() else "<directory>"
+                )
+            for name in sorted(filenames):
+                path = current_path / name
+                relative = path.relative_to(root)
+                snapshot[f"{prefix}/{relative.as_posix()}"] = _path_digest(path)
+    return snapshot
+
+
+def _path_digest(path: Path) -> str:
+    if path.is_symlink():
+        return "symlink:" + os.readlink(path)
+    digest = hashlib.sha256()
+    try:
+        mode = path.stat().st_mode & 0o777
+        digest.update(f"mode:{mode:o}\0".encode())
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        raise FixGuardrailError(f"Could not fingerprint protected generator path {path}: {exc}") from exc
+    return digest.hexdigest()
+
+
+def _reject_protected_root_mutation(
+    before: Mapping[str, str],
+    paths: Sequence[Path],
+) -> None:
+    if not paths:
+        return
+    after = _snapshot_protected_roots(paths)
+    changed = sorted(
+        key
+        for key in before.keys() | after.keys()
+        if before.get(key) != after.get(key)
+    )
+    if changed:
+        examples = ", ".join(changed[:5])
+        extra = f" and {len(changed) - 5} more" if len(changed) > 5 else ""
+        raise FixGuardrailError(
+            "Generator adapter modified protected workspace content outside its JSON response: "
+            f"{examples}{extra}. The candidate was rejected; inspect and revert those direct changes."
+        )

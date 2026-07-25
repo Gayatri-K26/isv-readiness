@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import subprocess
+import xml.etree.ElementTree as ElementTree
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
@@ -18,7 +20,7 @@ from isv_readiness.project import MINIMAL_PROCESS_ENV, ReadinessProject
 from isv_readiness.scan.dynamic import DynamicArtifacts, scan_dynamic_artifacts
 from isv_readiness.scan.k8s_dynamic import K8sDynamicArtifacts, scan_k8s_artifacts
 from isv_readiness.scan.k8s_scope import load_k8s_scope
-from isv_readiness.scan.models import GapReport
+from isv_readiness.scan.models import Evidence, GapReport, GapRow, Remediation
 from isv_readiness.scan.profile import enrich_report_with_profile
 from isv_readiness.scan.scanner import ScanOptions, scan_provider
 from isv_readiness.schema import load_schema
@@ -28,6 +30,7 @@ from isv_readiness.validation_adapter import IsvctlAdapter
 
 LIVE_RUN_VERSION = "0.1.0"
 SELECTION_RE = re.compile(r"^[A-Za-z0-9_.\[\]-]+$")
+_JUNIT_VALIDATION_RE = re.compile(r"\[([^\]]+)\]")
 PROFILE_SKIP_ACTIONS = {"skip_with_rationale", "request_external_adapter"}
 LiveRunner = Callable[[Sequence[str], Path, Mapping[str, str], int], subprocess.CompletedProcess[str]]
 CommitResolver = Callable[[Path], str]
@@ -178,6 +181,19 @@ def run_live_domain(
                     static_rows=tuple(static_report.rows),
                 )
             )
+    expected_rows = _expected_dynamic_rows(
+        scoped_static_report,
+        excluded_validations=excluded_validations,
+        selection=selection,
+    )
+    dynamic_rows.extend(
+        _missing_junit_rows(
+            expected_rows,
+            _junit_validation_names(junit),
+            provider_root=provider_root,
+            config=config,
+        )
+    )
     report = GapReport(
         schema_version=static_report.schema_version,
         provider_repo=static_report.provider_repo,
@@ -246,6 +262,128 @@ def _same_validation(selection: str, validation_class: str | None) -> bool:
         selection == validation_class
         or selection.startswith(f"{validation_class}-")
         or validation_class.startswith(f"{selection}-")
+    )
+
+
+def _expected_dynamic_rows(
+    report: GapReport,
+    *,
+    excluded_validations: Sequence[str],
+    selection: str | None,
+) -> list[GapRow]:
+    """Return every in-scope validation occurrence that must reach JUnit."""
+    excluded = set(excluded_validations)
+    expected: list[GapRow] = []
+    for row in report.rows:
+        name = row.validation_class
+        if (
+            not name
+            or name in {"StepOutputSchema", "ValidationConfigContract"}
+            or name in excluded
+            or row.enrichment.get("execution_adapter") is not None
+        ):
+            continue
+        if selection is not None and not _same_validation(selection, name):
+            continue
+        expected.append(row)
+    return expected
+
+
+def _missing_junit_rows(
+    expected_rows: Sequence[GapRow],
+    actual_names: Sequence[str],
+    *,
+    provider_root: Path,
+    config: Path,
+) -> list[GapRow]:
+    """Create blocking contract rows for expected occurrences absent from JUnit."""
+    remaining = list(expected_rows)
+    for actual in actual_names:
+        exact = next(
+            (index for index, row in enumerate(remaining) if row.validation_class == actual),
+            None,
+        )
+        compatible = (
+            exact
+            if exact is not None
+            else next(
+                (
+                    index
+                    for index, row in enumerate(remaining)
+                    if _same_validation(actual, row.validation_class)
+                ),
+                None,
+            )
+        )
+        if compatible is not None:
+            remaining.pop(compatible)
+
+    return [
+        _missing_junit_row(
+            expected,
+            provider_root=provider_root,
+            config=config,
+        )
+        for expected in remaining
+    ]
+
+
+def _junit_validation_names(path: Path) -> tuple[str, ...]:
+    """Return terminal validation testcase names, excluding injected subtests."""
+    try:
+        tree = ElementTree.parse(path)
+    except (OSError, ElementTree.ParseError):
+        return ()
+    names: list[str] = []
+    for case in tree.iter("testcase"):
+        raw_name = case.get("name") or ""
+        if not raw_name or "::" in raw_name:
+            continue
+        match = _JUNIT_VALIDATION_RE.search(raw_name)
+        names.append(match.group(1) if match else raw_name)
+    return tuple(names)
+
+
+def _missing_junit_row(
+    expected: GapRow,
+    *,
+    provider_root: Path,
+    config: Path,
+) -> GapRow:
+    name = expected.validation_class or "<unknown>"
+    identity = f"{expected.id}|missing-junit"
+    gap_id = "gap_" + hashlib.sha1(identity.encode("utf-8")).hexdigest()[:12]
+    try:
+        config_path = str(config.resolve().relative_to(provider_root.resolve()))
+    except ValueError:
+        config_path = str(config)
+    enrichment = dict(expected.enrichment)
+    enrichment["contract_error"] = "missing_junit_result"
+    return GapRow(
+        id=gap_id,
+        domain=expected.domain,
+        step_name=expected.step_name,
+        validation_class=name,
+        requirement_id=expected.requirement_id,
+        status="error",
+        detection="dynamic",
+        stage="coverage",
+        evidence=Evidence(
+            message=(
+                f"{name} was selected by the reviewed validation contract but "
+                "no terminal testcase appeared in JUnit."
+            ),
+            validation_message="missing_junit_result",
+            schema_errors=["Expected validation occurrence is absent from JUnit."],
+            config_path=config_path,
+        ),
+        remediation=Remediation(
+            auto_fixable=False,
+            target=None,
+            rerun_command=f"isvctl test run -f {config_path}",
+        ),
+        enrichment=enrichment,
+        labels=expected.labels,
     )
 
 

@@ -516,6 +516,17 @@ def _generate(
         max_request_bytes=generator_max_request_bytes,
         runner=generator_runner,
         environment=environment,
+        protected_roots=(
+            project_path,
+            project.validation_root(project_path),
+            project.provider_root(project_path),
+            scratch,
+            *(
+                (project.resolve_path(project_path, project.assessment.profile),)
+                if project.assessment.profile
+                else ()
+            ),
+        ),
     ), provider_contract_constraints(raw_context_pack)
 
 

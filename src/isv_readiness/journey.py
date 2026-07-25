@@ -113,6 +113,16 @@ def cmd_qualify(
                 idle_timeout_seconds=generator_spec.idle_timeout_seconds,
                 max_request_bytes=generator_spec.max_request_bytes,
                 runner=generator_runner,
+                protected_roots=(
+                    project_path,
+                    project.validation_root(project_path),
+                    project.provider_root(project_path),
+                    *(
+                        (project.resolve_path(project_path, project.assessment.profile),)
+                        if project.assessment.profile
+                        else ()
+                    ),
+                ),
             )
             proposal_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
         except GeneratorRequestExported as exc:

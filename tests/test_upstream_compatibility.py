@@ -19,6 +19,58 @@ FIXTURES = ROOT / "tests" / "fixtures"
 
 
 class UpstreamSuiteCompatibilityTests(unittest.TestCase):
+    def test_storage_and_hyphenated_domain_files_are_discovered(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            validation_root = Path(tempdir) / "ai-cloud-validation"
+            suites = validation_root / "isvctl" / "configs" / "suites"
+            provider = validation_root / "isvctl" / "configs" / "providers" / "acme"
+            config_dir = provider / "config"
+            suites.mkdir(parents=True)
+            config_dir.mkdir(parents=True)
+
+            domains = {
+                "storage": ("storage.yaml", "StorageContractCheck"),
+                "control_plane": ("control-plane.yaml", "ControlPlaneContractCheck"),
+                "image_registry": ("image-registry.yaml", "ImageRegistryContractCheck"),
+            }
+            for domain, (filename, check) in domains.items():
+                suite = {
+                    "version": "1.0",
+                    "tests": {
+                        "platform": domain,
+                        "validations": {"contract": {"checks": {check: {}}}},
+                    },
+                }
+                (suites / filename).write_text(
+                    yaml.safe_dump(suite, sort_keys=False),
+                    encoding="utf-8",
+                )
+                (config_dir / filename).write_text(
+                    yaml.safe_dump(
+                        {
+                            "import": f"../../../suites/{filename}",
+                            "version": "1.0",
+                            "tests": {"platform": domain},
+                        },
+                        sort_keys=False,
+                    ),
+                    encoding="utf-8",
+                )
+
+            report = scan_provider(
+                ScanOptions(
+                    provider_repo=provider,
+                    domains=list(domains),
+                    validation_root=validation_root,
+                )
+            )
+
+            self.assertFalse(any(row.step_name == "<config>" for row in report.rows))
+            self.assertEqual(
+                {row.validation_class for row in report.rows},
+                {check for _, check in domains.values()},
+            )
+
     def test_new_upstream_validation_is_preserved_and_routed_without_mutating_suite(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             validation_root = Path(tempdir) / "ai-cloud-validation"

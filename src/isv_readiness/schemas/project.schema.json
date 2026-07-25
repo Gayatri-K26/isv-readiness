@@ -35,7 +35,7 @@
       "properties": {
         "domains": {
           "type": "array",
-          "items": {"enum": ["bare_metal", "control_plane", "iam", "image_registry", "kubernetes", "network", "observability", "security", "slurm", "vm"]},
+          "items": {"enum": ["bare_metal", "control_plane", "iam", "image_registry", "kubernetes", "network", "observability", "security", "slurm", "storage", "vm"]},
           "minItems": 1,
           "uniqueItems": true
         },

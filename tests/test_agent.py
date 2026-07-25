@@ -225,8 +225,18 @@ def _refusal_runner(command, cwd, request, environment, timeout):
 def _live_runner(command, cwd, environment, timeout):
     del cwd, environment, timeout
     junit = Path(command[command.index("--junitxml") + 1])
+    cases = (
+        '<testcase name="test_vm[InstanceCreatedCheck]" />'
+        if "-k" in command
+        else (
+            '<testcase name="test_vm[InstanceCreatedCheck]" />'
+            '<testcase name="test_vm[InstanceListCheck]" />'
+            '<testcase name="test_vm[InstanceStateCheck]" />'
+            '<testcase name="test_vm[StepSuccessCheck]" />'
+        )
+    )
     junit.write_text(
-        '<testsuite tests="1"><testcase name="test_vm[InstanceCreatedCheck]" /></testsuite>',
+        f"<testsuite>{cases}</testsuite>",
         encoding="utf-8",
     )
     return subprocess.CompletedProcess(command, 0, "PASS\n", "")

@@ -22,6 +22,7 @@ class PublishTests(unittest.TestCase):
     def test_platform_mapping_uses_authoritative_domain_names(self) -> None:
         self.assertEqual(_platform_for_domain("network"), "NETWORK")
         self.assertEqual(_platform_for_domain("control_plane"), "CONTROL_PLANE")
+        self.assertEqual(_platform_for_domain("storage"), "STORAGE")
         with self.assertRaisesRegex(PublishError, "Cannot infer"):
             _platform_for_domain("unknown")
 

@@ -24,6 +24,7 @@ SUPPORTED_DOMAINS = frozenset(
         "observability",
         "security",
         "slurm",
+        "storage",
         "vm",
     }
 )

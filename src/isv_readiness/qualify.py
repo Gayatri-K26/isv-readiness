@@ -41,6 +41,7 @@ SUITE_FILENAMES = {
     "observability": "observability.yaml",
     "security": "security.yaml",
     "slurm": "slurm.yaml",
+    "storage": "storage.yaml",
     "vm": "vm.yaml",
 }
 
@@ -104,6 +105,7 @@ def run_profile_draft(
     max_request_bytes: int = DEFAULT_GENERATOR_MAX_REQUEST_BYTES,
     runner: GeneratorRunner | None = None,
     environment: Mapping[str, str] | None = None,
+    protected_roots: Sequence[Path] = (),
 ) -> dict[str, Any]:
     """Draft a solution profile from the qualify pack via a generator adapter.
 
@@ -143,6 +145,7 @@ def run_profile_draft(
         max_request_bytes=max_request_bytes,
         runner=runner,
         environment=environment,
+        protected_roots=protected_roots,
     )
     if isinstance(raw.get("solution"), dict):
         raw["solution"]["profile_status"] = "draft"

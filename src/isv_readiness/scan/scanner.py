@@ -26,6 +26,10 @@ from isv_readiness.scan.schema_registry import SchemaRegistry
 from isv_readiness.validation_adapter import normalize_catalog, normalize_validation_plan
 
 K8S_DOMAINS = {"k8s", "kubernetes"}
+DOMAIN_FILE_STEMS = {
+    "control_plane": "control-plane",
+    "image_registry": "image-registry",
+}
 VALIDATION_ONLY_STEP = "<validation>"
 VALIDATION_CONFIG_STEP = "<validation-config>"
 
@@ -548,11 +552,14 @@ def _is_k8s_domain(domain: str) -> bool:
 def _domain_config_names(domain: str) -> list[str]:
     if _is_k8s_domain(domain):
         return ["k8s.yaml", "k8s.yml", "kubernetes.yaml", "kubernetes.yml"]
-    return [f"{domain}.yaml", f"{domain}.yml"]
+    stem = DOMAIN_FILE_STEMS.get(domain, domain)
+    return [f"{stem}.yaml", f"{stem}.yml"]
 
 
 def _suite_file_name(domain: str) -> str:
-    return "k8s.yaml" if _is_k8s_domain(domain) else f"{domain}.yaml"
+    if _is_k8s_domain(domain):
+        return "k8s.yaml"
+    return f"{DOMAIN_FILE_STEMS.get(domain, domain)}.yaml"
 
 
 def _command_keys_for_domain(domain: str) -> list[str]:

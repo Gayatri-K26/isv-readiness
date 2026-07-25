@@ -91,6 +91,26 @@ class CrossDomainOnboardingTests(unittest.TestCase):
             execute_provider_onboarding(plan, runner=runner, overwrite=False)
             self.assertEqual(wrapper.read_text(encoding="utf-8"), "tests:\n  platform: slurm\n")
 
+    def test_storage_onboarding_tracks_upstream_config_and_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            validation_root = Path(tempdir) / "ai-cloud-validation"
+            template_dir = validation_root / "isvctl" / "configs" / "providers" / "my-isv"
+            template_dir.mkdir(parents=True)
+            plan = build_provider_onboarding_plan(validation_root, "acme", ["storage"])
+
+            def runner(command: Sequence[str], cwd: Path, timeout_seconds: int) -> subprocess.CompletedProcess[str]:
+                del cwd, timeout_seconds
+                config = plan.provider_dir / "config" / "storage.yaml"
+                config.parent.mkdir(parents=True)
+                config.write_text("tests:\n  platform: storage\n", encoding="utf-8")
+                return subprocess.CompletedProcess(command, 0, "created", "")
+
+            written = execute_provider_onboarding(plan, runner=runner)
+
+            self.assertEqual(plan.domains, ("storage",))
+            self.assertIn(plan.provider_dir / "config" / "storage.yaml", written)
+            self.assertTrue(any("high-speed storage" in item for item in plan.required_inputs["storage"]))
+
     def test_uses_existing_checkout_executable_and_validates_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             validation_root = Path(tempdir) / "ai-cloud-validation"
