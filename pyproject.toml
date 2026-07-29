@@ -22,7 +22,12 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-isv_readiness = ["schemas/*.json"]
+isv_readiness = [
+    "schemas/*.json",
+    "skills/*/*.md",
+    "skills/*/agents/*.yaml",
+    "skills/*/references/*.md",
+]
 
 [tool.ruff]
 line-length = 120

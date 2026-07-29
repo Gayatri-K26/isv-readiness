@@ -60,6 +60,7 @@
         "credential_env": {"$ref": "#/$defs/string_array"},
         "pass_env": {"$ref": "#/$defs/string_array"},
         "max_attempts": {"type": "integer", "minimum": 1, "maximum": 20},
+        "max_failure_groups": {"type": "integer", "minimum": 1, "maximum": 50},
         "cleanup_required": {"type": "boolean"}
       }
     }

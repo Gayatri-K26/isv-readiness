@@ -88,6 +88,7 @@ class ExecutionPolicy:
     credential_env: tuple[str, ...]
     pass_env: tuple[str, ...]
     max_attempts: int
+    max_failure_groups: int
     cleanup_required: bool
 
 
@@ -320,6 +321,7 @@ def execute_bootstrap(
             credential_env=plan.auth_env,
             pass_env=plan.pass_env,
             max_attempts=3,
+            max_failure_groups=10,
             cleanup_required=True,
         ),
     )
@@ -396,6 +398,7 @@ def load_project(path: Path) -> ReadinessProject:
             credential_env=tuple(raw["execution"]["credential_env"]),
             pass_env=tuple(raw["execution"]["pass_env"]),
             max_attempts=raw["execution"]["max_attempts"],
+            max_failure_groups=raw["execution"].get("max_failure_groups", 10),
             cleanup_required=raw["execution"]["cleanup_required"],
         ),
     )

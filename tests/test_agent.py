@@ -109,6 +109,47 @@ class AgentWorkflowTests(unittest.TestCase):
             schema = load_schema("agent-state.schema.json")
             jsonschema.validate(state.to_dict(), schema)
 
+    def test_live_failure_without_editable_evidence_is_parked_with_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            project_path, provider = _project(Path(tempdir))
+            work = Path(tempdir) / "work"
+            state = run_agent_turn(
+                project_path,
+                domain="vm",
+                work_dir=work,
+                generator_command=["fixture-generator"],
+                generator_runner=_generator_runner,
+            )
+            assert state.patch_sha256 is not None
+
+            state = run_agent_turn(
+                project_path,
+                domain="vm",
+                work_dir=work,
+                generator_command=["fixture-generator"],
+                generator_runner=_generator_runner,
+                approval_patch_sha256=state.patch_sha256,
+                apply_changes=True,
+                run_live=True,
+                live_runner=_failing_live_runner,
+                commit_resolver=lambda root: COMMIT,
+                environment={"PATH": "/bin", "HOME": "/home/test", "ACME_TOKEN": "secret"},
+            )
+
+            self.assertEqual(state.status, "blocked")
+            self.assertIn("not currently evidenced as fixable", state.reason)
+            self.assertIn("TODO", (provider / "scripts" / "vm" / "launch_instance.py").read_text())
+            envelope = state.feedback[-1]
+            assert isinstance(envelope, dict)
+            self.assertFalse(envelope["retryable"])
+            self.assertIn("provider returned 409", envelope["stable_error"])
+            self.assertTrue(envelope["artifact_refs"])
+            for reference in envelope["artifact_refs"]:
+                path = Path(reference["path"])
+                self.assertTrue(path.is_file())
+                self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), reference["sha256"])
+            jsonschema.validate(state.to_dict(), load_schema("agent-state.schema.json"))
+
 
 def _project(root: Path) -> tuple[Path, Path]:
     workspace = root / "workspace"
@@ -240,6 +281,19 @@ def _live_runner(command, cwd, environment, timeout):
         encoding="utf-8",
     )
     return subprocess.CompletedProcess(command, 0, "PASS\n", "")
+
+
+def _failing_live_runner(command, cwd, environment, timeout):
+    del cwd, environment, timeout
+    junit = Path(command[command.index("--junitxml") + 1])
+    junit.write_text(
+        "<testsuite><testcase name=\"test_vm[InstanceCreatedCheck]\">"
+        "<failure type=\"runtime_exception\" "
+        "message=\"provider returned 409 at 2026-07-29T12:01:02Z\" />"
+        "</testcase></testsuite>",
+        encoding="utf-8",
+    )
+    return subprocess.CompletedProcess(command, 1, "InstanceCreatedCheck provider returned 409\n", "")
 
 
 if __name__ == "__main__":

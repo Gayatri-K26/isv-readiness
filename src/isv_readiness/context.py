@@ -21,6 +21,7 @@ import jsonschema
 import yaml
 
 from isv_readiness.decision import adapter_contract_unit, decide_gap
+from isv_readiness.failure_feedback import redact_failure_text, redact_failure_value
 from isv_readiness.project import (
     DEFAULT_INFERENCE_RA_URL,
     DEFAULT_NSRG_URL,
@@ -46,103 +47,6 @@ NCP_GUIDE_LINK_RE = re.compile(r"\[([^\]]+)\]\((https://docs\.nvidia\.com/dsx/nc
 MERMAID_BLOCK_RE = re.compile(r"```mermaid\s*\n(.*?)```", re.DOTALL)
 MERMAID_NODE_RE = re.compile(r'\b([A-Za-z][A-Za-z0-9_]*)\s*\[(?:"([^"]*)"|([^\]]*))\]')
 MERMAID_SUBGRAPH_RE = re.compile(r'^\s*subgraph\s+([A-Za-z][A-Za-z0-9_]*)\s*\[(?:"([^"]*)"|([^\]]*))\]')
-QUALIFICATION_MAPPING_RULES = (
-    "Match capabilities explicitly declared by the ISV's supplied interfaces and "
-    "documentation to the closest applicable checks in each declared domain.",
-    "Match the required behavior, not nearby terminology: a read or inventory interface "
-    "does not prove create, update, placement, retention, aggregation, policy, or other "
-    "semantics that the evidence does not declare.",
-    "Every validation class or step grouped under one capability selector must be "
-    "independently supported by the cited evidence; split the group or leave a check "
-    "unmatched when its behavior differs.",
-    "Treat each catalog requirement as its step and validation-class pair. A class-only "
-    "selector matches that class in every step; use one only when the evidence supports "
-    "every occurrence, otherwise constrain the selector by both steps and classes.",
-    "Treat an API specification as authoritative evidence of the interfaces the ISV "
-    "declares, not proof that those interfaces work in the target environment.",
-    "Use covered/test when a declared capability maps to an upstream check and should "
-    "be validated; runtime results, not qualification claims, determine whether it passes.",
-    "Do not use unknown/deferred merely because the target version, credentials, hardware, "
-    "topology, or runtime behavior are unverified when supplied ISV evidence explicitly "
-    "declares the capability; map it to covered/test and let validation determine the result.",
-    "Use covered/test as a domain default only when the supplied ISV evidence explicitly "
-    "maps every check in that domain's pinned catalog.",
-    "For a partially supported domain, add grouped covered/test capability entries for "
-    "explicitly mapped checks; do not use a covered domain default to fill unmapped checks.",
-    "Use out_of_scope/skip as a partial-domain default only when the supplied evidence "
-    "explicitly excludes every unmatched check from the product claim; otherwise use "
-    "unknown/deferred so an SME must decide.",
-    "Use out_of_scope/skip only for a product-scope exclusion, never merely because the "
-    "current lab lacks hardware, credentials, or runtime evidence.",
-    "Missing provider script implementations are validate-phase gaps, not product "
-    "capability gaps.",
-    "Do not assign numeric nsrg_layers unless a supplied source explicitly maps the "
-    "component to those exact layer numbers.",
-)
-PROVIDER_IMPLEMENTATION_RULES = (
-    "Use only runtime environment names declared by the project; never invent a new input name in provider code.",
-    "Treat provider scaffolds, templates, and reference implementations as incomplete implementation material, "
-    "not authorization for demo inputs or behavior. If they read an environment name that is absent from "
-    "provider_runtime_contract.allowed_provider_env, do not copy or preserve that path; the authoritative runtime "
-    "and provider interface contracts control the implementation.",
-    "Treat the reviewed solution-profile capability mapping and rationale as an approved implementation premise. "
-    "Do not re-open scope merely because runtime behavior has not yet been tested.",
-    "Use declared interface paths, methods, authentication, response fields, and lifecycle semantics. Never invent "
-    "an undocumented provider operation, field, credential, or passing result.",
-    "When a declared response may vary at runtime, generate a bounded adapter for the supplied shape that validates "
-    "what it receives and fails closed on unsupported data. Runtime uncertainty belongs in live validation; it is "
-    "not by itself a reason to refuse implementation.",
-    "Preserve one canonical resource identifier across setup output, configured step arguments, lifecycle API calls, "
-    "and result JSON. Do not silently replace a configured identifier with another environment-derived identifier.",
-    "Preserve lifecycle verbs. A create, launch, provision, delete, or teardown step must perform that source-backed "
-    "operation; observing or validating a pre-existing resource does not satisfy a mutating lifecycle contract. "
-    "Return an empty change set when the declared interface lacks the required operation.",
-    "Keep TLS peer verification enabled. Never add an unverified SSL context, CERT_NONE, verify=False, curl -k, "
-    "or an equivalent bypass.",
-    "Keep SSH host-key verification enabled. Never disable StrictHostKeyChecking, discard known-hosts state, or "
-    "automatically trust an unknown host key.",
-    "Keep internal polling and subprocess deadlines inside the configured step timeout. A runner timeout may include "
-    "bounded orchestration headroom beyond a source-backed provider deadline; that headroom is not a new provider "
-    "recovery threshold.",
-    "Preserve every explicit source-backed timing threshold. Never shorten a provider lifecycle deadline to fit a "
-    "scaffold default; update the selected step timeout and keep any explicit internal recovery deadline at or above "
-    "the declared threshold.",
-    "Emit only the structured fields required by the validation contract. Never place raw API bodies, headers, "
-    "console output, stdout, stderr, or log excerpts in result JSON, including inside a general error field.",
-    "Treat edit-eligible unresolved checks as one adapter contract only when they share a script target, or when "
-    "they share both a configuration target and step name. Preserve the existing cross-step data flow.",
-    "Honor the documented semantic contract as well as the executable assertions. Do not exploit a missing "
-    "validation check or relabel a provider concept as a contract primitive unless supplied evidence establishes "
-    "that mapping.",
-    "Populate each structured result field only from the source-backed provider concept that field represents. "
-    "Never satisfy a schema with a placeholder, sentinel, or unrelated value; leave an optional field empty when "
-    "the provider contract has no mapping, and refuse when an unmapped field is required.",
-    "Report success only after actively verifying every success precondition declared by the authoritative "
-    "provider contract. The presence of a credential, key path, endpoint, or configuration value is not evidence "
-    "that the corresponding operation or connection succeeded.",
-    "Before a setup or inventory adapter reports success, verify the complete source-backed resource set required "
-    "by downstream selected checks is ready. Partial multi-resource readiness must remain pending and then fail "
-    "closed at the existing deadline. Emit counts, identities, and capacities from that same verified set; never "
-    "let an empty, zero, or partial observation fall through to a scaffold or suite default that broadens the claim.",
-    "When changing a domain configuration, edit only the selected step block. Preserve all comments, formatting, "
-    "and unrelated steps exactly.",
-    "Treat environment, API, and configuration strings used as subprocess arguments as untrusted. Validate them "
-    "against a narrow source-backed syntax or use an explicit end-of-options boundary when supported; shell "
-    "quoting alone does not prevent a leading hyphen from becoming a command option.",
-    "Respect optional provider response fields. Base outcomes on required state fields when available, let an "
-    "explicit optional failure indicator override that state, and fail closed when the declared fields cannot "
-    "support a result; do not fabricate a default or refuse merely because an optional field may be absent.",
-    "Standard client behavior such as verified TLS defaults, the current remote SSH user, and host-side SSH "
-    "configuration may be used when the reviewed interface explicitly establishes that access flow. Do not "
-    "fabricate credentials or claim reachability; return a runtime failure when the environment is not configured.",
-    "Treat an interactive console or shell as a session, not a batch command that must exit naturally. Establish "
-    "success only from source-backed readiness evidence, terminate the probe cleanly within its deadline, and do "
-    "not turn the expected continued session into a timeout failure.",
-    "Treat connection topology as part of the structural contract. If provider evidence requires a jump host, "
-    "proxy, gateway, or equivalent intermediate hop but the pinned validation consumer accepts only a direct "
-    "endpoint and credential with no compatible proxy input, return an empty change set with that exact blocker. "
-    "Never substitute the intermediary for the tested resource or claim direct reachability.",
-)
 LIFECYCLE_TIMEOUT_CONSTRAINT = "lifecycle_step_timeout_seconds"
 TEXT_EXTENSIONS = {
     ".json",
@@ -155,15 +59,6 @@ TEXT_EXTENSIONS = {
     ".yml",
 }
 SENSITIVE_FILENAMES = {".env", ".npmrc", ".pypirc", "credentials", "credentials.json"}
-SECRET_ASSIGNMENT_RE = re.compile(
-    r"(?im)^(\s*(?:export\s+)?[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE_KEY)[A-Z0-9_]*\s*[:=]\s*)([^\n]+)$"
-)
-BEARER_RE = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{12,}")
-AWS_KEY_RE = re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b")
-PRIVATE_KEY_RE = re.compile(
-    r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----",
-    re.DOTALL,
-)
 
 Fetcher = Callable[[str, Mapping[str, str]], bytes]
 OUTCOME_CALLS = frozenset({"report_subtest", "set_failed", "set_passed"})
@@ -475,7 +370,6 @@ def build_context_pack(
             "do not infer unprovided transitive helper behavior.",
             "Change only provider-owned files authorized by the selected scope and change-set policy.",
             "Never place credential values in source, patches, prompts, reports, or logs.",
-            "Prior-run artifacts are empirical evidence of runtime behavior; when they conflict with declared sources or profile claims, trust the run results.",
             "Results attest only to the ISV-owned scope; do not claim coverage of domains or layers the ISV does not own.",
         ),
         items=tuple(items),
@@ -489,34 +383,55 @@ def _bounded_failure_feedback(feedback: Sequence[Mapping[str, Any] | str]) -> di
     normalized: list[dict[str, Any]] = []
     for index, item in enumerate(feedback, start=1):
         if isinstance(item, str):
+            redacted = redact_text(item)
             normalized.append(
                 {
                     "attempt": index,
                     "category": "legacy",
-                    "fingerprint": _sha256_text(" ".join(item.split()))[:16],
-                    "summary": item,
+                    "fingerprint": _sha256_text(" ".join(redacted.split()))[:16],
+                    "summary": redacted,
                     "details": [],
                 }
             )
             continue
-        normalized.append(
-            {
-                "attempt": item.get("attempt", index),
-                "category": item.get("category", "verification"),
-                "fingerprint": item.get("fingerprint"),
-                "summary": item.get("summary", "Candidate verification failed."),
-                "details": list(item.get("details") or ()),
-            }
-        )
+        envelope = {
+            "attempt": item.get("attempt", index),
+            "category": item.get("category", "verification"),
+            "fingerprint": item.get("fingerprint"),
+            "summary": item.get("summary", "Candidate verification failed."),
+            "details": list(item.get("details") or ()),
+        }
+        for key in (
+            "expected",
+            "actual",
+            "stable_error",
+            "representative_excerpt",
+            "affected_checks",
+            "affected_count",
+            "artifact_refs",
+            "retryable",
+            "retry_reason",
+        ):
+            if key in item:
+                envelope[key] = item[key]
+        normalized.append(_redact_content(envelope))
     latest = normalized[-1]
+    latest_attempt = latest["attempt"]
     return {
         "latest": latest,
+        "root_causes": [
+            item for item in normalized
+            if item["attempt"] == latest_attempt
+        ],
         "ledger": [
             {
                 "attempt": item["attempt"],
                 "category": item["category"],
                 "fingerprint": item["fingerprint"],
                 "summary": item["summary"],
+                "affected_checks": item.get("affected_checks", []),
+                "affected_count": item.get("affected_count", 0),
+                "retryable": item.get("retryable"),
             }
             for item in normalized
         ],
@@ -589,13 +504,7 @@ def build_qualify_pack(
         },
         "constraints": [
             "Treat ai-cloud-validation suites and validation classes as read-only source-of-truth contracts.",
-            *QUALIFICATION_MAPPING_RULES,
-            "Use the NCP Software Reference Guide to interpret capabilities and architecture only; it cannot expand ISV ownership or override the pinned validation contracts.",
-            "Use the complete NVIDIA Inference Reference Architecture as reference context for architecture, component interactions, and validation considerations. It applies as review context to every qualification, but it does not prove that an ISV supplies an inference capability, require every described component, expand declared ownership, or override pinned validation contracts.",
             "For each Inference Reference Architecture Mermaid visual, read the appended agent-readable description together with the preserved original diagram. Treat both as reference guidance, never as empirical or authoritative ISV evidence.",
-            "Ownership fields are suggestions for SME review; never add domains or invent scope beyond the declared domains.",
-            "Prior-run artifacts are empirical evidence of runtime behavior; when they conflict with declared sources or profile claims, trust the run results.",
-            "Never place credential values in source, patches, prompts, reports, or logs.",
         ],
         "items": [_jsonable(asdict(item)) for item in items],
         "budget": {"max_chars": None, "used_chars": used, "omitted_items": 0},
@@ -1482,10 +1391,7 @@ class _VisibleTextParser(HTMLParser):
 
 
 def redact_text(text: str) -> str:
-    text = PRIVATE_KEY_RE.sub("[REDACTED PRIVATE KEY]", text)
-    text = SECRET_ASSIGNMENT_RE.sub(r"\1[REDACTED]", text)
-    text = BEARER_RE.sub("Bearer [REDACTED]", text)
-    return AWS_KEY_RE.sub("[REDACTED AWS KEY]", text)
+    return redact_failure_text(text)
 
 
 def _decode_json_or_text(text: str) -> Any:
@@ -1576,20 +1482,7 @@ def _jsonable(value: Any) -> Any:
 
 
 def _redact_content(value: Any) -> Any:
-    if isinstance(value, str):
-        return redact_text(value)
-    if isinstance(value, list):
-        return [_redact_content(item) for item in value]
-    if isinstance(value, dict):
-        redacted = {}
-        for key, item in value.items():
-            name = str(key)
-            if any(marker in name.upper() for marker in ("TOKEN", "SECRET", "PASSWORD", "API_KEY", "PRIVATE_KEY")):
-                redacted[name] = "[REDACTED]"
-            else:
-                redacted[name] = _redact_content(item)
-        return redacted
-    return value
+    return redact_failure_value(value)
 
 
 def _fetch_url(url: str, headers: Mapping[str, str]) -> bytes:

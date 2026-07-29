@@ -137,6 +137,13 @@ aliases:
 gapctl qualify --generator claude
 ```
 
+Every generator receives the same repository-pinned `isv-readiness-agent`
+skill with a qualification or remediation workflow. The skill teaches the
+agent how to reason from evidence; the existing schema, hash, scope, static
+verification, review, and live-run gates remain deterministic `gapctl`
+controls. Codex receives the skill natively in its isolated workspace. Other
+adapters receive the identical versioned skill instructions in the request.
+
 Any executable that reads one request JSON object from stdin and writes one
 schema-valid response JSON object to stdout can be selected directly:
 
@@ -247,11 +254,17 @@ requires interactive console or shell probes to terminate cleanly rather than
 misclassifying a healthy continuing session as a timeout.
 Lifecycle verbs also remain literal: a launch or create step cannot be replaced
 with a read-only check of a pre-existing resource.
-Retry requests contain the latest deterministic failure plus a compact attempt
-ledger, not prior candidates or an accumulated transcript. If the same failure
-fingerprint appears twice, the contract is parked without a third identical
-generation. When retries stop, the parked gap retains the last deterministic
-guardrail or static-verification failure for review.
+Retry requests contain the latest deterministic, redacted failure envelope plus
+a compact attempt ledger, not prior candidates or an accumulated transcript.
+The envelope records expected versus actual behavior, a stable error and one
+representative excerpt per root cause, affected checks and counts, and paths
+plus hashes for the complete retained artifacts. Fingerprints normalize
+timestamps, UUIDs, labeled run IDs, and polling counters. A retry occurs only
+when the observed row remains scanner-approved for the reviewed provider edit;
+ambiguous evidence or an ownership conflict is parked for triage.
+If the same normalized fingerprint appears twice, the contract is parked
+without a third identical generation. `execution.max_failure_groups` controls
+the distinct-root-cause ceiling and defaults to 10 for new and older manifests.
 The reviewed qualification mapping is an implementation premise during
 `validate`: runtime uncertainty is handled by response validation and explicit
 failure, while refusal is reserved for absent interfaces and structural
@@ -351,6 +364,9 @@ There is no bundle step.
   isolation, and bound to the bytes the human reviews. Static verification is
   not evidence that a provider API behaves correctly; only the live run proves
   that.
+- Failure summaries are diagnostic pointers, not replacements for evidence:
+  complete run artifacts remain on disk and every envelope carries their paths
+  and content hashes.
 - Live cloud execution requires an explicit confirmation inside `validate`.
 - Credentials are represented in durable files only by environment-variable
   name.

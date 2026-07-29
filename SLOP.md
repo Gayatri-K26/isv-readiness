@@ -2549,3 +2549,103 @@ testable.
   defaults.
 - All 184 tests pass. Ruff, Python compilation, every packaged JSON schema,
   lock validation, and diff checks pass.
+
+## Step 54 - Package the Generator Reasoning as One Agent Skill
+
+### Evidence
+
+Qualification and remediation already supplied strong rules and deterministic
+guardrails, but the reusable reasoning workflow existed only as request text.
+Codex ran with user configuration ignored, so generator behavior did not use a
+repository-owned skill.
+
+### Decision
+
+1. Package one provider-neutral `isv-readiness-agent` skill with concise
+   qualification and remediation references.
+2. Attach the selected phase instructions, version, and content hash to every
+   generator request so built-in, registered, executable, and file-exchange
+   adapters receive the same workflow.
+3. Stage the packaged skill natively for the isolated Codex adapter. Continue
+   ignoring ambient user configuration.
+4. Keep schemas, hashes, scope checks, static verification, approvals, and
+   live-run controls unchanged.
+5. Keep generic qualification and remediation judgment in the skill references
+   only. Requests retain transport, output, edit-boundary, and source-specific
+   constraints; Python retains deterministic enforcement.
+6. Avoid sending Codex a second embedded copy after staging the native skill.
+   Keep embedded instructions for adapters and file exchange that do not support
+   native Codex skill discovery.
+
+### Verification
+
+- Skill validation and focused unit tests cover deterministic phase attachment,
+  content hashing, native Codex staging, and remediation request delivery.
+- All 192 tests pass. Ruff, Python compilation, every packaged JSON schema,
+  lock validation, skill validation, and diff checks pass.
+
+## Step 55 - Generalize Rehearsal Corrections in the Agent Skill
+
+### Evidence
+
+The BCM rehearsal exposed four reusable reasoning gaps: incomplete wire-contract
+reconstruction, lifecycle calls without state-transition postconditions,
+test configuration derived from defaults instead of verified inventory, and
+connection routing conflated with authenticated peer identity.
+
+### Decision
+
+1. Require complete, evidenced request, response, state, polling, and error
+   semantics before implementing an interface call.
+2. Treat lifecycle work as a state transition with independent postconditions
+   and evidence-backed retry safety.
+3. Reconcile selected-check prerequisites and generated configuration with the
+   same verified inventory.
+4. Allow routing overrides without weakening or changing peer identity.
+5. Keep these rules provider-neutral and skill-only; add no phase, domain
+   exception, or deterministic guardrail.
+
+### Verification
+
+- Focused skill tests assert all four instructions are present in the selected
+  phase content.
+- All 192 tests pass. Ruff, Python compilation, lock validation, skill
+  validation, and diff checks pass.
+
+## Step 56 - Make Static and Live Failure Feedback Diagnostic but Bounded
+
+### Evidence
+
+The static repair paths compacted verification failures, but fingerprints still
+treated timestamps and request IDs as new failures. The guarded agent's live
+path passed a tuple of message strings with no expected/actual contract,
+affected-check count, artifact identity, or deterministic decision about
+whether another generated edit could plausibly help. A reviewed ownership flag
+alone was therefore too weak a retry criterion.
+
+### Decision
+
+1. Use one provider-neutral failure-envelope shape for static and live repair:
+   expected and actual behavior, stable redacted error, one representative
+   excerpt, affected checks/count, retry reason, and path-plus-hash references
+   to complete retained artifacts.
+2. Redact secrets and email-like PII before feedback reaches a generator.
+   Normalize timestamps, UUIDs, labeled request/resource/operation IDs, and
+   poll counters only for fingerprint identity; preserve the redacted text for
+   diagnosis.
+3. Retry only when scanner classification, reviewed ownership, and an approved
+   target establish that a generated provider change could plausibly fix every
+   selected root cause.
+4. Park on ambiguous evidence, repeated normalized failures, or ownership
+   conflict. Use the existing scope-decision boundary; do not let a model repair
+   or suppress a disputed ownership declaration.
+5. Add optional `execution.max_failure_groups`, defaulting to 10 for both new
+   and legacy manifests. Do not add a pipeline phase or retrieval protocol.
+
+### Verification
+
+- Focused tests cover volatile-value normalization, secret/PII redaction,
+  artifact identity, editable live failures, ownership conflicts, legacy
+  project defaults, context compaction, and existing static/agent workflows.
+- All 198 tests pass. Ruff, Python compilation, every packaged JSON schema,
+  lock validation, and diff checks pass.

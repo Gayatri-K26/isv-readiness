@@ -71,6 +71,7 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertEqual(project.assessment.domains, ("vm", "kubernetes"))
             self.assertEqual(project.provider.state, "existing")
             self.assertFalse(project.execution.allow_live_runs)
+            self.assertEqual(project.execution.max_failure_groups, 10)
             self.assertEqual(project.apis[0].auth_env, ("ACME_TOKEN",))
             self.assertEqual(
                 [source.id for source in project.context_sources],
@@ -124,6 +125,7 @@ class ProjectBootstrapTests(unittest.TestCase):
             )
             execute_bootstrap(plan, runner=_git_runner)
             raw = yaml.safe_load(plan.manifest_path.read_text(encoding="utf-8"))
+            raw["execution"].pop("max_failure_groups")
             raw["context_sources"] = [
                 source for source in raw["context_sources"] if source["id"] != "inference_ra"
             ]
@@ -131,6 +133,7 @@ class ProjectBootstrapTests(unittest.TestCase):
 
             loaded = load_project(plan.manifest_path)
 
+            self.assertEqual(loaded.execution.max_failure_groups, 10)
             inference = next(source for source in loaded.context_sources if source.id == "inference_ra")
             self.assertEqual(inference.location, DEFAULT_INFERENCE_RA_URL)
             self.assertEqual(inference.domains, ("vm",))

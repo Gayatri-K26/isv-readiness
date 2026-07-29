@@ -13,8 +13,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from isv_readiness.agent_skill import with_agent_skill
 from isv_readiness.changes import canonical_sha256
-from isv_readiness.context import QUALIFICATION_MAPPING_RULES
 from isv_readiness.generation import DEFAULT_GENERATOR_TIMEOUT_SECONDS, GeneratorRunner, dispatch_generator
 from isv_readiness.generators import DEFAULT_GENERATOR_MAX_REQUEST_BYTES
 from isv_readiness.runs import latest_run
@@ -113,7 +113,7 @@ def run_profile_draft(
     ``draft`` in the ``qualify`` stage regardless of what the model claims,
     and its domain set must exactly match the declared scope.
     """
-    request = {
+    request = with_agent_skill({
         "schema_version": "0.1.0",
         "task": (
             "Draft a qualify-phase solution profile mapping the provider's evidenced "
@@ -123,18 +123,12 @@ def run_profile_draft(
         "rules": [
             "Return one JSON object and no Markdown or commentary.",
             "Draft every declared domain and no others; never invent scope.",
-            *QUALIFICATION_MAPPING_RULES,
-            "Use unknown or deferred when the capability mapping is unclear, and use gap only when the supplied ISV evidence explicitly shows a required capability is absent.",
-            "State the supporting evidence for each domain in its 'rationale'.",
             "Every id used in 'evidence_refs' must also be declared in the profile's 'sources' list.",
-            "Model context_pack.project.provider as an actor of kind 'isv' and default both capability_owner_actor_id and provider_adapter_owner_actor_id to it for owned domains; add other actors only when the evidence names them.",
-            "Ownership fields are suggestions for SME review, not decisions.",
-            "Copy environment facts (versions, addresses, CIDRs) verbatim from the evidence; do not infer them.",
             "Do not include credential values anywhere.",
         ],
         "output_schema": load_schema("solution-profile.schema.json"),
         "context_pack": pack,
-    }
+    }, "qualification")
     raw = dispatch_generator(
         request,
         command=command,

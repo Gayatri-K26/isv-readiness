@@ -7,11 +7,7 @@ import unittest
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from isv_readiness.context import (
-    QUALIFICATION_MAPPING_RULES,
-    build_qualify_pack,
-    sync_context_sources,
-)
+from isv_readiness.context import build_qualify_pack, sync_context_sources
 from isv_readiness.project import (
     DEFAULT_INFERENCE_RA_URL,
     DEFAULT_NSRG_URL,
@@ -174,8 +170,6 @@ class QualifyPackTests(unittest.TestCase):
             self.assertEqual(source_ids[0], "latest_run_vm_junit")
             self.assertIn("catalog_vm", source_ids)
             self.assertIn("primary_api_spec", source_ids)
-            for rule in QUALIFICATION_MAPPING_RULES:
-                self.assertIn(rule, pack["constraints"])
             serialized = json.dumps(pack)
             self.assertIn("VM01-01", serialized)
             self.assertIn("launchVm", serialized)
@@ -261,7 +255,7 @@ class ProfileDraftTests(unittest.TestCase):
         self.assertIn("catalog_vm", declared)
         self.assertEqual(declared["catalog_vm"]["url"], "gapctl://catalog/vm")
 
-    def test_partial_domain_mapping_rules_are_shared_with_the_generator(self) -> None:
+    def test_qualification_reasoning_comes_from_the_pinned_skill(self) -> None:
         pack = {"project": {"declared_domains": ["vm"]}}
         captured: dict = {}
 
@@ -272,14 +266,15 @@ class ProfileDraftTests(unittest.TestCase):
 
         run_profile_draft(pack, command=["true"], cwd=Path("/tmp"), runner=runner)
 
-        for rule in QUALIFICATION_MAPPING_RULES:
-            self.assertIn(rule, captured["rules"])
-        self.assertTrue(any("every check" in rule for rule in captured["rules"]))
-        self.assertTrue(any("partially supported domain" in rule for rule in captured["rules"]))
-        self.assertTrue(any("required behavior" in rule for rule in captured["rules"]))
-        self.assertTrue(any("step and validation-class pair" in rule for rule in captured["rules"]))
-        self.assertTrue(any("target version" in rule for rule in captured["rules"]))
-        self.assertTrue(any("numeric nsrg_layers" in rule for rule in captured["rules"]))
+        self.assertEqual(captured["agent_skill"]["name"], "isv-readiness-agent")
+        self.assertEqual(captured["agent_skill"]["phase"], "qualification")
+        instructions = " ".join(captured["agent_skill"]["instructions"].split())
+        self.assertIn("API specification is useful but not required", instructions)
+        self.assertIn("every pinned", instructions)
+        self.assertIn("missing lab prerequisite", instructions)
+        self.assertIn("target version", instructions)
+        self.assertIn("numeric NSRG layers", instructions)
+        self.assertNotIn("missing lab prerequisite", " ".join(captured["rules"]))
 
     def test_draft_rejects_invented_or_missing_scope(self) -> None:
         pack = {"project": {"declared_domains": ["vm"]}}

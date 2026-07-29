@@ -9,10 +9,10 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from isv_readiness.agent_skill import with_agent_skill
 from isv_readiness.changes import ChangeSet, canonical_sha256, change_set_from_dict, validate_change_set
 from isv_readiness.context import (
     LIFECYCLE_TIMEOUT_CONSTRAINT,
-    PROVIDER_IMPLEMENTATION_RULES,
     provider_contract_constraints,
 )
 from isv_readiness.fixes import FixGuardrailError
@@ -164,7 +164,7 @@ def run_generator(
             f"{lifecycle_timeout:g}. For lifecycle adapters, keep the explicit internal recovery deadline at or "
             "above that value and set the configured step timeout to contain it; bounded runner headroom is allowed."
         )
-    request = {
+    request = with_agent_skill({
         "schema_version": "0.1.0",
         "task": (
             "Produce the smallest source-grounded provider-owned change set that addresses the selected gap "
@@ -179,23 +179,16 @@ def run_generator(
             "Use only create or replace operations allowed by the output schema.",
             "Do not include credentials, edit validation-suite contracts, or invent scope.",
             "Every content_sha256 must be the SHA-256 of the UTF-8 content field.",
-            "Prefer the smallest change and preserve cleanup/error behavior required by the contract.",
             (
                 "Every non-empty change set must include the selected remediation target. It may also include "
                 "other provider-owned scripts and the selected domain configuration when those edits are required "
                 "by the same adapter contract; do not assume the selected target is the only authorized file."
             ),
-            (
-                "Refuse only for an absent required interface or a structural contract mismatch. Unverified runtime "
-                "behavior should be tested by fail-closed adapter code, not treated as proof of impossibility. Never "
-                "fabricate a passing result."
-            ),
-            *PROVIDER_IMPLEMENTATION_RULES,
             *source_rules,
         ],
         "output_schema": load_schema("change-set.schema.json"),
         "context_pack": context_pack,
-    }
+    }, "remediation")
     raw = dispatch_generator(
         request,
         command=command,

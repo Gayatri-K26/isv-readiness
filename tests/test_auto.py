@@ -310,6 +310,9 @@ class AutoResilienceTests(unittest.TestCase):
         self.assertEqual(digest["latest"]["category"], "guardrail")
         self.assertEqual(len(digest["ledger"]), 1)
         self.assertEqual(digest["latest"]["fingerprint"], digest["ledger"][0]["fingerprint"])
+        artifact_ref = digest["latest"]["artifact_refs"][0]
+        self.assertIn("/failures/", artifact_ref["path"])
+        self.assertEqual(len(artifact_ref["sha256"]), 64)
 
     def test_static_verification_retry_receives_selected_gap_evidence(self) -> None:
         calls = {"n": 0}

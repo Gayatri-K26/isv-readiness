@@ -16,7 +16,15 @@
     "patch_sha256": {"type": ["string", "null"]},
     "reason": {"type": "string"},
     "artifacts": {"type": "object", "additionalProperties": {"type": "string"}},
-    "feedback": {"type": "array", "items": {"type": "string"}},
+    "feedback": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {"type": "string"},
+          {"$ref": "#/$defs/failure_feedback"}
+        ]
+      }
+    },
     "history": {
       "type": "array",
       "maxItems": 100,
@@ -29,6 +37,64 @@
           "gap_id": {"type": ["string", "null"]},
           "reason": {"type": "string"}
         }
+      }
+    }
+  },
+  "$defs": {
+    "artifact_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path", "sha256"],
+      "properties": {
+        "kind": {"type": "string"},
+        "path": {"type": "string"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "failure_feedback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt",
+        "category",
+        "fingerprint",
+        "summary",
+        "expected",
+        "actual",
+        "stable_error",
+        "representative_excerpt",
+        "affected_checks",
+        "affected_count",
+        "artifact_refs",
+        "details",
+        "retryable",
+        "retry_reason"
+      ],
+      "properties": {
+        "attempt": {"type": "integer", "minimum": 1},
+        "category": {"type": "string"},
+        "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{16}$"},
+        "summary": {"type": "string"},
+        "expected": {"type": "string"},
+        "actual": {"type": "string"},
+        "stable_error": {"type": "string"},
+        "representative_excerpt": {"type": "string"},
+        "affected_checks": {
+          "type": "array",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        },
+        "affected_count": {"type": "integer", "minimum": 0},
+        "artifact_refs": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/artifact_reference"}
+        },
+        "details": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "retryable": {"type": "boolean"},
+        "retry_reason": {"type": "string"}
       }
     }
   }

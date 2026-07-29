@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from isv_readiness.agent_skill import SKILL_NAME, with_agent_skill
 from isv_readiness.codex_generator import (
     CodexGeneratorError,
     _resolve_codex_executable,
@@ -37,13 +38,17 @@ class CodexGeneratorTests(unittest.TestCase):
 
         def runner(command, cwd: Path, prompt: str, timeout: int):
             seen.update(command=list(command), cwd=cwd, prompt=json.loads(prompt), timeout=timeout)
+            seen["skill_staged"] = (cwd / ".agents" / "skills" / SKILL_NAME / "SKILL.md").is_file()
             seen["schema"] = json.loads(Path(command[command.index("--output-schema") + 1]).read_text(encoding="utf-8"))
             output = Path(command[command.index("--output-last-message") + 1])
             output.write_text(json.dumps(expected), encoding="utf-8")
             return subprocess.CompletedProcess(command, 0, "events", "")
 
         result = generate_with_codex(
-            {"output_schema": {"type": "object"}, "context_pack": {"gap": {"id": "gap_test"}}},
+            with_agent_skill(
+                {"output_schema": {"type": "object"}, "context_pack": {"gap": {"id": "gap_test"}}},
+                "remediation",
+            ),
             codex_executable="/opt/codex",
             model="test-model",
             runner=runner,
@@ -60,6 +65,10 @@ class CodexGeneratorTests(unittest.TestCase):
         self.assertEqual(seen["command"][seen["command"].index("--model") + 1], "test-model")
         self.assertEqual(seen["command"][-1], "-")
         self.assertEqual(seen["schema"], seen["prompt"]["output_schema"])
+        self.assertTrue(seen["skill_staged"])
+        self.assertEqual(seen["prompt"]["agent_skill"]["phase"], "remediation")
+        self.assertNotIn("instructions", seen["prompt"]["agent_skill"])
+        self.assertEqual(seen["prompt"]["agent_skill"]["invocation"], f"Use ${SKILL_NAME} for this request.")
         self.assertEqual(seen["timeout"], CODEX_MODEL_TIMEOUT_SECONDS)
 
     def test_translates_full_schema_for_codex_and_removes_optional_nulls(self) -> None:

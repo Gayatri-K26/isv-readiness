@@ -12,6 +12,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from isv_readiness.agent_skill import SKILL_NAME, skill_root
 from isv_readiness.generator_limits import CODEX_MODEL_TIMEOUT_SECONDS, MAX_GENERATOR_TIMEOUT_SECONDS
 from isv_readiness.subprocesses import run_captured
 
@@ -78,10 +79,18 @@ def generate_with_codex(
     codex_schema = _codex_output_schema(schema)
     codex_request = dict(request)
     codex_request["output_schema"] = codex_schema
+    requested_skill = codex_request.get("agent_skill")
+    if isinstance(requested_skill, dict) and requested_skill.get("name") == SKILL_NAME:
+        native_skill = dict(requested_skill)
+        native_skill.pop("instructions", None)
+        native_skill["invocation"] = f"Use ${SKILL_NAME} for this request."
+        codex_request["agent_skill"] = native_skill
     prompt = json.dumps(codex_request, sort_keys=True, ensure_ascii=False)
     run = runner or _default_runner
     with tempfile.TemporaryDirectory(prefix="gapctl-codex-") as tempdir:
         root = Path(tempdir)
+        if isinstance(requested_skill, dict) and requested_skill.get("name") == SKILL_NAME:
+            shutil.copytree(skill_root(), root / ".agents" / "skills" / SKILL_NAME)
         schema_path = root / "change-set.schema.json"
         output_path = root / "last-message.json"
         schema_path.write_text(json.dumps(codex_schema, sort_keys=True), encoding="utf-8")

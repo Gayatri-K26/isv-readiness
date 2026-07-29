@@ -1,0 +1,4 @@
+interface:
+  display_name: "ISV Readiness Agent"
+  short_description: "Source-grounded ISV artifact generation"
+  default_prompt: "Use $isv-readiness-agent to generate a source-grounded gapctl qualification or remediation artifact."

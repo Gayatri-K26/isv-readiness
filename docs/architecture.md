@@ -193,6 +193,13 @@ scope, static-verification, and human-review guards. Validation imports at most
 one candidate before producing a review, so a pause between external-agent
 turns cannot discard staged work.
 
+Generator requests also carry one repository-pinned `isv-readiness-agent`
+skill and its content hash. The skill provides a concise, phase-specific
+reasoning workflow while request rules and deterministic guardrails remain
+authoritative. The Codex adapter stages the packaged skill in its isolated
+workspace; other adapters consume the same embedded instructions. No ambient
+personal skill is required or trusted.
+
 Each generation pack includes the exact declared runtime environment names and
 the other edit-eligible unresolved validation rows in the selected adapter
 contract unit. Checks share a unit when they use one script. Rows whose target
@@ -229,11 +236,20 @@ terminate cleanly instead of waiting for a healthy session to exit naturally.
 
 Retry accounting uses the same contract unit, so several checks backed by one
 adapter cannot multiply the model budget or consume another step's retries.
-Each retry receives only the latest structured failure in full plus a compact
-attempt ledger. If the same deterministic failure fingerprint appears twice,
-the unit is parked immediately instead of spending a third generation on the
-same outcome. Model and transport failures remain infrastructure errors outside
-this repair state. The final parked reason retains the exact stopping evidence.
+Static and live retries share a deterministic failure envelope: expected and
+actual behavior, the stable redacted error, one representative excerpt for each
+normalized root cause, affected check identities and counts, and hashed
+references to retained artifacts. Volatile timestamps, UUIDs, labeled
+request/resource/operation IDs, and poll counters do not create false-new
+fingerprints.
+
+The generator is retried only when the scanner, reviewed profile, and observed
+failure all support a plausible edit to an approved provider target. Conflicting
+ownership evidence routes to the existing scope-decision gate. Missing or
+ambiguous diagnostic evidence, a repeated normalized fingerprint, or the
+configurable `execution.max_failure_groups` ceiling parks regeneration for
+triage. Model and transport failures remain infrastructure errors outside this
+repair state. Compact feedback never replaces the complete artifacts.
 The per-gap pack keeps its model-neutral 180k-character safety bound and fails
 closed instead of truncating or omitting selected evidence; sibling rows are
 represented by their validation contract fields rather than duplicated scanner
@@ -377,6 +393,7 @@ The main internal services are:
 
 - `project.py`: workspace bootstrap and pinned project contract;
 - `context.py`: redacted context import and bounded packs;
+- `failure_feedback.py`: shared redaction, stable failure identity, and artifact references;
 - `qualify.py`: suite catalog and profile drafting;
 - `solution_profile.py`: scope contract and responsibility resolution;
 - `scan/`: static and dynamic evidence extraction;

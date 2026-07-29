@@ -14,8 +14,18 @@ from typing import Any
 
 from isv_readiness.change_verification import apply_verified_change_set, verify_change_set
 from isv_readiness.changes import ChangeSet
-from isv_readiness.context import build_context_pack, provider_contract_constraints
+from isv_readiness.context import ContextError, build_context_pack, provider_contract_constraints
 from isv_readiness.decision import adapter_contract_unit, decide_gap, validation_profile_issues
+from isv_readiness.failure_feedback import (
+    MAX_FAILURE_DETAIL_CHARS,
+    MAX_FAILURE_DETAILS,
+    MAX_FAILURE_SUMMARY_CHARS,
+    artifact_reference,
+    bounded_failure_text,
+    redact_failure_text,
+    redact_failure_value,
+    stable_failure_fingerprint,
+)
 from isv_readiness.fixes import FixGuardrailError
 from isv_readiness.generation import GeneratorInfrastructureError, GeneratorRunner, run_generator
 from isv_readiness.generator_limits import GENERATOR_ADAPTER_TIMEOUT_SECONDS
@@ -30,9 +40,6 @@ from isv_readiness.scan.scanner import ScanOptions, scan_provider
 from isv_readiness.solution_profile import canonicalize_domain, load_solution_profile
 
 AUTO_REVIEW_VERSION = "0.1.0"
-MAX_FAILURE_SUMMARY_CHARS = 1_000
-MAX_FAILURE_DETAIL_CHARS = 2_000
-MAX_FAILURE_DETAILS = 10
 
 
 class AutoWorkflowError(ValueError):
@@ -55,6 +62,15 @@ class AttemptFailure:
     fingerprint: str
     summary: str
     details: tuple[str, ...]
+    expected: str
+    actual: str
+    stable_error: str
+    representative_excerpt: str
+    affected_checks: tuple[str, ...]
+    affected_count: int
+    artifact_refs: tuple[dict[str, Any], ...]
+    retryable: bool
+    retry_reason: str
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -229,27 +245,60 @@ def run_auto(
                 "Generator infrastructure failed; validation stopped without changing the real provider: "
                 f"{exc}"
             ) from exc
+        except ContextError as exc:
+            attempts_by_unit[contract_unit] = max_attempts
+            blocked_by_unit[contract_unit] = (
+                "Automatic regeneration was parked because the required failure evidence "
+                f"could not be represented safely: {exc}"
+            )
+            continue
         except FixGuardrailError as exc:
             # A malformed generation or guard violation is a failed attempt for
             # this gap, not a reason to abort every other gap in the run.
             attempts_by_unit[contract_unit] = attempts_by_unit.get(contract_unit, 0) + 1
-            repeated = _record_failure(
+            failure_artifact = _write_failure_artifact(
+                work_dir,
+                contract_unit=contract_unit,
+                attempt=attempts_by_unit[contract_unit],
+                category="guardrail",
+                payload={"error": str(exc)},
+            )
+            stop_reason = _record_failure(
                 feedback_by_unit,
                 contract_unit,
                 attempt=attempts_by_unit[contract_unit],
                 category="guardrail",
                 summary="Candidate was rejected by a deterministic guardrail.",
                 details=(str(exc),),
+                expected="A schema-valid candidate confined to the reviewed provider-owned edit scope.",
+                actual=str(exc),
+                affected_check=gap_id,
+                artifact_refs=(artifact_reference("failure", failure_artifact),),
+                max_failure_groups=project.execution.max_failure_groups,
             )
-            if repeated:
+            if stop_reason:
                 attempts_by_unit[contract_unit] = max_attempts
-                blocked_by_unit[contract_unit] = _repeated_failure_reason(feedback_by_unit[contract_unit][-1])
+                blocked_by_unit[contract_unit] = stop_reason
             continue
         attempts_by_unit[contract_unit] = attempts_by_unit.get(contract_unit, 0) + 1
         if not manifest.success:
             # Leave the gap for the next iteration's retry budget; a fresh scan
             # keeps selecting it until the budget is exhausted, then it parks.
-            repeated = _record_failure(
+            details = (
+                *manifest.selected_failure_details,
+                *(f"Regression: {item}" for item in manifest.regressions),
+            )
+            failure_artifact = _write_failure_artifact(
+                work_dir,
+                contract_unit=contract_unit,
+                attempt=attempts_by_unit[contract_unit],
+                category="static_verification",
+                payload={
+                    "change_set": change_set.to_dict(),
+                    "verification": manifest.to_dict(),
+                },
+            )
+            stop_reason = _record_failure(
                 feedback_by_unit,
                 contract_unit,
                 attempt=attempts_by_unit[contract_unit],
@@ -258,14 +307,19 @@ def run_auto(
                     "Candidate failed isolated static verification; selected status became "
                     f"{manifest.selected_status_after or 'missing'}."
                 ),
-                details=(
-                    *manifest.selected_failure_details,
-                    *(f"Regression: {item}" for item in manifest.regressions),
+                details=details,
+                expected="The selected check passes isolated static verification without regressions.",
+                actual=(
+                    f"Selected status was {manifest.selected_status_after or 'missing'} "
+                    f"with {len(manifest.regressions)} regression(s)."
                 ),
+                affected_check=gap_id,
+                artifact_refs=(artifact_reference("failure", failure_artifact),),
+                max_failure_groups=project.execution.max_failure_groups,
             )
-            if repeated:
+            if stop_reason:
                 attempts_by_unit[contract_unit] = max_attempts
-                blocked_by_unit[contract_unit] = _repeated_failure_reason(feedback_by_unit[contract_unit][-1])
+                blocked_by_unit[contract_unit] = stop_reason
             continue
         apply_verified_change_set(
             report,
@@ -538,20 +592,19 @@ def _record_failure(
     category: str,
     summary: str,
     details: tuple[str, ...],
-) -> bool:
-    normalized_summary = " ".join(summary.split())
-    normalized_details = tuple(" ".join(detail.split()) for detail in details)
-    canonical = json.dumps(
-        {
-            "category": category,
-            "summary": normalized_summary,
-            "details": normalized_details,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
+    expected: str,
+    actual: str,
+    affected_check: str,
+    artifact_refs: Sequence[dict[str, Any] | None],
+    max_failure_groups: int,
+) -> str | None:
+    normalized_summary = " ".join(redact_failure_text(summary).split())
+    normalized_details = tuple(
+        " ".join(redact_failure_text(detail).split())
+        for detail in details
     )
     bounded_details = tuple(
-        _bounded_failure_text(detail, MAX_FAILURE_DETAIL_CHARS)
+        bounded_failure_text(detail, MAX_FAILURE_DETAIL_CHARS)
         for detail in normalized_details[:MAX_FAILURE_DETAILS]
     )
     if len(normalized_details) > MAX_FAILURE_DETAILS:
@@ -563,13 +616,32 @@ def _record_failure(
     failure = AttemptFailure(
         attempt=attempt,
         category=category,
-        fingerprint=hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16],
-        summary=_bounded_failure_text(normalized_summary, MAX_FAILURE_SUMMARY_CHARS),
+        fingerprint=stable_failure_fingerprint(category, normalized_summary, normalized_details),
+        summary=bounded_failure_text(normalized_summary, MAX_FAILURE_SUMMARY_CHARS),
         details=bounded_details,
+        expected=bounded_failure_text(expected, MAX_FAILURE_DETAIL_CHARS),
+        actual=bounded_failure_text(actual, MAX_FAILURE_DETAIL_CHARS),
+        stable_error=bounded_details[0] if bounded_details else bounded_failure_text(actual, MAX_FAILURE_DETAIL_CHARS),
+        representative_excerpt=(
+            bounded_details[0] if bounded_details else bounded_failure_text(actual, MAX_FAILURE_DETAIL_CHARS)
+        ),
+        affected_checks=(affected_check,),
+        affected_count=1,
+        artifact_refs=tuple(ref for ref in artifact_refs if ref is not None),
+        retryable=True,
+        retry_reason="The rejected generated candidate can plausibly be corrected within the same approved edit unit.",
     )
     history = failures_by_unit.setdefault(contract_unit, [])
     history.append(failure)
-    return sum(item.fingerprint == failure.fingerprint for item in history) >= 2
+    if sum(item.fingerprint == failure.fingerprint for item in history) >= 2:
+        return _repeated_failure_reason(failure)
+    distinct = len({item.fingerprint for item in history})
+    if distinct >= max_failure_groups:
+        return (
+            "Stopped automatic regeneration because the configurable distinct-root-cause ceiling "
+            f"was reached ({distinct}/{max_failure_groups}); review the retained failure ledger."
+        )
+    return None
 
 
 def _repeated_failure_reason(failure: AttemptFailure) -> str:
@@ -589,11 +661,31 @@ def _latest_failure_text(feedback: Sequence[AttemptFailure | str]) -> str:
     return " ".join((latest.summary, *latest.details)).strip()
 
 
-def _bounded_failure_text(value: str, max_chars: int) -> str:
-    if len(value) <= max_chars:
-        return value
-    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
-    return f"{value[:max_chars]}... [truncated; sha256 {digest}]"
+def _write_failure_artifact(
+    work_dir: Path,
+    *,
+    contract_unit: str,
+    attempt: int,
+    category: str,
+    payload: Mapping[str, Any],
+) -> Path:
+    artifact = {
+        "contract_unit": contract_unit,
+        "attempt": attempt,
+        "category": category,
+        "evidence": redact_failure_value(dict(payload)),
+    }
+    content = json.dumps(artifact, indent=2, sort_keys=True) + "\n"
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    unit_digest = hashlib.sha256(contract_unit.encode("utf-8")).hexdigest()[:12]
+    path = work_dir / "failures" / f"{unit_digest}-{attempt:02d}-{digest[:16]}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        if path.read_text(encoding="utf-8") != content:
+            raise AutoWorkflowError(f"Failure artifact identity collision: {path}")
+        return path
+    path.write_text(content, encoding="utf-8")
+    return path
 
 
 def _scan(provider_repo: Path, validation_root: Path, domain: str, profile) -> dict[str, Any]:

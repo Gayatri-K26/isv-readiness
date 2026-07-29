@@ -17,8 +17,16 @@ from isv_readiness.change_verification import (
     verify_change_set,
 )
 from isv_readiness.changes import build_change_proposal, canonical_sha256, load_change_set
-from isv_readiness.context import build_context_pack, provider_contract_constraints
-from isv_readiness.decision import decide_gap, validation_profile_issues
+from isv_readiness.context import ContextError, build_context_pack, provider_contract_constraints
+from isv_readiness.decision import FAILURE_STATUSES, decide_gap, validation_profile_issues
+from isv_readiness.failure_feedback import (
+    MAX_FAILURE_DETAIL_CHARS,
+    MAX_FAILURE_SUMMARY_CHARS,
+    artifact_reference,
+    bounded_failure_text,
+    redact_failure_text,
+    stable_failure_fingerprint,
+)
 from isv_readiness.fixes import select_gap
 from isv_readiness.generation import GeneratorRunner, run_generator
 from isv_readiness.live import CommitResolver, LiveRunner, run_live_domain
@@ -58,7 +66,7 @@ class AgentState:
     patch_sha256: str | None
     reason: str
     artifacts: dict[str, str]
-    feedback: tuple[str, ...]
+    feedback: tuple[dict[str, Any] | str, ...]
     history: tuple[AgentHistory, ...]
 
     def to_dict(self) -> dict[str, Any]:
@@ -241,15 +249,29 @@ def _prepare_next_change(
     if gap_id is None:
         raise AgentWorkflowError("Loop returned ready without a selected gap.")
 
-    context_pack = build_context_pack(
-        project,
-        project_path,
-        report,
-        gap_id=gap_id,
-        cache_dir=project_path.parent / ".gapctl" / "context-cache",
-        environment=environment,
-        feedback=state.feedback,
-    )
+    try:
+        context_pack = build_context_pack(
+            project,
+            project_path,
+            report,
+            gap_id=gap_id,
+            cache_dir=project_path.parent / ".gapctl" / "context-cache",
+            environment=environment,
+            feedback=state.feedback,
+        )
+    except ContextError as exc:
+        if not state.feedback:
+            raise
+        return _transition(
+            state,
+            status="blocked",
+            gap_id=gap_id,
+            reason=(
+                "Automatic regeneration was parked because the required failure evidence "
+                f"could not be represented safely: {exc}"
+            ),
+            artifacts={"report": str(report_path)},
+        )
     raw_context_pack = context_pack.to_dict()
     contract_constraints = provider_contract_constraints(raw_context_pack)
     context_path = work_dir / f"context-{state.iteration:03d}-{gap_id}.json"
@@ -331,11 +353,56 @@ def _prepare_next_change(
             f"Static verification failed ({verification.selected_status_after or 'selected row missing'}); "
             f"{len(verification.regressions)} regression(s)."
         )
-        feedback = (
-            reason,
+        details = (
             *verification.selected_failure_details,
             *(f"Regression: {item}" for item in verification.regressions),
         )
+        envelope = _failure_envelope(
+            attempt=attempts,
+            category="static_verification",
+            summary=reason,
+            expected="The selected check passes isolated static verification without regressions.",
+            actual=(
+                f"Selected status was {verification.selected_status_after or 'missing'} "
+                f"with {len(verification.regressions)} regression(s)."
+            ),
+            details=details,
+            affected_checks=(gap_id,),
+            artifact_refs=_artifact_refs(
+                ("report", report_path),
+                ("context", context_path),
+                ("change_set", changes_path),
+                ("proposal", proposal_path),
+                ("patch", patch_path),
+                ("verification", verification_path),
+            ),
+            retryable=True,
+            retry_reason=(
+                "The selected row remains reviewed, provider-owned, scanner-approved, "
+                "and editable by the generated candidate."
+            ),
+        )
+        feedback = (*state.feedback, envelope)
+        repeated = _feedback_repeats(state.feedback, (envelope,))
+        too_many = _distinct_feedback_count(feedback) >= project.execution.max_failure_groups
+        if repeated or too_many:
+            stop_reason = (
+                f"The same normalized failure repeated ({envelope['fingerprint']})."
+                if repeated
+                else (
+                    "The configurable distinct-root-cause ceiling was reached "
+                    f"({_distinct_feedback_count(feedback)}/{project.execution.max_failure_groups})."
+                )
+            )
+            return _transition(
+                state,
+                status="blocked",
+                gap_id=gap_id,
+                reason=f"Automatic regeneration was parked. {stop_reason}",
+                artifacts=artifacts,
+                attempts=attempts,
+                feedback=feedback,
+            )
         if attempts >= project.execution.max_attempts:
             return _transition(
                 state,
@@ -472,18 +539,62 @@ def _run_live_and_advance(
         rollback_path = work_dir / f"rollback-{state.iteration:03d}-{state.selected_gap_id}.json"
         _write_json(rollback_path, rollback.to_dict())
     attempts = state.attempts + 1
-    unresolved = [
+    dynamic_failures = [
         row
         for row in live.report.get("rows", [])
-        if row.get("detection") == "dynamic" and decide_gap(row).blocking
+        if row.get("detection") == "dynamic"
+        and row.get("status") in FAILURE_STATUSES
     ]
-    feedback = (
-        f"Live verification failed with exit code {live.exit_code}; statuses: {', '.join(live.selected_statuses) or 'none'}.",
-        *(str((row.get("evidence") or {}).get("message") or row.get("id")) for row in unresolved[:10]),
+    artifact_refs = _artifact_refs(
+        ("live_result", live_path),
+        ("gap_report", live_report_path),
+        ("junit", Path(live.junit_path) if live.junit_path else None),
+        ("log", Path(live.log_path)),
     )
+    new_feedback = _live_failure_envelopes(
+        dynamic_failures,
+        attempt=attempts,
+        exit_code=live.exit_code,
+        selected_statuses=live.selected_statuses,
+        artifact_refs=artifact_refs,
+        log_path=Path(live.log_path),
+    )
+    repeated = _feedback_repeats(state.feedback, new_feedback)
+    feedback = (*state.feedback, *new_feedback)
     artifacts = {"live": str(live_path), "feedback_report": str(live_report_path)}
     if rollback_path:
         artifacts["rollback"] = str(rollback_path)
+    distinct = _distinct_feedback_count(feedback)
+    ambiguous = any(not item.get("stable_error") for item in new_feedback)
+    retryable = bool(new_feedback) and all(item.get("retryable") is True for item in new_feedback)
+    if repeated or distinct >= project.execution.max_failure_groups or ambiguous or not retryable:
+        if repeated:
+            stop_reason = "the same normalized live root cause repeated"
+        elif distinct >= project.execution.max_failure_groups:
+            stop_reason = (
+                "the configurable distinct-root-cause ceiling was reached "
+                f"({distinct}/{project.execution.max_failure_groups})"
+            )
+        elif ambiguous:
+            stop_reason = "the retained artifacts did not yield an unambiguous diagnostic excerpt"
+        else:
+            stop_reason = (
+                "at least one failure is not currently evidenced as fixable by a generated "
+                "provider change; ownership conflicts require a scope decision"
+            )
+        return _transition(
+            state,
+            status="blocked",
+            gap_id=state.selected_gap_id,
+            reason=(
+                f"Live verification failed and the applied change was rolled back; "
+                f"automatic regeneration was parked because {stop_reason}."
+            ),
+            artifacts=artifacts,
+            attempts=attempts,
+            feedback=feedback,
+            patch_sha256=None,
+        )
     if attempts >= project.execution.max_attempts:
         return _transition(
             state,
@@ -518,6 +629,204 @@ def _run_live_and_advance(
         generator_runner=generator_runner,
         live_runner=live_runner,
         commit_resolver=commit_resolver,
+    )
+
+
+def _failure_envelope(
+    *,
+    attempt: int,
+    category: str,
+    summary: str,
+    expected: str,
+    actual: str,
+    details: Sequence[str],
+    affected_checks: Sequence[str],
+    artifact_refs: Sequence[Mapping[str, Any]],
+    retryable: bool,
+    retry_reason: str,
+) -> dict[str, Any]:
+    redacted_details = tuple(
+        bounded_failure_text(str(detail), MAX_FAILURE_DETAIL_CHARS)
+        for detail in details
+        if str(detail).strip()
+    )
+    stable_error = redacted_details[0] if redacted_details else ""
+    return {
+        "attempt": attempt,
+        "category": category,
+        "fingerprint": stable_failure_fingerprint(category, summary, redacted_details),
+        "summary": bounded_failure_text(summary, MAX_FAILURE_SUMMARY_CHARS),
+        "expected": bounded_failure_text(expected, MAX_FAILURE_DETAIL_CHARS),
+        "actual": bounded_failure_text(actual, MAX_FAILURE_DETAIL_CHARS),
+        "stable_error": stable_error,
+        "representative_excerpt": stable_error,
+        "affected_checks": sorted(dict.fromkeys(str(item) for item in affected_checks)),
+        "affected_count": len(affected_checks),
+        "artifact_refs": [dict(item) for item in artifact_refs],
+        "details": list(redacted_details),
+        "retryable": retryable,
+        "retry_reason": bounded_failure_text(retry_reason, MAX_FAILURE_DETAIL_CHARS),
+    }
+
+
+def _live_failure_envelopes(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    attempt: int,
+    exit_code: int,
+    selected_statuses: Sequence[str],
+    artifact_refs: Sequence[Mapping[str, Any]],
+    log_path: Path,
+) -> tuple[dict[str, Any], ...]:
+    groups: dict[str, list[Mapping[str, Any]]] = {}
+    group_details: dict[str, tuple[str, ...]] = {}
+    for row in rows:
+        decision = decide_gap(row)
+        details = _row_failure_details(row)
+        category = f"live_verification:{row.get('status', 'error')}:{decision.action}"
+        fingerprint = stable_failure_fingerprint(category, decision.reason, details)
+        groups.setdefault(fingerprint, []).append(row)
+        group_details.setdefault(fingerprint, details)
+
+    envelopes: list[dict[str, Any]] = []
+    for fingerprint in sorted(groups):
+        grouped_rows = groups[fingerprint]
+        details = group_details[fingerprint]
+        decisions = [decide_gap(row) for row in grouped_rows]
+        checks = [
+            str(row.get("validation_class") or row.get("id") or "<unknown-check>")
+            for row in grouped_rows
+        ]
+        ownership_conflict = any(
+            row.get("status") in FAILURE_STATUSES and not decision.blocking
+            for row, decision in zip(grouped_rows, decisions, strict=True)
+        )
+        retryable = (
+            not ownership_conflict
+            and bool(decisions)
+            and all(decision.edit_eligible for decision in decisions)
+        )
+        if ownership_conflict:
+            retry_reason = (
+                "Observed runtime failure conflicts with the reviewed unowned/skip route; "
+                "request a scope decision instead of editing or accepting the result."
+            )
+        elif retryable:
+            retry_reason = (
+                "Every affected row is reviewed, provider-owned, scanner-approved, and "
+                "maps to an editable provider target."
+            )
+        else:
+            retry_reason = "; ".join(dict.fromkeys(decision.reason for decision in decisions))
+        statuses = sorted(dict.fromkeys(str(row.get("status") or "error") for row in grouped_rows))
+        envelope = _failure_envelope(
+            attempt=attempt,
+            category="live_verification",
+            summary=(
+                f"Live verification produced {len(grouped_rows)} affected check(s) "
+                f"with status(es): {', '.join(statuses)}."
+            ),
+            expected="Each selected dynamic check passes under the reviewed qualification scope.",
+            actual=(
+                f"Process exit code {exit_code}; selected statuses: "
+                f"{', '.join(selected_statuses) or 'none'}."
+            ),
+            details=details,
+            affected_checks=checks,
+            artifact_refs=artifact_refs,
+            retryable=retryable,
+            retry_reason=retry_reason,
+        )
+        envelope["fingerprint"] = fingerprint
+        envelopes.append(envelope)
+
+    if envelopes:
+        return tuple(envelopes)
+
+    log_excerpt = _tail_failure_excerpt(log_path)
+    return (
+        _failure_envelope(
+            attempt=attempt,
+            category="live_process",
+            summary="Live validation failed without a mapped dynamic failure row.",
+            expected="The live command exits successfully and emits mapped dynamic check results.",
+            actual=(
+                f"Process exit code {exit_code}; selected statuses: "
+                f"{', '.join(selected_statuses) or 'none'}."
+            ),
+            details=(log_excerpt,) if log_excerpt else (),
+            affected_checks=(),
+            artifact_refs=artifact_refs,
+            retryable=False,
+            retry_reason=(
+                "No scanner-classified provider-owned row ties this process failure to an "
+                "approved generated edit; inspect the referenced artifacts."
+            ),
+        ),
+    )
+
+
+def _row_failure_details(row: Mapping[str, Any]) -> tuple[str, ...]:
+    evidence = row.get("evidence")
+    evidence = evidence if isinstance(evidence, Mapping) else {}
+    details: list[str] = []
+    message = evidence.get("message")
+    if isinstance(message, str) and message.strip():
+        details.append(message.strip())
+    for label, key in (
+        ("Provider error", "validation_message"),
+        ("Log excerpt", "stderr_excerpt"),
+    ):
+        value = evidence.get(key)
+        if isinstance(value, str) and value.strip() and value.strip() not in details:
+            details.append(f"{label}: {value.strip()}")
+    for label, key in (
+        ("Schema error", "schema_errors"),
+        ("Missing JSON field", "missing_json_fields"),
+    ):
+        values = evidence.get(key)
+        if isinstance(values, list):
+            details.extend(
+                f"{label}: {value}"
+                for value in values
+                if isinstance(value, str) and value.strip()
+            )
+    return tuple(details)
+
+
+def _artifact_refs(*items: tuple[str, Path | None]) -> tuple[dict[str, Any], ...]:
+    refs = [artifact_reference(kind, path) for kind, path in items]
+    return tuple(ref for ref in refs if ref is not None)
+
+
+def _tail_failure_excerpt(path: Path) -> str:
+    if not path.is_file():
+        return ""
+    return bounded_failure_text(
+        redact_failure_text(path.read_text(encoding="utf-8", errors="replace")[-8_000:]),
+        MAX_FAILURE_DETAIL_CHARS,
+    ).strip()
+
+
+def _feedback_repeats(
+    previous: Sequence[Mapping[str, Any] | str],
+    current: Sequence[Mapping[str, Any]],
+) -> bool:
+    previous_fingerprints = {
+        str(item.get("fingerprint"))
+        for item in previous
+        if isinstance(item, Mapping) and item.get("fingerprint")
+    }
+    return any(str(item.get("fingerprint")) in previous_fingerprints for item in current)
+
+
+def _distinct_feedback_count(feedback: Sequence[Mapping[str, Any] | str]) -> int:
+    return len(
+        {
+            str(item.get("fingerprint"))
+            for item in feedback
+            if isinstance(item, Mapping) and item.get("fingerprint")
+        }
     )
 
 
@@ -560,7 +869,7 @@ def _transition(
     reason: str,
     artifacts: dict[str, str],
     attempts: int | None = None,
-    feedback: Sequence[str] | None = None,
+    feedback: Sequence[Mapping[str, Any] | str] | None = None,
     patch_sha256: str | None = None,
     iteration: int | None = None,
 ) -> AgentState:
