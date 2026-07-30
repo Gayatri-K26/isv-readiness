@@ -15,12 +15,19 @@ from typing import Any
 
 from isv_readiness.agent_skill import with_agent_skill
 from isv_readiness.changes import canonical_sha256
+from isv_readiness.failure_feedback import (
+    MAX_FAILURE_DETAIL_CHARS,
+    MAX_FAILURE_SUMMARY_CHARS,
+    bounded_failure_text,
+    stable_failure_fingerprint,
+)
 from isv_readiness.generation import DEFAULT_GENERATOR_TIMEOUT_SECONDS, GeneratorRunner, dispatch_generator
 from isv_readiness.generators import DEFAULT_GENERATOR_MAX_REQUEST_BYTES
 from isv_readiness.runs import latest_run
 from isv_readiness.schema import load_schema
 from isv_readiness.solution_profile import (
     SolutionProfile,
+    SolutionProfileError,
     canonicalize_domain,
     parse_solution_profile,
 )
@@ -106,6 +113,7 @@ def run_profile_draft(
     runner: GeneratorRunner | None = None,
     environment: Mapping[str, str] | None = None,
     protected_roots: Sequence[Path] = (),
+    max_attempts: int = 3,
 ) -> dict[str, Any]:
     """Draft a solution profile from the qualify pack via a generator adapter.
 
@@ -113,34 +121,67 @@ def run_profile_draft(
     ``draft`` in the ``qualify`` stage regardless of what the model claims,
     and its domain set must exactly match the declared scope.
     """
-    request = with_agent_skill({
-        "schema_version": "0.1.0",
-        "task": (
-            "Draft a qualify-phase solution profile mapping the provider's evidenced "
-            "capabilities onto the declared validation domains."
-        ),
-        "context_pack_sha256": canonical_sha256(pack),
-        "rules": [
-            "Return one JSON object and no Markdown or commentary.",
-            "Draft every declared domain and no others; never invent scope.",
-            "Every id used in 'evidence_refs' must also be declared in the profile's 'sources' list.",
-            "Do not include credential values anywhere.",
-        ],
-        "output_schema": load_schema("solution-profile.schema.json"),
-        "context_pack": pack,
-    }, "qualification")
-    raw = dispatch_generator(
-        request,
-        command=command,
-        cwd=cwd,
-        pass_env=pass_env,
-        timeout_seconds=timeout_seconds,
-        idle_timeout_seconds=idle_timeout_seconds,
-        max_request_bytes=max_request_bytes,
-        runner=runner,
-        environment=environment,
-        protected_roots=protected_roots,
-    )
+    if max_attempts < 1:
+        raise QualifyError("Qualification generator max_attempts must be positive.")
+    feedback: list[dict[str, Any]] = []
+    fingerprints: set[str] = set()
+    for attempt in range(1, max_attempts + 1):
+        request_payload = {
+            "schema_version": "0.1.0",
+            "task": (
+                "Draft a qualify-phase solution profile mapping the provider's evidenced "
+                "capabilities onto the declared validation domains."
+            ),
+            "context_pack_sha256": canonical_sha256(pack),
+            "rules": [
+                "Return one JSON object and no Markdown or commentary.",
+                "Draft every declared domain and no others; never invent scope.",
+                "Every id used in 'evidence_refs' must also be declared in the profile's 'sources' list.",
+                "Do not include credential values anywhere.",
+            ],
+            "output_schema": load_schema("solution-profile.schema.json"),
+            "context_pack": pack,
+        }
+        if feedback:
+            request_payload["previous_attempt_feedback"] = feedback
+        request = with_agent_skill(request_payload, "qualification")
+        raw = dispatch_generator(
+            request,
+            command=command,
+            cwd=cwd,
+            pass_env=pass_env,
+            timeout_seconds=timeout_seconds,
+            idle_timeout_seconds=idle_timeout_seconds,
+            max_request_bytes=max_request_bytes,
+            runner=runner,
+            environment=environment,
+            protected_roots=protected_roots,
+        )
+        try:
+            return _harden_and_validate_draft(raw, pack)
+        except (QualifyError, SolutionProfileError) as exc:
+            envelope = _qualification_failure_envelope(
+                attempt,
+                exc,
+                tuple(pack["project"]["declared_domains"]),
+            )
+            fingerprint = str(envelope["fingerprint"])
+            if fingerprint in fingerprints:
+                raise QualifyError(
+                    "Automatic qualification regeneration was parked because the same "
+                    f"normalized structural failure repeated ({fingerprint}): {exc}"
+                ) from exc
+            feedback.append(envelope)
+            fingerprints.add(fingerprint)
+            if attempt == max_attempts:
+                raise QualifyError(
+                    "Qualification generator retry budget was exhausted; the last "
+                    f"structural failure was: {exc}"
+                ) from exc
+    raise AssertionError("qualification retry loop did not return or raise")
+
+
+def _harden_and_validate_draft(raw: dict[str, Any], pack: Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(raw.get("solution"), dict):
         raw["solution"]["profile_status"] = "draft"
     raw["journey"] = {"stage": "qualify", "status": "in_progress"}
@@ -154,6 +195,41 @@ def run_profile_draft(
         missing = ", ".join(sorted(declared - drafted)) or "none"
         raise QualifyError(f"Draft domains must exactly match the declared scope (extra: {extra}; missing: {missing}).")
     return raw
+
+
+def _qualification_failure_envelope(
+    attempt: int,
+    error: Exception,
+    domains: Sequence[str],
+) -> dict[str, Any]:
+    detail = bounded_failure_text(str(error), MAX_FAILURE_DETAIL_CHARS)
+    summary = "Qualification proposal failed deterministic structural validation."
+    return {
+        "attempt": attempt,
+        "category": "qualification_validation",
+        "fingerprint": stable_failure_fingerprint(
+            "qualification_validation",
+            summary,
+            (detail,),
+        ),
+        "summary": bounded_failure_text(summary, MAX_FAILURE_SUMMARY_CHARS),
+        "expected": (
+            "A schema-valid, acyclic qualification proposal containing exactly "
+            "the declared domains."
+        ),
+        "actual": detail,
+        "stable_error": detail,
+        "representative_excerpt": detail,
+        "affected_checks": sorted(dict.fromkeys(domains)),
+        "affected_count": len(set(domains)),
+        "artifact_refs": [],
+        "details": [detail],
+        "retryable": True,
+        "retry_reason": (
+            "The generator can correct this structural proposal error without "
+            "changing qualification scope or product ownership."
+        ),
+    }
 
 
 def _declare_cited_pack_items(raw: dict[str, Any], pack: Mapping[str, Any]) -> None:

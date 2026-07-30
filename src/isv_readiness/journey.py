@@ -123,6 +123,7 @@ def cmd_qualify(
                         else ()
                     ),
                 ),
+                max_attempts=project.execution.max_attempts,
             )
             proposal_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
         except GeneratorRequestExported as exc:

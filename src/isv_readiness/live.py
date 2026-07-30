@@ -213,10 +213,15 @@ def run_live_domain(
         if selection is None or _same_validation(selection, row.validation_class)
     ]
     statuses = tuple(sorted(row.status for row in selected_rows))
+    junit_terminal_failures = _junit_terminal_failure_count(junit)
     # Success requires both an actual execution and the same reviewed
-    # status/profile decision used by fill, status, and publication.
+    # status/profile decision used by fill, status, and publication. Inspect
+    # the XML directly as a final deterministic gate so a runner's exit code,
+    # summary text, scanner grouping, or injected subtest naming cannot hide a
+    # recorded failure or error.
     success = (
         result.returncode == 0
+        and junit_terminal_failures == 0
         and any(status == "pass" for status in statuses)
         and not any(decide_gap(row.to_dict()).blocking for row in selected_rows)
     )
@@ -342,6 +347,18 @@ def _junit_validation_names(path: Path) -> tuple[str, ...]:
         match = _JUNIT_VALIDATION_RE.search(raw_name)
         names.append(match.group(1) if match else raw_name)
     return tuple(names)
+
+
+def _junit_terminal_failure_count(path: Path) -> int:
+    """Count every explicit JUnit failure/error, including nested subtests."""
+    try:
+        tree = ElementTree.parse(path)
+    except (OSError, ElementTree.ParseError):
+        return 0
+    return sum(
+        case.find("failure") is not None or case.find("error") is not None
+        for case in tree.iter("testcase")
+    )
 
 
 def _missing_junit_row(

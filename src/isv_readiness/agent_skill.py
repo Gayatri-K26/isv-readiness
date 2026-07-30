@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 SKILL_NAME = "isv-readiness-agent"
-SKILL_VERSION = "0.1.0"
+SKILL_VERSION = "0.1.1"
 SkillPhase = Literal["qualification", "remediation"]
 
 

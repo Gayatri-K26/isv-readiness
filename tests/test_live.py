@@ -233,6 +233,45 @@ class LiveRunTests(unittest.TestCase):
             )
             self.assertIn("error", result.selected_statuses)
 
+    def test_explicit_junit_subtest_failure_vetoes_green_exit_and_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            project, manifest = _project(Path(tempdir), allow_live=True)
+
+            def runner(command, cwd, environment, timeout):
+                del cwd, environment, timeout
+                junit = Path(command[command.index("--junitxml") + 1])
+                junit.write_text(
+                    '<testsuite tests="2">'
+                    '<testcase name="test_vm[InstanceCreatedCheck]" />'
+                    '<testcase name="pytest_internal::cleanup">'
+                    '<failure message="provider cleanup failed" />'
+                    "</testcase>"
+                    "</testsuite>",
+                    encoding="utf-8",
+                )
+                return subprocess.CompletedProcess(command, 0, "PASS\n", "")
+
+            result = run_live_domain(
+                project,
+                manifest,
+                domain="vm",
+                artifacts_dir=Path(tempdir) / "artifacts",
+                explicit_authorization=True,
+                selection="InstanceCreatedCheck",
+                runner=runner,
+                commit_resolver=lambda root: COMMIT,
+                environment={
+                    "PATH": "/bin",
+                    "HOME": "/home/test",
+                    "ACME_TOKEN": "x",
+                    "ACME_REGION": "west",
+                },
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("pass", result.selected_statuses)
+        self.assertFalse(result.success)
+
     def test_live_run_rejects_checkout_drift_and_missing_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             project, manifest = _project(Path(tempdir), allow_live=True)

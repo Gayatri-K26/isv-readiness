@@ -294,6 +294,76 @@ class ProfileDraftTests(unittest.TestCase):
                 runner=_draft_runner(_profile_payload(domains=("network",))),
             )
 
+    def test_structural_failure_is_compacted_into_the_next_qualification_pass(self) -> None:
+        pack = {"project": {"declared_domains": ["vm"]}}
+        invalid = _profile_payload()
+        invalid["components"] = [
+            {
+                "id": "provider",
+                "name": "acme",
+                "version": "1.0",
+                "kind": "product",
+                "supplier_actor_id": "isv",
+                "depends_on": ["cluster"],
+                "source_refs": [],
+            },
+            {
+                "id": "cluster",
+                "name": "cluster",
+                "version": "1.0",
+                "kind": "service",
+                "supplier_actor_id": "isv",
+                "depends_on": ["provider"],
+                "source_refs": [],
+            },
+        ]
+        requests: list[dict] = []
+
+        def runner(command, cwd, request, env, timeout):
+            del cwd, env, timeout
+            requests.append(json.loads(request))
+            payload = invalid if len(requests) == 1 else _profile_payload()
+            return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+
+        result = run_profile_draft(
+            pack,
+            command=["true"],
+            cwd=Path("/tmp"),
+            runner=runner,
+        )
+
+        self.assertEqual(result["solution"]["profile_status"], "draft")
+        self.assertEqual(len(requests), 2)
+        feedback = requests[1]["previous_attempt_feedback"]
+        self.assertEqual(len(feedback), 1)
+        self.assertEqual(feedback[0]["category"], "qualification_validation")
+        self.assertIn("provider -> cluster -> provider", feedback[0]["stable_error"])
+        self.assertTrue(feedback[0]["retryable"])
+
+    def test_repeated_qualification_structure_failure_parks_regeneration(self) -> None:
+        pack = {"project": {"declared_domains": ["vm"]}}
+        calls = 0
+
+        def runner(command, cwd, request, env, timeout):
+            nonlocal calls
+            del cwd, request, env, timeout
+            calls += 1
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                json.dumps(_profile_payload(domains=("network",))),
+                "",
+            )
+
+        with self.assertRaisesRegex(QualifyError, "same normalized structural failure"):
+            run_profile_draft(
+                pack,
+                command=["true"],
+                cwd=Path("/tmp"),
+                runner=runner,
+            )
+        self.assertEqual(calls, 2)
+
 
 class RatificationAidTests(unittest.TestCase):
     def test_empirical_conflicts_flag_covered_domains_with_failing_latest_run(self) -> None:

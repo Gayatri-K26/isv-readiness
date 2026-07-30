@@ -28,8 +28,9 @@
    absent.
 8. Treat missing provider scripts as remediation gaps, not product capability
    gaps.
-9. Cite supporting evidence in every domain rationale. Declare every cited
-   evidence ID as a source.
+9. Cite supporting evidence in every domain rationale and capability mapping.
+   Declare every cited evidence ID as a source. Do not make a structural or
+   behavioral claim when its source cannot be identified.
 10. Model the project provider as the ISV actor and default capability and
     provider-adapter ownership to it for owned domains. Add another actor only
     when evidence names it. Ownership remains an SME-reviewed suggestion.

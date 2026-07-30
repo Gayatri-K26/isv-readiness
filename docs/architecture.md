@@ -72,6 +72,11 @@ the proposal to remain a qualify-stage draft and requires its domains to equal
 the domains declared during `init`. The SME edits the proposal when facts are
 unresolved. Only an explicit approval promotes the reviewed document.
 
+Schema, reference, exact-domain, and component-graph failures are returned to
+the next bounded qualification pass in a compact, redacted failure envelope.
+Repeated normalized failures and exhausted retry budgets park qualification;
+an invalid proposal is never persisted.
+
 Before approval, the CLI displays both the domain-default diff and effective
 pinned-check counts. Each catalog check is resolved through the profile's
 step, validation-category, and validation-class selectors. The resulting
@@ -233,6 +238,16 @@ verified client behavior may implement an established access flow without
 inventing provider credentials or success. Interactive consoles and shells are
 treated as sessions: a probe must use source-backed readiness evidence and
 terminate cleanly instead of waiting for a healthy session to exit naturally.
+The agent must reuse suitable existing provider transport, routing, polling,
+inventory, and client primitives; cite the source for every wire mapping; and
+restore relevant starting configuration and health after mutating tests when
+safe. Existing command paths require evidence that their executables and route
+match the declared run environment.
+
+The terminal static state also requires a configured
+`execution.run_environment`. The initial `not_configured` sentinel produces an
+`execution-preflight` parked gap rather than an unqualified `no_changes`
+conclusion.
 
 Retry accounting uses the same contract unit, so several checks backed by one
 adapter cannot multiply the model budget or consume another step's retries.
@@ -250,6 +265,12 @@ ambiguous diagnostic evidence, a repeated normalized fingerprint, or the
 configurable `execution.max_failure_groups` ceiling parks regeneration for
 triage. Model and transport failures remain infrastructure errors outside this
 repair state. Compact feedback never replaces the complete artifacts.
+
+Live success additionally parses the emitted JUnit XML directly and rejects
+every explicit `failure` or `error`, including injected subtests. Process exit
+zero, PASS text, scanner grouping, and testcase naming cannot override that
+deterministic result.
+
 The per-gap pack keeps its model-neutral 180k-character safety bound and fails
 closed instead of truncating or omitting selected evidence; sibling rows are
 represented by their validation contract fields rather than duplicated scanner

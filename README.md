@@ -110,6 +110,12 @@ The ISV SME reviews that file. Unresolved ownership or coverage decisions stop
 the command and remain visible. Edit the proposal and run the same command
 again; there is no separate profile, draft, or approval command.
 
+If a generated proposal fails schema, reference, domain-set, or component-graph
+validation, `qualify` gives the next bounded generator pass one redacted,
+normalized failure envelope containing the exact structural error. A repeated
+failure or exhausted project retry budget parks generation for triage instead
+of persisting an invalid proposal.
+
 The review output shows domain-default changes and then resolves every pinned
 check through the proposed capability selectors. Per-domain and total counts
 distinguish effective `covered/test`, `out_of_scope/skip`, and other outcomes,
@@ -197,6 +203,13 @@ never truncated.
 
 ### 3. Validate
 
+Before validation, replace the initial `execution.run_environment:
+not_configured` value in `isv-project.yaml` with a non-secret description of
+where provider commands execute, such as `operator workstation through the
+declared bastion`. Static `no_changes` is parked until this is declared, so
+command availability and the configured route cannot be mistaken for proven
+executability.
+
 Set the declared provider runtime values in the current environment before
 live validation:
 
@@ -237,7 +250,10 @@ For every owned domain, `validate`:
 11. adds a run-local `isvctl` exclusion overlay for validation classes that the
     reviewed profile explicitly routes out of scope, without editing the pinned
     suite or provider source;
-12. records JUnit, logs, run metadata, and the full-scope gap scorecard.
+12. rejects live success when any emitted JUnit testcase records a `failure` or
+    `error`, including injected subtests, regardless of process exit or summary
+    text;
+13. records JUnit, logs, run metadata, and the full-scope gap scorecard.
 
 All scaffolded domain configuration, including Kubernetes, lives under the
 provider directory. The isolated review copy and atomic apply therefore use one
@@ -254,6 +270,10 @@ requires interactive console or shell probes to terminate cleanly rather than
 misclassifying a healthy continuing session as a timeout.
 Lifecycle verbs also remain literal: a launch or create step cannot be replaced
 with a read-only check of a pre-existing resource.
+The agent must reuse suitable provider transport, routing, polling, inventory,
+and client primitives; cite the supplied source for each wire mapping; restore
+safe test baselines after mutation; and require evidence that existing command
+paths are executable through the declared route.
 Retry requests contain the latest deterministic, redacted failure envelope plus
 a compact attempt ledger, not prior candidates or an accumulated transcript.
 The envelope records expected versus actual behavior, a stable error and one

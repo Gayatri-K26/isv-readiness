@@ -25,6 +25,10 @@ class AgentSkillTests(unittest.TestCase):
         self.assertIn("Model lifecycle work as a state transition", remediation_text)
         self.assertIn("must not change or disable the authenticated peer identity", remediation_text)
         self.assertIn("never scaffold defaults", remediation_text)
+        self.assertIn("reuse or extend them instead of creating a second implementation", remediation_text)
+        self.assertIn("Identify the supplied source for each of those mappings", remediation_text)
+        self.assertIn("restore them after success or failure when safe", remediation_text)
+        self.assertIn("executables are available from the declared run environment", remediation_text)
         self.assertNotEqual(qualification["agent_skill"]["sha256"], remediation["agent_skill"]["sha256"])
         self.assertEqual(
             qualification["agent_skill"]["sha256"],

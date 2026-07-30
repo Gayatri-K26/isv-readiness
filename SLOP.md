@@ -2649,3 +2649,34 @@ alone was therefore too weak a retry criterion.
   project defaults, context compaction, and existing static/agent workflows.
 - All 198 tests pass. Ruff, Python compilation, every packaged JSON schema,
   lock validation, and diff checks pass.
+
+## Step 57 - Close Rehearsal Trust Gaps Without a New Phase
+
+### Evidence
+
+The second BCM rehearsal showed better lifecycle reasoning and effective
+guardrails, but it also exposed four narrow gaps: an explicit JUnit subtest
+failure could be hidden by runner status or result grouping; qualification
+structural failures did not reach a subsequent generator pass; static
+`no_changes` could be accepted with no declared execution environment; and the
+agent repeatedly duplicated shared provider clients while omitting cleanup and
+source citations.
+
+### Decision
+
+1. Veto live success when any emitted JUnit testcase contains a `failure` or
+   `error`, including injected subtests.
+2. Retry qualification structural failures within the project attempt budget
+   using a redacted, normalized failure envelope. Park repeated failures.
+3. Add one `execution-preflight` parked gap when
+   `execution.run_environment` remains unset or uses the initial sentinel.
+4. Tighten the existing provider-neutral skill to reuse shared provider
+   primitives, cite wire mappings, restore safe test baselines, and require
+   evidence for command availability and routing.
+5. Add no pipeline phase, BCM-specific rule, command scanner, or new schema.
+
+### Verification
+
+- Focused tests cover direct JUnit failure veto, qualification feedback and
+  repeated-failure parking, execution preflight, and the revised skill text.
+- Full repository verification is recorded with the implementation handoff.

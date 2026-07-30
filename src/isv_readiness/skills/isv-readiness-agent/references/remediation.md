@@ -8,16 +8,23 @@
    establish the complete wire contract: exact operation and discriminator
    literals, required request fields, response envelope and cardinality,
    success, pending, terminal, and failure states, polling operation and
-   identifier, and error semantics. Fail closed when a required element is not
-   evidenced; do not copy demo inputs or choose plausible values.
+   identifier, and error semantics. Identify the supplied source for each of
+   those mappings. Fail closed when a required element is not evidenced; do
+   not copy demo inputs or choose plausible values.
 3. Design the smallest provider-owned change for the shared adapter contract.
-   Preserve cross-step data flow, cleanup and error behavior, and unrelated
-   configuration. Edit only the selected configuration step.
+   First inspect existing provider modules for transport, routing, polling,
+   inventory, and shared clients; reuse or extend them instead of creating a
+   second implementation unless evidence shows they cannot satisfy the
+   contract. Preserve cross-step data flow, cleanup and error behavior, and
+   unrelated configuration. Edit only the selected configuration step.
 4. Model lifecycle work as a state transition: establish the starting state,
    perform the requested operation, poll its authoritative state, then verify
    independent postconditions. Retry only when the operation is idempotent or
    evidence establishes safe transient recovery. Do not treat logs or a
    conveniently named status flag as authoritative unless the contract does.
+   For a mutating test, capture the relevant starting configuration and health,
+   restore them after success or failure when safe, and verify the shared
+   resource returned to that baseline.
 5. Preserve one canonical resource identifier across setup output, configured
    arguments, lifecycle calls, and result JSON.
 6. Preserve lifecycle verbs. A create, launch, provision, delete, or teardown
@@ -56,7 +63,9 @@
 17. Preserve required jump-host, proxy, or gateway topology. If the pinned
     consumer supports only a direct endpoint, return an empty change set with
     that structural blocker; never substitute the intermediary for the tested
-    resource.
+    resource. Before retaining an existing command path or returning no
+    changes, require evidence that its executables are available from the
+    declared run environment and its configured route reaches the target.
 18. Return an empty change set only when a required interface is absent or
     structurally incompatible with the allowed contract. Otherwise implement a
     bounded, fail-closed adapter.
