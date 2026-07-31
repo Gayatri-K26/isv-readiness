@@ -53,10 +53,12 @@ cd acme-readiness
 `init`:
 
 - validates the provider name, owned domains, and runtime environment-variable names;
-- clones the selected `ai-cloud-validation` branch or tag when absent;
+- uses a supplied `ai-cloud-validation` checkout as-is, or clones the selected
+  branch or tag when absent;
 - records the exact validation commit in `isv-project.yaml`;
 - builds the NVIDIA check catalog for the declared domains;
-- scaffolds the provider-owned scripts and configuration;
+- preserves an existing provider implementation, or scaffolds provider-owned
+  scripts and configuration when it is absent;
 - imports and redacts the declared API specification, the complete NVIDIA NCP
   Software Reference Guide from NVIDIA's published documentation index, and
   the complete NVIDIA Inference Reference Architecture;
@@ -72,6 +74,21 @@ When `--api` is supplied, `validate` injects that value into provider scripts as
 Use `--validation-ref <branch-or-tag>` to select something other than `main`.
 A new workspace receives the current head of that ref and pins its commit.
 Later commands never pull the checkout forward silently.
+
+If the ISV already has the repository, point `init` at it directly:
+
+```bash
+gapctl init acme-cloud \
+  --workspace ./acme-readiness \
+  --validation-root /absolute/path/to/ai-cloud-validation \
+  --domains vm,network
+```
+
+The checkout must contain the upstream `my-isv` provider template. `init` does
+not fetch, pull, switch branches, or overwrite an existing
+`isvctl/configs/providers/acme-cloud` implementation. It records the checkout's
+current commit; `--validation-ref` only selects the branch or tag for a new
+clone.
 
 Credential values are never command arguments or project data. `--auth`
 accepts names such as `ACME_CLIENT_SECRET`, not secret values.

@@ -2680,3 +2680,31 @@ source citations.
 - Focused tests cover direct JUnit failure veto, qualification feedback and
   repeated-failure parking, execution preflight, and the revised skill text.
 - Full repository verification is recorded with the implementation handoff.
+
+## Step 58 - Reuse an Existing Validation Checkout and Provider
+
+### Evidence
+
+Bootstrap already accepted an internal `validation_root` and pinned an existing
+checkout, but the public `gapctl init` command could not supply that path. When
+the checkout already contained the named provider, initialization still called
+the upstream scaffold command, which correctly refused to overwrite the
+existing implementation and stopped the workflow.
+
+### Decision
+
+1. Expose `--validation-root` on `gapctl init` and pass it through the existing
+   bootstrap boundary.
+2. Validate and pin the supplied checkout's current `HEAD` without fetching,
+   pulling, switching branches, or otherwise changing it.
+3. When the named provider directory already exists, use it unchanged and skip
+   scaffolding. Let qualification and deterministic scanning report missing or
+   invalid domain files later instead of mutating imported work during init.
+4. Retain existing behavior for new checkouts and missing providers.
+
+### Verification
+
+- Focused tests cover the supplied checkout path and preservation of an
+  existing provider implementation.
+- All 203 tests pass. Ruff, Python compilation, every packaged JSON schema,
+  lock validation, and diff checks pass.

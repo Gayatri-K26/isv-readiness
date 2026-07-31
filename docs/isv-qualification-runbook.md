@@ -49,9 +49,12 @@ cd ./<provider-name>-readiness
 `init` clones `ai-cloud-validation` into the workspace, records its exact
 commit, imports the provider specification, complete NCP Software Reference
 Guide, and complete NVIDIA Inference Reference Architecture, and creates the
-initial profile and provider scaffolding. The Inference Reference Architecture
-is standard reference context for every ISV; it does not imply that the ISV
-claims inference capabilities. Later commands do not silently update the pinned
+initial profile and provider scaffolding. If the ISV already has a checkout,
+add `--validation-root /absolute/path/to/ai-cloud-validation`; `init` pins its
+current commit and preserves an existing named provider implementation without
+fetching, switching, or overwriting it. The Inference Reference Architecture is
+standard reference context for every ISV; it does not imply that the ISV claims
+inference capabilities. Later commands do not silently update the pinned
 validation checkout.
 
 Verify the generated state:

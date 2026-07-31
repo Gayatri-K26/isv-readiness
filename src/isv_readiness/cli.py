@@ -68,6 +68,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default="main",
         help="ai-cloud-validation branch or tag to pin (default: main)",
     )
+    init_parser.add_argument(
+        "--validation-root",
+        type=Path,
+        default=None,
+        help="Use an existing ai-cloud-validation checkout instead of cloning one",
+    )
     init_parser.set_defaults(handler=_init)
 
     qualify_parser = subparsers.add_parser(
@@ -138,6 +144,7 @@ def _init(args: argparse.Namespace) -> int:
         input_envs=args.input_envs,
         api_spec=args.api_spec,
         validation_ref=args.validation_ref,
+        validation_root=args.validation_root,
     )
 
 

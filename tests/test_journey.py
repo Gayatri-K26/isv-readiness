@@ -51,12 +51,23 @@ class PublicJourneyTests(unittest.TestCase):
 
     def test_public_cli_accepts_registered_names_paths_and_file_exchange(self) -> None:
         parser = _build_parser()
+        existing_checkout = parser.parse_args(
+            [
+                "init",
+                "acme",
+                "--domains",
+                "vm",
+                "--validation-root",
+                "/opt/ai-cloud-validation",
+            ]
+        )
         registered = parser.parse_args(["qualify", "--generator", "internal-agent"])
         executable = parser.parse_args(["validate", "--generator", "/opt/custom-adapter"])
         exchange = parser.parse_args(
             ["validate", "--generator-response", "/tmp/agent-response.json"]
         )
 
+        self.assertEqual(existing_checkout.validation_root, Path("/opt/ai-cloud-validation"))
         self.assertEqual(registered.generator, "internal-agent")
         self.assertEqual(executable.generator, "/opt/custom-adapter")
         self.assertEqual(exchange.generator_response, Path("/tmp/agent-response.json"))

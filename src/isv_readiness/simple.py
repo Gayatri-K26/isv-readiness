@@ -59,6 +59,7 @@ def cmd_init(
     input_envs: list[str] | None = None,
     api_spec: str | None,
     validation_ref: str = "main",
+    validation_root: Path | None = None,
 ) -> int:
     workspace = workspace.expanduser().resolve()
     project_path = workspace / "isv-project.yaml"
@@ -80,6 +81,7 @@ def cmd_init(
             provider_name=provider_name,
             domains=domains,
             validation_ref=validation_ref,
+            validation_root=validation_root,
             api_base_url=api_url,
             api_base_url_env="ISV_API_BASE_URL" if api_url else None,
             auth_env=auth_envs,
@@ -108,16 +110,21 @@ def cmd_init(
         print(str(exc), file=sys.stderr)
         return 2
 
-    # 3. Onboard: scaffold provider script stubs for every domain
-    print(f"[3/4] Scaffolding provider scripts for {', '.join(domains)}...")
-    try:
-        onboard_plan = build_provider_onboarding_plan(resolved_root, provider_name, domains)
-        written = execute_provider_onboarding(onboard_plan, overwrite=False)
-        for path in written:
-            print(f"  Created: {path}")
-    except (OSError, OnboardingError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
+    # 3. Onboard only when the checkout does not already contain this provider.
+    # Existing implementations are input to qualification and must not be
+    # overwritten or partially supplemented during initialization.
+    if project.provider.state == "existing":
+        print(f"[3/4] Using existing provider implementation: {project.provider_root(project_path)}")
+    else:
+        print(f"[3/4] Scaffolding provider scripts for {', '.join(domains)}...")
+        try:
+            onboard_plan = build_provider_onboarding_plan(resolved_root, provider_name, domains)
+            written = execute_provider_onboarding(onboard_plan, overwrite=False)
+            for path in written:
+                print(f"  Created: {path}")
+        except (OSError, OnboardingError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
 
     # Context belongs to initialization, not to a separate operator workflow.
     # Optional NVIDIA sources may be unavailable; a declared API specification

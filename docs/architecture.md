@@ -28,10 +28,12 @@ flowchart LR
 `init` owns all workspace bootstrap work:
 
 1. validate provider, domain, API, and credential-name inputs;
-2. clone `ai-cloud-validation` when the checkout is absent;
+2. validate and use a supplied `ai-cloud-validation` checkout as-is, or clone
+   it when absent;
 3. resolve and record the exact validation commit;
 4. build the per-domain suite catalog through the installed `isvctl` contract;
-5. scaffold provider-owned files;
+5. preserve an existing provider implementation, or scaffold provider-owned
+   files when absent;
 6. import declared context into the redacted cache;
 7. create the initial draft profile.
 
@@ -44,6 +46,8 @@ check never performs hidden network requests.
 A fresh clone obtains the current head of the selected ref. Once recorded, the
 commit is stable for that qualification. Later commands reject checkout drift
 instead of silently pulling different tests into an active engagement.
+An explicitly supplied checkout is never fetched, switched, or rewritten by
+bootstrap; its current `HEAD` is the commit recorded in the project.
 
 ### `qualify`
 

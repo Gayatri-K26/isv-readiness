@@ -74,9 +74,11 @@ class SimpleCommandTests(unittest.TestCase):
 
     def test_init_passes_requested_validation_ref_to_bootstrap(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
+            validation_root = Path(tempdir) / "existing-validation"
 
             def stop_before_clone(plan, *, overwrite):
                 self.assertEqual(plan.validation_ref, "release-1.2")
+                self.assertEqual(plan.validation_root, validation_root.resolve())
                 self.assertEqual(plan.api_base_url_env, "ISV_API_BASE_URL")
                 self.assertEqual(plan.pass_env, ("ACME_REGION",))
                 self.assertFalse(overwrite)
@@ -97,9 +99,44 @@ class SimpleCommandTests(unittest.TestCase):
                         input_envs=["ACME_REGION"],
                         api_spec=None,
                         validation_ref="release-1.2",
+                        validation_root=validation_root,
                     ),
                     2,
                 )
+
+    def test_init_preserves_existing_provider_implementation(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            workspace = Path(tempdir) / "workspace"
+            provider_root = workspace / "ai-cloud-validation" / "isvctl" / "configs" / "providers" / "acme"
+            project = MagicMock()
+            project.provider.state = "existing"
+            project.provider_root.return_value = provider_root
+            project.assessment.domains = ("vm",)
+            project.validation.resolved_commit = "a" * 40
+            project.validation_root.return_value = workspace / "ai-cloud-validation"
+            catalog = {"domains": {"vm": {"checks": []}}}
+            with (
+                patch("isv_readiness.simple.build_bootstrap_plan", return_value=MagicMock()),
+                patch("isv_readiness.simple.execute_bootstrap", return_value=project),
+                patch("isv_readiness.simple.build_qualify_catalog", return_value=catalog),
+                patch("isv_readiness.simple.build_provider_onboarding_plan") as build_onboarding,
+                patch("isv_readiness.simple.execute_provider_onboarding") as execute_onboarding,
+                patch("isv_readiness.simple.sync_context_sources", return_value=()),
+                redirect_stdout(io.StringIO()) as output,
+            ):
+                exit_code = cmd_init(
+                    "acme",
+                    workspace=workspace,
+                    domains=["vm"],
+                    api_url=None,
+                    auth_envs=[],
+                    api_spec=None,
+                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn(f"Using existing provider implementation: {provider_root}", output.getvalue())
+            build_onboarding.assert_not_called()
+            execute_onboarding.assert_not_called()
 
     def test_status_handles_new_and_existing_gap_reports(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
