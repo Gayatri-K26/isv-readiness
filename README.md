@@ -41,6 +41,8 @@ not clone `ai-cloud-validation`; that happens during `gapctl init`.
 gapctl init acme-cloud \
   --workspace ./acme-readiness \
   --domains vm,network \
+  --context /absolute/path/to/reference-architecture.md \
+  --context https://docs.acme.example/platform \
   --api https://api.acme.example/v1 \
   --api-spec /absolute/path/to/openapi.yaml \
   --auth ACME_CLIENT_ID \
@@ -59,10 +61,17 @@ cd acme-readiness
 - builds the NVIDIA check catalog for the declared domains;
 - preserves an existing provider implementation, or scaffolds provider-owned
   scripts and configuration when it is absent;
-- imports and redacts the declared API specification, the complete NVIDIA NCP
-  Software Reference Guide from NVIDIA's published documentation index, and
-  the complete NVIDIA Inference Reference Architecture;
+- imports and redacts every declared ISV context source, any optional API
+  specification, the complete NVIDIA NCP Software Reference Guide from
+  NVIDIA's published documentation index, and the complete NVIDIA Inference
+  Reference Architecture;
 - creates the initial draft solution profile.
+
+`isv-project.yaml` is the only place source locations and import settings are
+defined. `solution-profile.yaml` records ownership and coverage decisions and
+may cite qualification evidence by `source_refs` or `evidence_refs`; those
+values are IDs from the qualification pack, not duplicate source definitions.
+Qualification rejects invented or unavailable citation IDs.
 
 GitHub issues are not qualification sources. The pinned executable contracts,
 the ISV's own evidence, both complete NVIDIA references, and recorded runs are
@@ -70,6 +79,14 @@ the qualification inputs.
 
 When `--api` is supplied, `validate` injects that value into provider scripts as
 `ISV_API_BASE_URL`; the operator does not need to export it separately.
+
+An API URL and API specification are optional. Use repeatable `--context`
+arguments when the ISV instead supplies reference architectures, product or
+operations documentation, command references, configuration examples, or
+other qualification evidence. Each value may be a readable local file, a
+directory of text documents, or an HTTP(S) URL. Explicitly supplied context is
+required for that workspace: initialization stops if it cannot be imported
+rather than qualifying against incomplete evidence.
 
 Use `--validation-ref <branch-or-tag>` to select something other than `main`.
 A new workspace receives the current head of that ref and pins its commit.
@@ -419,8 +436,8 @@ The main operator-visible artifacts are:
 ```text
 acme-readiness/
 ├── ai-cloud-validation/        # pinned NVIDIA checkout
-├── isv-project.yaml            # immutable scope inputs and checkout pin
-├── solution-profile.yaml       # SME-reviewed ownership and coverage
+├── isv-project.yaml            # scope, source definitions, and checkout pin
+├── solution-profile.yaml       # SME-reviewed decisions and source-ID citations
 ├── gaps.json                   # latest full-scope readiness result
 └── .gapctl/
     ├── catalog.json

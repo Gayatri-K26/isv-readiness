@@ -46,7 +46,12 @@ from isv_readiness.qualify import (
     run_profile_draft,
 )
 from isv_readiness.simple import SimpleError, cmd_status, find_project, run_test_domain
-from isv_readiness.solution_profile import SolutionProfileError, load_solution_profile, parse_solution_profile
+from isv_readiness.solution_profile import (
+    SolutionProfileError,
+    load_solution_profile,
+    parse_solution_profile,
+    validate_profile_evidence_refs,
+)
 from isv_readiness.validation_adapter import IsvctlAdapter, ValidationAdapterError
 
 Confirm = Callable[[str], bool]
@@ -75,7 +80,9 @@ def cmd_qualify(
 
     qualification_dir = project_path.parent / ".gapctl" / "qualification"
     proposal_path = qualification_dir / "solution-profile.proposed.yaml"
+    cache_dir = project_path.parent / ".gapctl" / "context-cache"
     catalog: dict[str, Any] | None = None
+    pack: dict[str, Any] | None = None
     if not proposal_path.exists():
         print("Building an evidence-grounded qualification proposal...")
         try:
@@ -86,7 +93,6 @@ def cmd_qualify(
                 response_path=generator_response,
             )
             qualification_dir.mkdir(parents=True, exist_ok=True)
-            cache_dir = project_path.parent / ".gapctl" / "context-cache"
             cached_records = load_context_records(cache_dir)
             if not context_cache_is_current(
                 project,
@@ -156,6 +162,14 @@ def cmd_qualify(
             catalog = build_qualify_catalog(
                 IsvctlAdapter(project.validation_root(project_path)), project.assessment.domains
             )
+        if pack is None:
+            pack = build_qualify_pack(project, catalog, cache_dir=cache_dir)
+        evidence_source_ids = {
+            item["source_id"]
+            for item in pack["items"]
+            if isinstance(item, dict) and isinstance(item.get("source_id"), str)
+        }
+        validate_profile_evidence_refs(proposal, evidence_source_ids)
         conflicts = empirical_conflicts(proposal, project_path.parent / ".gapctl" / "runs")
         if conflicts:
             for conflict in conflicts:
@@ -164,11 +178,13 @@ def cmd_qualify(
             return 1
         promoted_raw = _promoted_profile(proposal_path)
         promoted = parse_solution_profile(promoted_raw)
+        validate_profile_evidence_refs(promoted, evidence_source_ids)
         issues = validation_profile_issues(promoted, project.assessment.domains)
         check_summary = effective_check_summary(proposal, catalog)
     except (
         OSError,
         TypeError,
+        ContextError,
         QualifyError,
         SolutionProfileError,
         ValidationAdapterError,

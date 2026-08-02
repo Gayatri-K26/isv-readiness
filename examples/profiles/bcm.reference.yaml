@@ -293,16 +293,6 @@ domains:
       This reference target is a bare-metal cluster solution. VMaaS can be added
       as a separately versioned component if the candidate solution claims it.
 
-sources:
-  - id: bcm-docs
-    title: NVIDIA Base Command Manager Documentation
-    url: https://docs.nvidia.com/base-command-manager/index.html
-    kind: documentation
-  - id: bcm-11-release-notes
-    title: NVIDIA Base Command Manager 11 Release Notes
-    url: https://docs.nvidia.com/base-command-manager/bcm-11-release-notes/overview.html
-    kind: documentation
-
 assumptions:
   - This is a draft discovery baseline, not a validated product claim.
   - Exact BCM build, licenses, enabled integrations, and target hardware must be pinned at intake.

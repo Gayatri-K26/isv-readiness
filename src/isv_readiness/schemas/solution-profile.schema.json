@@ -43,13 +43,6 @@
       },
       "minItems": 1
     },
-    "sources": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/source"
-      },
-      "default": []
-    },
     "assumptions": {
       "type": "array",
       "items": {
@@ -333,27 +326,6 @@
             "$ref": "#/$defs/capability"
           },
           "default": []
-        }
-      }
-    },
-    "source": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["id", "title", "url", "kind"],
-      "properties": {
-        "id": {
-          "$ref": "#/$defs/identifier"
-        },
-        "title": {
-          "type": "string",
-          "minLength": 1
-        },
-        "url": {
-          "type": "string",
-          "minLength": 1
-        },
-        "kind": {
-          "enum": ["documentation", "repository", "api_spec", "runbook", "other"]
         }
       }
     }

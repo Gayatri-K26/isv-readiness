@@ -27,7 +27,8 @@ flowchart LR
 
 `init` owns all workspace bootstrap work:
 
-1. validate provider, domain, API, and credential-name inputs;
+1. validate provider, domain, optional API, arbitrary ISV context, and
+   credential-name inputs;
 2. validate and use a supplied `ai-cloud-validation` checkout as-is, or clone
    it when absent;
 3. resolve and record the exact validation commit;
@@ -37,11 +38,19 @@ flowchart LR
 6. import declared context into the redacted cache;
 7. create the initial draft profile.
 
+Source configuration has one owner: `isv-project.yaml`. The solution profile
+does not repeat source URLs, paths, kinds, trust levels, or import settings. It
+contains only `source_refs` and `evidence_refs` citation IDs. During
+qualification, the deterministic boundary resolves every citation against the
+exact packed evidence items before a proposal can be approved.
+
 The cache index is bound to both the declared source configuration and the
-current bytes of local sources. If an ISV edits a local API specification or
-qualification document before proposal generation, `qualify` refreshes that
-source instead of sending stale evidence to the generator. This freshness
-check never performs hidden network requests.
+current bytes of local sources. API metadata is optional. Repeatable context
+inputs accept a local file, a local text-document tree, or an HTTP(S) page and
+are recorded as required, authoritative ISV evidence. If an ISV edits a local
+API specification or qualification document before proposal generation,
+`qualify` refreshes that source instead of sending stale evidence to the
+generator. This freshness check never performs hidden network requests.
 
 A fresh clone obtains the current head of the selected ref. Once recorded, the
 commit is stable for that qualification. Later commands reject checkout drift
@@ -73,8 +82,10 @@ applicable pinned checks and can suggest component mappings, coverage, and
 ownership. An API specification is authoritative for the interfaces the ISV
 declares, not proof that those interfaces work. The deterministic layer forces
 the proposal to remain a qualify-stage draft and requires its domains to equal
-the domains declared during `init`. The SME edits the proposal when facts are
-unresolved. Only an explicit approval promotes the reviewed document.
+the domains declared during `init`. It also resolves profile citations against
+the exact qualification-pack `source_id` values; the profile cannot redefine
+their locations or trust. The SME edits the proposal when facts are unresolved.
+Only an explicit approval promotes the reviewed document.
 
 Schema, reference, exact-domain, and component-graph failures are returned to
 the next bounded qualification pass in a compact, redacted failure envelope.
@@ -394,7 +405,8 @@ Conflicts are resolved in this order:
 
 1. pinned `ai-cloud-validation` source, schemas, suites, and test results;
 2. recorded empirical run evidence;
-3. the ISV API specification and provider-owned implementation;
+3. authoritative ISV context, any API specification, and the provider-owned
+   implementation;
 4. NVIDIA reference providers as patterns, not universal truth;
 5. NVIDIA Software Reference Guide material;
 6. explicitly supplied, approved advisory material.

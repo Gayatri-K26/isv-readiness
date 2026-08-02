@@ -9,8 +9,11 @@ commands, YAML, API specifications, or reports.
 Have these ready before starting:
 
 - the domains the product owns;
-- an OpenAPI or equivalent machine-readable interface specification;
-- the provider API endpoint;
+- one or more authoritative product inputs, such as a reference architecture,
+  product documentation, command reference, configuration examples, or an API
+  specification;
+- the provider API endpoint and API specification, only when the product has
+  them;
 - names of required credential and non-secret input environment variables;
 - a representative live environment with the claimed resources available;
 - an installed and authenticated agent CLI, a locally registered gapctl
@@ -37,6 +40,7 @@ the product actually owns.
 gapctl init <provider-name> \
   --workspace ./<provider-name>-readiness \
   --domains bare_metal,kubernetes,slurm,observability \
+  --context /absolute/path/to/<reference-architecture>.md \
   --api https://<provider-api-host>/<base-path> \
   --api-spec /absolute/path/to/<provider-api-spec>.yaml \
   --auth PROVIDER_CLIENT_ID \
@@ -46,16 +50,21 @@ gapctl init <provider-name> \
 cd ./<provider-name>-readiness
 ```
 
+`--api` and `--api-spec` are optional. Repeat `--context` for each readable
+local file, directory of text documents, or HTTP(S) source supplied as ISV
+qualification evidence.
+
 `init` clones `ai-cloud-validation` into the workspace, records its exact
-commit, imports the provider specification, complete NCP Software Reference
-Guide, and complete NVIDIA Inference Reference Architecture, and creates the
-initial profile and provider scaffolding. If the ISV already has a checkout,
-add `--validation-root /absolute/path/to/ai-cloud-validation`; `init` pins its
+commit, imports the supplied ISV context and optional provider specification,
+complete NCP Software Reference Guide, and complete NVIDIA Inference Reference
+Architecture, and creates the initial profile and provider scaffolding. If the
+ISV already has a checkout, add
+`--validation-root /absolute/path/to/ai-cloud-validation`; `init` pins its
 current commit and preserves an existing named provider implementation without
-fetching, switching, or overwriting it. The Inference Reference Architecture is
-standard reference context for every ISV; it does not imply that the ISV claims
-inference capabilities. Later commands do not silently update the pinned
-validation checkout.
+fetching, switching, or overwriting it. The Inference Reference Architecture
+is standard reference context for every ISV; it does not imply that the ISV
+claims inference capabilities. Later commands do not silently update the
+pinned validation checkout.
 
 Verify the generated state:
 
@@ -64,6 +73,12 @@ git -C ai-cloud-validation rev-parse HEAD
 sed -n '1,220p' isv-project.yaml
 sed -n '1,260p' solution-profile.yaml
 ```
+
+Define source locations only under `context_sources` in `isv-project.yaml`.
+The solution profile intentionally has no `sources` section: its
+`source_refs` and `evidence_refs` fields cite source IDs from the evidence pack.
+This keeps one source definition while preserving evidence-backed scope
+decisions.
 
 ## 4. Qualify the declared scope
 

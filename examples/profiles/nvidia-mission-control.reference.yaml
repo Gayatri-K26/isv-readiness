@@ -322,20 +322,6 @@ domains:
       This reference target is a bare-metal GPU cluster. A VMaaS component must
       be added and versioned if the candidate solution claims virtual machines.
 
-sources:
-  - id: nmc-docs
-    title: NVIDIA Mission Control Documentation
-    url: https://docs.nvidia.com/mission-control/index.html
-    kind: documentation
-  - id: nmc-230-release-notes
-    title: NVIDIA Mission Control 2.3.0 Release Notes
-    url: https://docs.nvidia.com/mission-control/docs/systems-quick-start-guide/2.3.0/nmc-release-notes.html
-    kind: documentation
-  - id: bcm-docs
-    title: NVIDIA Base Command Manager Documentation
-    url: https://docs.nvidia.com/base-command-manager/index.html
-    kind: documentation
-
 assumptions:
   - This is a draft discovery baseline, not a validated product claim.
   - Installed Mission Control, BCM, recovery, dashboard, and LaunchPad component builds must be captured from the deployment manifest.

@@ -59,6 +59,8 @@ class PublicJourneyTests(unittest.TestCase):
                 "vm",
                 "--validation-root",
                 "/opt/ai-cloud-validation",
+                "--context",
+                "https://docs.acme.invalid/reference-architecture",
             ]
         )
         registered = parser.parse_args(["qualify", "--generator", "internal-agent"])
@@ -68,6 +70,10 @@ class PublicJourneyTests(unittest.TestCase):
         )
 
         self.assertEqual(existing_checkout.validation_root, Path("/opt/ai-cloud-validation"))
+        self.assertEqual(
+            existing_checkout.context_inputs,
+            ["https://docs.acme.invalid/reference-architecture"],
+        )
         self.assertEqual(registered.generator, "internal-agent")
         self.assertEqual(executable.generator, "/opt/custom-adapter")
         self.assertEqual(exchange.generator_response, Path("/tmp/agent-response.json"))
@@ -92,6 +98,7 @@ class PublicJourneyTests(unittest.TestCase):
                     "isv_readiness.journey.build_qualify_catalog",
                     return_value={"domains": {"vm": {"checks": []}}},
                 ),
+                patch("isv_readiness.journey.build_qualify_pack", return_value={"items": []}),
                 redirect_stdout(io.StringIO()),
             ):
                 exit_code = cmd_qualify(confirm=lambda prompt: True)
@@ -155,6 +162,7 @@ class PublicJourneyTests(unittest.TestCase):
             with (
                 patch("isv_readiness.journey.find_project", return_value=manifest),
                 patch("isv_readiness.journey.build_qualify_catalog", return_value=catalog),
+                patch("isv_readiness.journey.build_qualify_pack", return_value={"items": []}),
                 redirect_stdout(output),
             ):
                 exit_code = cmd_qualify(confirm=lambda prompt: False)
@@ -182,7 +190,10 @@ class PublicJourneyTests(unittest.TestCase):
                     "isv_readiness.journey.build_qualify_catalog",
                     return_value={"domains": {"vm": {"checks": []}}},
                 ),
-                patch("isv_readiness.journey.build_qualify_pack", return_value={"project": {}}),
+                patch(
+                    "isv_readiness.journey.build_qualify_pack",
+                    return_value={"project": {}, "items": []},
+                ),
                 patch(
                     "isv_readiness.journey.resolve_generator_spec",
                     return_value=GeneratorSpec(

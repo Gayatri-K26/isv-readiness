@@ -30,6 +30,7 @@ from isv_readiness.solution_profile import (
     SolutionProfileError,
     canonicalize_domain,
     parse_solution_profile,
+    validate_profile_evidence_refs,
 )
 from isv_readiness.validation_adapter import IsvctlAdapter
 
@@ -136,7 +137,8 @@ def run_profile_draft(
             "rules": [
                 "Return one JSON object and no Markdown or commentary.",
                 "Draft every declared domain and no others; never invent scope.",
-                "Every id used in 'evidence_refs' must also be declared in the profile's 'sources' list.",
+                "Use source_refs and evidence_refs only to cite item source_id values present in context_pack.items.",
+                "Do not copy source definitions into the solution profile; isv-project.yaml owns them.",
                 "Do not include credential values anywhere.",
             ],
             "output_schema": load_schema("solution-profile.schema.json"),
@@ -185,8 +187,8 @@ def _harden_and_validate_draft(raw: dict[str, Any], pack: Mapping[str, Any]) -> 
     if isinstance(raw.get("solution"), dict):
         raw["solution"]["profile_status"] = "draft"
     raw["journey"] = {"stage": "qualify", "status": "in_progress"}
-    _declare_cited_pack_items(raw, pack)
     profile = parse_solution_profile(raw)
+    validate_profile_evidence_refs(profile, _pack_source_ids(pack))
 
     declared = {canonicalize_domain(domain) for domain in pack["project"]["declared_domains"]}
     drafted = {domain.domain for domain in profile.domains}
@@ -232,37 +234,12 @@ def _qualification_failure_envelope(
     }
 
 
-def _declare_cited_pack_items(raw: dict[str, Any], pack: Mapping[str, Any]) -> None:
-    """Declare pack items the draft cites as evidence in its sources list.
-
-    Citing the packed catalog/spec/run excerpts is exactly the evidence
-    discipline the rules demand; the profile's referential-integrity check
-    should not fail a draft for doing it.
-    """
-    items = {
-        item["source_id"]: item
+def _pack_source_ids(pack: Mapping[str, Any]) -> set[str]:
+    return {
+        item["source_id"]
         for item in pack.get("items", ())
         if isinstance(item, Mapping) and isinstance(item.get("source_id"), str)
     }
-    declared = {source.get("id") for source in raw.get("sources") or () if isinstance(source, Mapping)}
-    cited: set[str] = set()
-    for domain in raw.get("domains") or ():
-        if not isinstance(domain, Mapping):
-            continue
-        cited.update(ref for ref in domain.get("evidence_refs") or () if isinstance(ref, str))
-        for capability in domain.get("capabilities") or ():
-            if isinstance(capability, Mapping):
-                cited.update(ref for ref in capability.get("evidence_refs") or () if isinstance(ref, str))
-    for ref in sorted(cited - declared):
-        if ref in items:
-            raw.setdefault("sources", []).append(
-                {
-                    "id": ref,
-                    "title": f"qualify evidence pack item {ref}",
-                    "url": str(items[ref].get("origin") or f"gapctl://pack/{ref}"),
-                    "kind": "other",
-                }
-            )
 
 
 def empirical_conflicts(profile: SolutionProfile, runs_root: Path) -> list[str]:

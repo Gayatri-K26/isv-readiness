@@ -144,6 +144,7 @@ class BootstrapPlan:
     api_base_url: str | None
     api_base_url_env: str | None
     api_spec: str | None
+    context_inputs: tuple[str, ...]
     auth_env: tuple[str, ...]
     pass_env: tuple[str, ...]
     clone_required: bool
@@ -173,6 +174,7 @@ def build_bootstrap_plan(
     api_base_url: str | None = None,
     api_base_url_env: str | None = None,
     api_spec: str | None = None,
+    context_inputs: Sequence[str] = (),
     auth_env: Sequence[str] = (),
     pass_env: Sequence[str] = (),
 ) -> BootstrapPlan:
@@ -191,6 +193,19 @@ def build_bootstrap_plan(
     if invalid_env:
         raise ProjectError(f"Credential inputs must be environment variable names: {', '.join(invalid_env)}")
 
+    normalized_context: list[str] = []
+    for value in context_inputs:
+        location = value.strip()
+        if not location:
+            raise ProjectError("Context inputs must not be empty.")
+        if not location.startswith(("https://", "http://")):
+            path = Path(location).expanduser().resolve()
+            if not path.is_file() and not path.is_dir():
+                raise ProjectError(f"Context input not found: {path}")
+            location = str(path)
+        if location not in normalized_context:
+            normalized_context.append(location)
+
     workspace = workspace.expanduser().resolve()
     checkout = (validation_root or (workspace / "ai-cloud-validation")).expanduser().resolve()
     return BootstrapPlan(
@@ -204,6 +219,7 @@ def build_bootstrap_plan(
         api_base_url=api_base_url.strip() if api_base_url else None,
         api_base_url_env=api_base_url_env,
         api_spec=api_spec.strip() if api_spec else None,
+        context_inputs=tuple(normalized_context),
         auth_env=tuple(dict.fromkeys(auth_env)),
         pass_env=tuple(dict.fromkeys(pass_env)),
         clone_required=not checkout.exists(),
@@ -299,6 +315,21 @@ def execute_bootstrap(
                 required=True,
                 domains=plan.domains,
                 labels=(),
+                query=None,
+            )
+        )
+    for index, location in enumerate(plan.context_inputs, start=1):
+        is_url = location.startswith(("https://", "http://"))
+        kind = "web_url" if is_url else ("local_tree" if Path(location).is_dir() else "local_file")
+        sources.append(
+            ContextSource(
+                id=f"isv_context_{index}",
+                kind=kind,
+                location=location,
+                trust="authoritative",
+                required=True,
+                domains=plan.domains,
+                labels=("isv_supplied",),
                 query=None,
             )
         )
@@ -491,7 +522,6 @@ def _draft_scope_profile(plan: BootstrapPlan) -> dict[str, Any]:
             }
             for domain in plan.domains
         ],
-        "sources": [],
         "assumptions": [
             "This draft records operator-declared owned scope only; an SME must review versions, capability ownership, and assign NSRG layers to components before entering the validate phase."
         ],

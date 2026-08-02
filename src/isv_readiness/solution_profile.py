@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import asdict, dataclass
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -50,14 +50,6 @@ AgentAction = Literal[
 
 class SolutionProfileError(ValueError):
     """Raised when a solution profile is invalid or resolves ambiguously."""
-
-
-@dataclass(frozen=True)
-class SourceReference:
-    id: str
-    title: str
-    url: str
-    kind: str
 
 
 @dataclass(frozen=True)
@@ -180,7 +172,6 @@ class SolutionProfile:
     actors: tuple[Actor, ...]
     components: tuple[Component, ...]
     domains: tuple[DomainResponsibility, ...]
-    sources: tuple[SourceReference, ...]
     assumptions: tuple[str, ...]
 
     def to_dict(self) -> dict[str, Any]:
@@ -336,6 +327,11 @@ def load_solution_profile(path: Path, *, schema_path: Path | None = None) -> Sol
 def parse_solution_profile(
     payload: Mapping[str, Any], *, schema_path: Path | None = None
 ) -> SolutionProfile:
+    if "sources" in payload:
+        raise SolutionProfileError(
+            "Invalid solution profile: remove the top-level 'sources' section; "
+            "source definitions belong in isv-project.yaml and profiles cite their IDs."
+        )
     try:
         schema = (
             yaml.safe_load(schema_path.read_text(encoding="utf-8"))
@@ -354,15 +350,6 @@ def parse_solution_profile(
     )
     components = tuple(_parse_component(item) for item in payload["components"])
     domains = tuple(_parse_domain(item) for item in payload["domains"])
-    sources = tuple(
-        SourceReference(
-            id=item["id"],
-            title=item["title"],
-            url=item["url"],
-            kind=item["kind"],
-        )
-        for item in payload.get("sources", [])
-    )
     profile = SolutionProfile(
         schema_version=payload["schema_version"],
         solution=SolutionIdentity(
@@ -377,7 +364,6 @@ def parse_solution_profile(
         actors=actors,
         components=components,
         domains=domains,
-        sources=sources,
         assumptions=tuple(payload.get("assumptions", [])),
     )
     _validate_references(profile)
@@ -444,7 +430,6 @@ def _parse_capability(item: Mapping[str, Any]) -> CapabilityResponsibility:
 def _validate_references(profile: SolutionProfile) -> None:
     actor_ids = _unique_ids(profile.actors, "actor")
     component_ids = _unique_ids(profile.components, "component")
-    source_ids = _unique_ids(profile.sources, "source")
 
     domain_names = [domain.domain for domain in profile.domains]
     if len(domain_names) != len(set(domain_names)):
@@ -457,8 +442,6 @@ def _validate_references(profile: SolutionProfile) -> None:
         _require_reference(component.supplier_actor_id, actor_ids, f"component '{component.id}' actor")
         for dependency in component.depends_on:
             _require_reference(dependency, component_ids, f"component '{component.id}' dependency")
-        for source_ref in component.source_refs:
-            _require_reference(source_ref, source_ids, f"component '{component.id}' source")
     _validate_component_graph(profile.components)
 
     capability_ids: set[str] = set()
@@ -476,9 +459,7 @@ def _validate_references(profile: SolutionProfile) -> None:
         _validate_scope_references(
             domain.domain,
             domain.component_ids,
-            domain.evidence_refs,
             component_ids,
-            source_ids,
         )
         _require_rationale(domain.domain, domain.coverage, domain.validation_mode, domain.rationale)
         for capability in domain.capabilities:
@@ -500,9 +481,7 @@ def _validate_references(profile: SolutionProfile) -> None:
             _validate_scope_references(
                 capability.id,
                 capability.component_ids,
-                capability.evidence_refs,
                 component_ids,
-                source_ids,
             )
             effective_coverage = capability.coverage or domain.coverage
             effective_mode = capability.validation_mode or domain.validation_mode
@@ -513,14 +492,39 @@ def _validate_references(profile: SolutionProfile) -> None:
 def _validate_scope_references(
     scope_id: str,
     scoped_components: tuple[str, ...],
-    scoped_sources: tuple[str, ...],
     component_ids: set[str],
-    source_ids: set[str],
 ) -> None:
     for component_id in scoped_components:
         _require_reference(component_id, component_ids, f"scope '{scope_id}' component")
-    for source_id in scoped_sources:
-        _require_reference(source_id, source_ids, f"scope '{scope_id}' evidence")
+
+
+def validate_profile_evidence_refs(
+    profile: SolutionProfile,
+    available_source_ids: Collection[str],
+) -> None:
+    """Resolve profile citations against the evidence authority supplied by the caller."""
+    available = set(available_source_ids)
+    cited = {
+        ref
+        for component in profile.components
+        for ref in component.source_refs
+    }
+    cited.update(
+        ref
+        for domain in profile.domains
+        for ref in domain.evidence_refs
+    )
+    cited.update(
+        ref
+        for domain in profile.domains
+        for capability in domain.capabilities
+        for ref in capability.evidence_refs
+    )
+    unknown = sorted(cited - available)
+    if unknown:
+        raise SolutionProfileError(
+            "Unknown qualification evidence reference(s): " + ", ".join(unknown)
+        )
 
 
 def _validate_component_graph(components: tuple[Component, ...]) -> None:

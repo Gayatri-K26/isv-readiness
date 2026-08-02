@@ -75,10 +75,13 @@ class SimpleCommandTests(unittest.TestCase):
     def test_init_passes_requested_validation_ref_to_bootstrap(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             validation_root = Path(tempdir) / "existing-validation"
+            architecture = Path(tempdir) / "architecture.md"
+            architecture.write_text("# Architecture\n", encoding="utf-8")
 
             def stop_before_clone(plan, *, overwrite):
                 self.assertEqual(plan.validation_ref, "release-1.2")
                 self.assertEqual(plan.validation_root, validation_root.resolve())
+                self.assertEqual(plan.context_inputs, (str(architecture.resolve()),))
                 self.assertEqual(plan.api_base_url_env, "ISV_API_BASE_URL")
                 self.assertEqual(plan.pass_env, ("ACME_REGION",))
                 self.assertFalse(overwrite)
@@ -98,6 +101,7 @@ class SimpleCommandTests(unittest.TestCase):
                         auth_envs=[],
                         input_envs=["ACME_REGION"],
                         api_spec=None,
+                        context_inputs=[str(architecture)],
                         validation_ref="release-1.2",
                         validation_root=validation_root,
                     ),

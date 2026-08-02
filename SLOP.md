@@ -2708,3 +2708,59 @@ existing implementation and stopped the workflow.
   existing provider implementation.
 - All 203 tests pass. Ruff, Python compilation, every packaged JSON schema,
   lock validation, and diff checks pass.
+
+## Step 59 - Accept Qualification Context Without an API
+
+### Evidence
+
+The context subsystem already supported redacted local files, local text trees,
+and web pages, and the qualification skill already treated architecture and
+product documentation as valid evidence. The public initialization command
+only exposed API URL/specification inputs, making API-less products appear
+unsupported and preventing them from declaring their own reference material.
+
+### Decision
+
+1. Add a repeatable `--context` initialization option accepting an existing
+   local file, local directory, or HTTP(S) URL.
+2. Record those inputs as required, authoritative ISV evidence across the
+   declared domains and import them through the existing redaction and cache
+   pipeline.
+3. Keep `--api` and `--api-spec` optional. Add no replacement API model, source
+   mini-language, or additional workflow phase.
+4. Reject missing local context before cloning so initialization cannot create
+   a partial workspace from invalid input.
+
+### Verification
+
+- Focused tests cover API-less file/tree/URL context, duplicate normalization,
+  missing input rejection, CLI parsing, and initialization pass-through.
+- All 205 tests pass. Ruff, Python compilation, every packaged JSON schema,
+  lock validation, and diff checks pass.
+
+## Step 60 - Keep One Source Authority
+
+### Evidence
+
+The project manifest already owned source locations, trust, required status,
+and import behavior, while the generated solution profile repeated selected
+source titles, URLs, and kinds. That created two editable definitions for the
+same evidence and made drift or conflicting metadata possible.
+
+### Decision
+
+1. Keep all source definitions in `isv-project.yaml` and its generated
+   qualification pack.
+2. Remove source definitions from the solution-profile schema and generated
+   profiles; retain only `source_refs` and `evidence_refs` citation IDs.
+3. Resolve every generated or reviewed citation against the exact evidence
+   pack before qualification can proceed. Reject invented IDs and profile-side
+   source definitions.
+4. Add no registry, migration layer, or additional workflow phase.
+
+### Verification
+
+- Focused tests cover valid pack citations, unknown citations, and rejection
+  of duplicate profile-side source definitions.
+- All 208 tests pass. Ruff, Python compilation, every packaged JSON schema,
+  lock validation, and diff checks pass.

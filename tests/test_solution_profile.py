@@ -11,6 +11,7 @@ from isv_readiness.solution_profile import (
     SolutionProfileError,
     load_solution_profile,
     parse_solution_profile,
+    validate_profile_evidence_refs,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -179,6 +180,29 @@ class SolutionProfileTests(unittest.TestCase):
                 validation_category="k8s_storage",
                 validation_class="K8sCsiStorageTypesCheck",
             )
+
+    def test_evidence_references_resolve_against_external_source_authority(self) -> None:
+        payload = self._load_payload(self.bcm_path)
+        profile = parse_solution_profile(payload)
+        validate_profile_evidence_refs(
+            profile,
+            {"bcm-docs", "bcm-11-release-notes"},
+        )
+        with self.assertRaisesRegex(SolutionProfileError, "bcm-11-release-notes"):
+            validate_profile_evidence_refs(profile, {"bcm-docs"})
+
+    def test_solution_profile_rejects_duplicated_source_definitions(self) -> None:
+        payload = self._load_payload(self.bcm_path)
+        payload["sources"] = [
+            {
+                "id": "bcm-docs",
+                "title": "duplicated definition",
+                "url": "https://example.invalid",
+                "kind": "documentation",
+            }
+        ]
+        with self.assertRaisesRegex(SolutionProfileError, "source definitions belong in isv-project.yaml"):
+            parse_solution_profile(payload)
 
     @staticmethod
     def _load_payload(path: Path) -> dict:

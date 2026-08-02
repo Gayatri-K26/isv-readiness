@@ -58,6 +58,7 @@ def cmd_init(
     auth_envs: list[str],
     input_envs: list[str] | None = None,
     api_spec: str | None,
+    context_inputs: list[str] | None = None,
     validation_ref: str = "main",
     validation_root: Path | None = None,
 ) -> int:
@@ -87,6 +88,7 @@ def cmd_init(
             auth_env=auth_envs,
             pass_env=input_envs or [],
             api_spec=resolved_api_spec,
+            context_inputs=context_inputs or [],
         )
         project = execute_bootstrap(plan, overwrite=False)
     except (OSError, ProjectError) as exc:

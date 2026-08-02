@@ -43,11 +43,23 @@ def _build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Comma-separated infrastructure domains the ISV owns",
     )
-    init_parser.add_argument("--api", dest="api_url", default=None, help="Provider API base URL")
+    init_parser.add_argument(
+        "--api",
+        dest="api_url",
+        default=None,
+        help="Optional provider API base URL",
+    )
     init_parser.add_argument(
         "--api-spec",
         default=None,
-        help="Local path or URL for the provider API specification",
+        help="Optional local path or URL for a provider API specification",
+    )
+    init_parser.add_argument(
+        "--context",
+        dest="context_inputs",
+        action="append",
+        default=[],
+        help="ISV evidence file, directory, or URL; repeat when needed",
     )
     init_parser.add_argument(
         "--auth",
@@ -143,6 +155,7 @@ def _init(args: argparse.Namespace) -> int:
         auth_envs=args.auth_envs,
         input_envs=args.input_envs,
         api_spec=args.api_spec,
+        context_inputs=args.context_inputs,
         validation_ref=args.validation_ref,
         validation_root=args.validation_root,
     )

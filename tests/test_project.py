@@ -89,6 +89,56 @@ class ProjectBootstrapTests(unittest.TestCase):
             schema = load_schema("project.schema.json")
             jsonschema.validate(raw, schema)
 
+    def test_bootstrap_accepts_non_api_isv_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            workspace = root / "workspace"
+            checkout = workspace / "ai-cloud-validation"
+            _make_checkout(checkout)
+            architecture = root / "reference-architecture.md"
+            architecture.write_text("# Acme reference architecture\n", encoding="utf-8")
+            document_tree = root / "product-docs"
+            document_tree.mkdir()
+            (document_tree / "operations.md").write_text("# Operations\n", encoding="utf-8")
+
+            plan = build_bootstrap_plan(
+                workspace,
+                provider_name="acme",
+                domains=["vm"],
+                validation_root=checkout,
+                context_inputs=[
+                    str(architecture),
+                    str(document_tree),
+                    "https://docs.acme.invalid/platform",
+                    str(architecture),
+                ],
+            )
+            project = execute_bootstrap(plan, runner=_git_runner)
+
+            self.assertEqual(project.apis, ())
+            supplied = [source for source in project.context_sources if "isv_supplied" in source.labels]
+            self.assertEqual(
+                [(source.id, source.kind) for source in supplied],
+                [
+                    ("isv_context_1", "local_file"),
+                    ("isv_context_2", "local_tree"),
+                    ("isv_context_3", "web_url"),
+                ],
+            )
+            self.assertTrue(all(source.required and source.trust == "authoritative" for source in supplied))
+
+    def test_bootstrap_rejects_a_missing_context_input_before_clone(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            workspace = Path(tempdir) / "workspace"
+            with self.assertRaisesRegex(ProjectError, "Context input not found"):
+                build_bootstrap_plan(
+                    workspace,
+                    provider_name="acme",
+                    domains=["vm"],
+                    context_inputs=[str(Path(tempdir) / "missing.md")],
+                )
+            self.assertFalse(workspace.exists())
+
     def test_missing_checkout_is_cloned_before_manifest_is_written(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             workspace = Path(tempdir) / "workspace"

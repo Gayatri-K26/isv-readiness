@@ -238,7 +238,7 @@ class ProfileDraftTests(unittest.TestCase):
         self.assertEqual(raw["solution"]["profile_status"], "draft")
         self.assertEqual(raw["journey"], {"stage": "qualify", "status": "in_progress"})
 
-    def test_cited_pack_items_are_declared_as_sources(self) -> None:
+    def test_cited_pack_items_are_referenced_without_duplicate_definitions(self) -> None:
         pack = {
             "project": {"declared_domains": ["vm"]},
             "items": [{"source_id": "catalog_vm", "origin": "gapctl://catalog/vm"}],
@@ -251,9 +251,24 @@ class ProfileDraftTests(unittest.TestCase):
             cwd=Path("/tmp"),
             runner=_draft_runner(payload),
         )
-        declared = {source["id"]: source for source in raw["sources"]}
-        self.assertIn("catalog_vm", declared)
-        self.assertEqual(declared["catalog_vm"]["url"], "gapctl://catalog/vm")
+        self.assertNotIn("sources", raw)
+        self.assertEqual(raw["domains"][0]["evidence_refs"], ["catalog_vm"])
+
+    def test_unknown_evidence_reference_is_rejected(self) -> None:
+        pack = {
+            "project": {"declared_domains": ["vm"]},
+            "items": [{"source_id": "catalog_vm", "origin": "gapctl://catalog/vm"}],
+        }
+        payload = _profile_payload()
+        payload["domains"][0]["evidence_refs"] = ["invented_source"]
+        with self.assertRaisesRegex(QualifyError, "retry budget was exhausted"):
+            run_profile_draft(
+                pack,
+                command=["true"],
+                cwd=Path("/tmp"),
+                runner=_draft_runner(payload),
+                max_attempts=1,
+            )
 
     def test_qualification_reasoning_comes_from_the_pinned_skill(self) -> None:
         pack = {"project": {"declared_domains": ["vm"]}}
