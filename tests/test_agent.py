@@ -194,7 +194,6 @@ def _project(root: Path) -> tuple[Path, Path]:
     raw["provider"]["path"] = "provider"
     raw["provider"]["state"] = "existing"
     raw["execution"]["allow_live_runs"] = True
-    raw["execution"]["run_environment"] = "staging"
     plan.manifest_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     return plan.manifest_path, provider
 

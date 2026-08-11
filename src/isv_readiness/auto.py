@@ -432,20 +432,6 @@ def run_auto(
         blocked_by_unit=blocked_by_unit,
         feedback_by_unit=feedback_by_unit,
     )
-    if _run_environment_unconfigured(project.execution.run_environment):
-        parked.append(
-            ParkedGap(
-                gap_id="execution-preflight",
-                status="error",
-                action="request_scope_decision",
-                reason=(
-                    "Static checks are green, but execution.run_environment is not configured. "
-                    "Declare where provider steps run so required command availability and the "
-                    "configured route can be verified before accepting no_changes."
-                ),
-                masked_failure=False,
-            )
-        )
     if post_audit_pending_reason:
         parked.append(
             ParkedGap(
@@ -563,10 +549,6 @@ def _select_fixable(report: dict[str, Any], domain: str) -> list[dict[str, Any]]
         if row.get("domain") == domain
         and decide_gap(row).edit_eligible
     ]
-
-
-def _run_environment_unconfigured(value: str) -> bool:
-    return value.strip().lower() in {"", "not_configured", "unknown", "unset"}
 
 
 def _park(

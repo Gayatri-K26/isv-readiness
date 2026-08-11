@@ -289,12 +289,10 @@ The agent must reuse suitable existing provider transport, routing, polling,
 inventory, and client primitives; cite the source for every wire mapping; and
 restore relevant starting configuration and health after mutating tests when
 safe. Existing command paths require evidence that their executables and route
-match the declared run environment.
-
-The terminal static state also requires a configured
-`execution.run_environment`. The initial `not_configured` sentinel produces an
-`execution-preflight` parked gap rather than an unqualified `no_changes`
-conclusion.
+match the declared interfaces and runtime inputs. Target identity remains in
+the reviewed solution profile, while actual preflight and live execution prove
+whether the configured route works. The project does not use a free-text route
+sentence as a readiness gate.
 
 Retry accounting uses the same contract unit, so several checks backed by one
 adapter cannot multiply the model budget or consume another step's retries.

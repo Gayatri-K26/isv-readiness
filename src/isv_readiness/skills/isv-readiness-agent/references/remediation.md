@@ -78,8 +78,9 @@
     consumer supports only a direct endpoint, return an empty change set with
     that structural blocker; never substitute the intermediary for the tested
     resource. Before retaining an existing command path or returning no
-    changes, require evidence that its executables are available from the
-    declared run environment and its configured route reaches the target.
+    changes, require executable preflight or empirical evidence that its
+    commands are available and the route defined by the declared interfaces
+    and runtime inputs reaches the target.
 18. Return an empty change set only when a required interface is absent or
     structurally incompatible with the allowed contract. Otherwise implement a
     bounded, fail-closed adapter.

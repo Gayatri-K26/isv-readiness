@@ -247,13 +247,6 @@ never truncated.
 
 ### 3. Validate
 
-Before validation, replace the initial `execution.run_environment:
-not_configured` value in `isv-project.yaml` with a non-secret description of
-where provider commands execute, such as `operator workstation through the
-declared bastion`. Static `no_changes` is parked until this is declared, so
-command availability and the configured route cannot be mistaken for proven
-executability.
-
 Set the declared provider runtime values in the current environment before
 live validation:
 

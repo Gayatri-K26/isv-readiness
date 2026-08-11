@@ -204,42 +204,6 @@ class AutoWorkflowTests(unittest.TestCase):
             self.assertEqual(calls, 0)
             self.assertEqual(review.status, "no_changes")
 
-    def test_no_changes_parks_when_execution_environment_is_not_declared(self) -> None:
-        with tempfile.TemporaryDirectory() as tempdir:
-            project_path, _provider = _project(Path(tempdir))
-            raw = yaml.safe_load(project_path.read_text(encoding="utf-8"))
-            raw["execution"]["run_environment"] = "not_configured"
-            project_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
-            work = Path(tempdir) / "work"
-
-            staged = run_auto(
-                project_path,
-                domain="vm",
-                work_dir=work,
-                generator_command=["fixture-generator"],
-                generator_runner=_generator_runner,
-            )
-            run_auto(
-                project_path,
-                domain="vm",
-                work_dir=work,
-                generator_command=["fixture-generator"],
-                generator_runner=_generator_runner,
-                apply=True,
-                approval_patch_sha256=staged.patch_sha256,
-            )
-            terminal = run_auto(
-                project_path,
-                domain="vm",
-                work_dir=work,
-                generator_command=["fixture-generator"],
-                generator_runner=_generator_runner,
-            )
-
-        self.assertEqual(terminal.status, "no_changes")
-        preflight = next(item for item in terminal.parked if item.gap_id == "execution-preflight")
-        self.assertIn("command availability", preflight.reason)
-
     def test_file_exchange_can_stop_after_one_imported_generator_response(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             project_path, _provider = _project(Path(tempdir))
@@ -696,7 +660,6 @@ def _project(root: Path) -> tuple[Path, Path]:
     raw = yaml.safe_load(plan.manifest_path.read_text(encoding="utf-8"))
     raw["provider"]["path"] = "provider"
     raw["provider"]["state"] = "existing"
-    raw["execution"]["run_environment"] = "staging"
     plan.manifest_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     return plan.manifest_path, provider
 

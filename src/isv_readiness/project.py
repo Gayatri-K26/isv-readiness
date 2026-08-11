@@ -83,7 +83,6 @@ class ContextSource:
 
 @dataclass(frozen=True)
 class ExecutionPolicy:
-    run_environment: str
     allow_live_runs: bool
     credential_env: tuple[str, ...]
     pass_env: tuple[str, ...]
@@ -349,7 +348,6 @@ def execute_bootstrap(
         interfaces=interfaces,
         context_sources=tuple(sources),
         execution=ExecutionPolicy(
-            run_environment="not_configured",
             allow_live_runs=False,
             credential_env=plan.auth_env,
             pass_env=plan.pass_env,
@@ -427,7 +425,6 @@ def load_project(path: Path) -> ReadinessProject:
         ),
         context_sources=context_sources,
         execution=ExecutionPolicy(
-            run_environment=raw["execution"]["run_environment"],
             allow_live_runs=raw["execution"]["allow_live_runs"],
             credential_env=tuple(raw["execution"]["credential_env"]),
             pass_env=tuple(raw["execution"]["pass_env"]),
@@ -462,12 +459,17 @@ def validate_project(raw: Any) -> None:
 
 
 def _canonical_project_manifest(raw: Any) -> Any:
-    """Accept the pre-rename ``apis`` key while exposing only ``interfaces`` internally."""
+    """Normalize obsolete manifest names without exposing them internally."""
 
-    if not isinstance(raw, dict) or "interfaces" in raw or "apis" not in raw:
+    if not isinstance(raw, dict):
         return raw
     normalized = dict(raw)
-    normalized["interfaces"] = normalized.pop("apis")
+    if "interfaces" not in normalized and "apis" in normalized:
+        normalized["interfaces"] = normalized.pop("apis")
+    execution = normalized.get("execution")
+    if isinstance(execution, dict) and "run_environment" in execution:
+        normalized["execution"] = dict(execution)
+        normalized["execution"].pop("run_environment")
     return normalized
 
 

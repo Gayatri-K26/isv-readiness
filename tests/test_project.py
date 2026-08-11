@@ -89,6 +89,7 @@ class ProjectBootstrapTests(unittest.TestCase):
             raw = yaml.safe_load(plan.manifest_path.read_text(encoding="utf-8"))
             self.assertIn("interfaces", raw)
             self.assertNotIn("apis", raw)
+            self.assertNotIn("run_environment", raw["execution"])
             schema = load_schema("project.schema.json")
             jsonschema.validate(raw, schema)
 
@@ -165,6 +166,7 @@ class ProjectBootstrapTests(unittest.TestCase):
             execute_bootstrap(plan, runner=_git_runner)
             raw = yaml.safe_load(plan.manifest_path.read_text(encoding="utf-8"))
             raw["apis"] = raw.pop("interfaces")
+            raw["execution"]["run_environment"] = "operator workstation"
             plan.manifest_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
 
             project = load_project(plan.manifest_path)
@@ -172,6 +174,7 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertEqual(project.interfaces[0].kind, "rest")
             self.assertIn("interfaces", project.to_dict())
             self.assertNotIn("apis", project.to_dict())
+            self.assertNotIn("run_environment", project.to_dict()["execution"])
 
     def test_bootstrap_rejects_a_missing_context_input_before_clone(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:

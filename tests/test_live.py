@@ -332,7 +332,6 @@ def _project(root: Path, *, allow_live: bool):
     raw["provider"]["path"] = "provider"
     raw["provider"]["state"] = "existing"
     raw["execution"]["allow_live_runs"] = allow_live
-    raw["execution"]["run_environment"] = "staging"
     plan.manifest_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     return load_project(plan.manifest_path), plan.manifest_path
 

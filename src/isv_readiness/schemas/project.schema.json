@@ -53,9 +53,8 @@
     "execution": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["run_environment", "allow_live_runs", "credential_env", "pass_env", "max_attempts", "cleanup_required"],
+      "required": ["allow_live_runs", "credential_env", "pass_env", "max_attempts", "cleanup_required"],
       "properties": {
-        "run_environment": {"type": "string", "minLength": 1},
         "allow_live_runs": {"type": "boolean"},
         "credential_env": {"$ref": "#/$defs/string_array"},
         "pass_env": {"$ref": "#/$defs/string_array"},

@@ -3027,3 +3027,33 @@ SDK, and Kubernetes contracts were APIs.
 
 - Project tests cover every supported interface kind, canonical output, and a
   legacy `apis` manifest loaded as `interfaces`.
+
+## Step 68 - Remove the Free-Text Execution-Route Gate
+
+### Evidence
+
+`execution.run_environment` was intended to distinguish the qualified target
+from the machine and route used to execute provider commands. In practice it
+was an unstructured string. The only deterministic check rejected a few
+sentinel values such as `not_configured`; any other sentence passed without
+verifying mTLS, SSH, Kubernetes, Slurm, command availability, or reachability.
+The reviewed profile already identifies the target environment, while the
+project's interfaces and environment-name contracts describe the actionable
+runtime inputs.
+
+### Decision
+
+1. Remove `execution.run_environment` from the project model, schema, generated
+   manifests, loader, and tests.
+2. Remove the `execution-preflight` parked gap and its sentinel check.
+3. Keep target identity in `solution-profile.yaml`, connection metadata under
+   `interfaces`, and runtime variable names under the execution policy.
+4. Treat executable preflight and authorized live results as route evidence;
+   do not replace them with another free-text field.
+
+### Verification
+
+- New manifests omit the removed field. The loader drops it in memory from an
+  older manifest so an existing workspace can upgrade without retaining the
+  obsolete gate in the canonical project model.
+- Existing static, audit, patch-review, and live gates remain unchanged.
