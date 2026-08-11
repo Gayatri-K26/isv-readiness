@@ -4,7 +4,7 @@
   "title": "ISV Readiness Workspace Project",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "validation", "provider", "assessment", "apis", "context_sources", "execution"],
+  "required": ["schema_version", "validation", "provider", "assessment", "interfaces", "context_sources", "execution"],
   "properties": {
     "schema_version": {"const": "0.1.0"},
     "validation": {
@@ -42,9 +42,9 @@
         "profile": {"type": ["string", "null"]}
       }
     },
-    "apis": {
+    "interfaces": {
       "type": "array",
-      "items": {"$ref": "#/$defs/api"}
+      "items": {"$ref": "#/$defs/interface"}
     },
     "context_sources": {
       "type": "array",
@@ -77,7 +77,7 @@
       "items": {"type": "string", "minLength": 1},
       "uniqueItems": true
     },
-    "api": {
+    "interface": {
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "kind", "base_url", "base_url_env", "spec", "auth_env", "domains"],

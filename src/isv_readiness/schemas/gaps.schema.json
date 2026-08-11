@@ -76,7 +76,7 @@
           "enum": ["pass", "fail", "not_implemented", "skipped", "error"]
         },
         "detection": {
-          "enum": ["static", "dynamic"]
+          "enum": ["static", "dynamic", "semantic"]
         },
         "stage": {
           "enum": ["coverage", "correctness"]

@@ -10,12 +10,12 @@
     "project": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["provider", "declared_domains", "validation_commit", "api_interfaces"],
+      "required": ["provider", "declared_domains", "validation_commit", "interfaces"],
       "properties": {
         "provider": {"type": "string", "minLength": 1},
         "declared_domains": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1},
         "validation_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-        "api_interfaces": {"type": "array", "items": {"type": "object"}}
+        "interfaces": {"type": "array", "items": {"type": "object"}}
       }
     },
     "constraints": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1},

@@ -2764,3 +2764,266 @@ same evidence and made drift or conflicting metadata possible.
   of duplicate profile-side source definitions.
 - All 208 tests pass. Ruff, Python compilation, every packaged JSON schema,
   lock validation, and diff checks pass.
+
+## Step 61 - Surface Provider-Script Skip Decisions
+
+### Evidence
+
+The Mistral benchmark encoded 17 exclusions as config-level `skip: true`, which
+the scanner already reported, and six additional security steps as successful
+scripts that emit `skipped: true` or granular `*_skipped: true` fields. Those
+script-level decisions were statically classified as passing, so a provider
+could hide unresolved coverage behind executable diagnostics until a live run.
+
+### Decision
+
+1. Inspect emitted Python result mappings for literal top-level or granular
+   skip flags after syntax and stub checks.
+2. Report a coverage-stage `skipped` row when every statically visible
+   assignment for an emitted skip field is literal `True`.
+3. Keep these rows non-auto-fixable. The reviewed solution profile, rather than
+   the scanner or generator, decides whether an exact skip is an accepted
+   out-of-scope disposition.
+4. Add no provider-specific rule and do not infer capability absence from the
+   skip reason.
+
+### Verification
+
+- Focused scanner tests cover top-level and validation-specific emitted skip
+  fields.
+- All 210 tests pass. Ruff, Python compilation, every packaged JSON schema,
+  lock validation, and diff checks pass.
+
+## Step 62 - Remove the Remediation Character Ceiling
+
+### Evidence
+
+The Mistral historical-reconstruction benchmark imported a 238 KB authoritative
+OpenAPI document successfully, but every remediation candidate parked before
+generation because `build_context_pack` imposed an unrelated 180,000-character
+aggregate ceiling. The selected Codex adapter could carry the complete request,
+so the earlier limit contradicted the existing adapter-capacity policy and the
+rule that required evidence must not be truncated.
+
+### Decision
+
+1. Remove the remediation pack's default aggregate character limit and include
+   every selected item without omission or truncation.
+2. Preserve an explicit `max_chars` argument for focused callers and tests that
+   deliberately exercise bounded-pack failure behavior.
+3. Record `max_chars: null`, the actual used characters, and zero omissions in
+   an unbounded remediation pack.
+4. Keep the complete serialized request byte-capacity check at the generator
+   boundary as the single size gate.
+
+### Verification
+
+- A regression builds a remediation pack containing an authoritative API spec
+  larger than the former ceiling and verifies that the complete document is
+  retained with no truncation or omission.
+- Focused and full verification are recorded with the benchmark handoff.
+
+## Step 63 - Preserve Lifecycle Context and Guard Authenticated Cleanup
+
+### Evidence
+
+The offline Mistral replication generated related checks per adapter contract
+unit, but individual API scripts could not see the complete domain config,
+setup/teardown scripts, or existing shared client. That allowed locally
+plausible scripts to disagree about resource ownership and cleanup. Several
+scripts also accepted HTTP before attaching bearer credentials, and a teardown
+grouped multiple deletes in one fail-fast block without 404-as-absence behavior.
+
+The existing workflow already retries deterministic static failures and
+authorized live failures. It does not yet run a provider-neutral held-out
+intent/cassette harness before the patch review gate.
+
+### Decision
+
+1. Add a compact ordered domain-lifecycle contract to every remediation pack.
+2. Supply the complete domain config, selected/setup/teardown scripts, and
+   existing provider `scripts/common/**` helpers as authoritative context while
+   retaining the selected adapter contract as the edit authority.
+3. Require exactly one provider-shared authenticated client in the remediation
+   skill, with strict HTTPS base-URL validation, verified TLS, normalized
+   errors, and bounded source-supported retry behavior.
+4. Deterministically reject direct authenticated Python transports that do not
+   parse the endpoint, require HTTPS and a hostname, and reject userinfo, query,
+   and fragment components.
+5. Deterministically reject recognizable cleanup adapters that lack an
+   already-absent success path, group independent deletes in one fail-fast try
+   block, or perform several direct cleanup actions without `cleanup_errors`.
+6. Keep lifecycle-aware scanning downstream of reviewed ISV scope. Do not infer
+   provisioning ownership from an API operation. Add a future machine-readable
+   resource mode (`adapter_managed`, `preexisting`, or `external`) before making
+   scanner completeness depend on create/delete behavior.
+7. Reuse the existing bounded failure-envelope retry machinery for a future
+   offline intent/cassette stage rather than creating another repair loop.
+
+### Verification
+
+- Focused tests cover strict authenticated endpoint validation, cleanup
+  idempotency/error aggregation, whole-domain lifecycle context, setup/teardown
+  sources, shared client context, and the pinned skill instructions.
+- All 213 unit tests pass. Python compilation, all packaged JSON schemas, and
+  diff checks pass. Ruff was not available in the local environment.
+
+## Step 64 - Audit Domain Completeness Before Accepting Existing Scaffolds
+
+### Evidence
+
+The Mistral Slurm scope was reviewed as `covered/test`, and the supplied survey
+and API snapshot described managed cluster creation, access, workload, and
+deletion. Existing schema-valid setup and teardown scripts only inventoried a
+pre-existing Slurm installation and returned a successful no-op. The static
+scanner found no editable Slurm gap, so `auto` made zero Slurm model calls. The
+later candidate-derived behavioral suite also omitted Slurm. A better
+remediation prompt could not help because remediation was never scheduled.
+
+### Decision
+
+1. Preserve deterministic scanning as the first and cheapest gate. After its
+   edit-eligible rows are exhausted, make one separate, read-only domain audit
+   call for every reviewed `covered/test` capability.
+2. Require the audit to account for every approved capability exactly once,
+   derive provider-neutral setup/test/teardown effects from supplied evidence,
+   and cite supplied provider files before claiming `implemented`.
+3. Convert `gap` findings into `semantic` gap rows with an existing
+   provider-owned primary target. Reuse the current ownership decision,
+   generator protocol, candidate guards, isolated static regression scan,
+   scratch copy, retry budget, and human patch approval.
+4. Remove a semantic row from the active audit only after a statically safe
+   candidate is staged. Then make one post-change audit call. Park any repeated
+   finding for a later reviewed pass rather than constructing a new intent DSL
+   or an unbounded agent-review loop.
+5. Keep scope authority with the reviewed solution profile. The audit cannot
+   infer managed versus pre-existing ownership from API operation names; a real
+   source conflict becomes `scope_question`.
+6. Persist `domain-audit.pre.json` and `domain-audit.post.json` as local review
+   evidence. Do not describe this semantic source review as offline API replay
+   or live validation.
+7. Reuse the normal context pack as the audit's only source-content payload.
+   Add only a provider-relative path index for citations, and build generation
+   and audit context from the evolving scratch provider so later passes review
+   the exact candidate rather than a duplicate reread or the original tree.
+8. Keep the packaged remediation skill consistent with the guarded multi-file
+   boundary. A stale instruction that limited config-target gaps to the YAML
+   step contradicted the request rule allowing same-contract lifecycle scripts
+   and caused the Mistral Kubernetes rerun to refuse all three adapters. Remove
+   that narrower sentence; path, scope, hash, and isolated-rescan guards still
+   constrain every returned file.
+9. Deduplicate provider content by resolved path when the scanner-selected
+   target is also the domain configuration. Keep the complete target once and
+   still use it to discover lifecycle scripts; do not transmit a second copy
+   under another context-item label.
+10. Carry current same-domain scripts into each later remediation request, not
+    only configured setup/teardown files and `scripts/common`. This preserves a
+    newly staged domain-local client or ownership helper across contract units
+    without replaying prior candidates or adding provider-specific import
+    rules.
+11. Enforce the shared-client boundary as well as endpoint validation. A
+    credential-bearing HTTP implementation is allowed only in `scripts/common`
+    or a clearly named client/transport module; lifecycle adapters must import
+    it. This turns “one shared authenticated client” from model guidance into a
+    deterministic candidate guard without encoding Mistral routes or domains.
+    Recognize underscore-prefixed private Python modules as shared helpers too;
+    the Mistral teardown experiment showed that requiring a filename keyword
+    rejects a conventional `_mistral.py` transport even when lifecycle scripts
+    import it.
+
+### Verification
+
+- A regression begins with scanner-green, schema-valid VM lifecycle files whose
+  setup only represents an existing-resource scaffold. It verifies the call
+  sequence `audit -> generation -> audit`, a staged `DomainLifecycleAudit`
+  change, retained pre/post audit artifacts, and no mutation of the real
+  provider.
+- Contract tests reject an audit that omits an approved capability and an
+  `implemented` claim with no code evidence.
+- A targeted offline Mistral Slurm run now emits a semantic gap and invokes
+  remediation instead of recording zero model calls. The audit identifies the
+  inventory-only setup and no-op teardown. Remediation then fails closed on a
+  real remaining intake gap: the reviewed runtime contract supplies CPU/GPU
+  selectors but no source-backed node-pool capacity/replica inputs or safe
+  ownership handoff. No Mistral operation ran and no provider patch was staged.
+- Semantic remediation context includes the capability's real pinned consumer
+  rows, not only the synthetic `DomainLifecycleAudit` class.
+- The audit request contains no duplicate full scanner report or second copy of
+  provider source content; pre- and post-audit orchestration share one helper.
+- All 217 unit tests pass. Ruff, Python compilation, every packaged JSON
+  schema, lock validation, and diff checks pass.
+
+## Step 65 - Close Two Candidate-Review Blind Spots
+
+### Evidence
+
+The second frozen Mistral run exposed two narrow gaps in existing deterministic
+guards. A Security candidate compressed its implementation into a base64
+payload executed with `exec`, making an otherwise syntax-valid file opaque to
+review. Separately, a control-plane teardown called `delete_project()` but did
+not treat HTTP 404 as successful absence. The cleanup guard recognized only a
+method named exactly `delete` or `destroy`, so the descriptive method name
+escaped the existing idempotency rule.
+
+### Decision
+
+1. Reject generated Python that invokes `exec`, `eval`, or `compile`; provider
+   candidates must remain directly readable and statically inspectable.
+2. Recognize `delete_*` and `destroy_*` method names as cleanup actions, while
+   preserving the existing 404, independent-action, and aggregation checks.
+3. Add no provider names, API routes, intent DSL, or additional repair loop.
+
+### Verification
+
+- Focused regressions cover all three dynamic-execution calls and a
+  `delete_project()` teardown without an already-absent success path.
+
+## Step 66 - Keep Shell Lifecycles Behind the Shared HTTP Client
+
+### Evidence
+
+The third Mistral run generated Slurm setup and teardown shell scripts that
+attached a bearer token directly to `curl`. The Python shared-client guard did
+not inspect shell, so the scripts could accept a plaintext endpoint, mishandle
+HTTP 404, and conflate transport failure with successful absence even though
+the remediation contract required one guarded authenticated client.
+
+### Decision
+
+1. Reject credential-bearing `curl` or `wget` transport in generated shell
+   candidates.
+2. Require shell lifecycle adapters to invoke the provider-shared client
+   executable, keeping endpoint validation, TLS behavior, error normalization,
+   and retry policy in one statically guarded implementation.
+3. Add no provider-specific route, shell parser, or new workflow stage.
+
+### Verification
+
+- A focused regression rejects a Slurm-shaped shell lifecycle that sends an
+  authorization header directly with `curl`.
+
+## Step 67 - Name the General Provider Contract `interfaces`
+
+### Evidence
+
+The project schema already allowed `rest`, `graphql`, `cli`, `sdk`,
+`kubernetes`, and `other`, but stored all of them under a top-level `apis` key
+and exposed an `ApiInterface` model. The name incorrectly implied that CLI,
+SDK, and Kubernetes contracts were APIs.
+
+### Decision
+
+1. Rename the canonical manifest collection to `interfaces` and the Python
+   model to `ProviderInterface`.
+2. Emit `interfaces` in new manifests, qualification packs, remediation packs,
+   runtime contracts, and project identity hashes.
+3. Retain `--api` and `--api-spec` as the narrow REST bootstrap shortcut.
+4. Accept legacy manifests containing `apis` through a small in-memory loader
+   normalization; do not persist or emit the legacy name.
+5. Keep the six existing interface kinds and document their meaning without
+   adding another public command or parallel configuration structure.
+
+### Verification
+
+- Project tests cover every supported interface kind, canonical output, and a
+  legacy `apis` manifest loaded as `interfaces`.

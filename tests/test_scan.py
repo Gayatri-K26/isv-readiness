@@ -275,6 +275,67 @@ class StaticScanTests(unittest.TestCase):
             row = next(item for item in report.rows if item.step_name == "launch_instance")
             self.assertEqual(row.status, "pass")
 
+    def test_static_scan_surfaces_script_emitted_skip_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            provider = Path(tempdir) / "provider"
+            shutil.copytree(FIXTURES / "provider_repo", provider)
+            script = provider / "scripts" / "vm" / "launch_instance.py"
+            script.write_text(
+                "import json\n\n"
+                "reason = 'provider capability is unavailable'\n"
+                "result = {\n"
+                "    'success': True,\n"
+                "    'platform': 'fixture',\n"
+                "    'instance_id': 'vm-1',\n"
+                "    'skipped': True,\n"
+                "    'skip_reason': reason,\n"
+                "}\n"
+                "print(json.dumps(result))\n",
+                encoding="utf-8",
+            )
+
+            report = scan_provider(
+                ScanOptions(
+                    provider_repo=provider,
+                    domains=["vm"],
+                    validation_root=FIXTURES / "ai-cloud-validation",
+                )
+            )
+
+        row = next(item for item in report.rows if item.step_name == "launch_instance")
+        self.assertEqual(row.status, "skipped")
+        self.assertEqual(row.stage, "coverage")
+        self.assertIn("skipped", row.evidence.message)
+        self.assertFalse(row.remediation.auto_fixable)
+
+    def test_static_scan_surfaces_granular_script_skip_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            provider = Path(tempdir) / "provider"
+            shutil.copytree(FIXTURES / "provider_repo", provider)
+            script = provider / "scripts" / "vm" / "launch_instance.py"
+            script.write_text(
+                "result = {\n"
+                "    'success': True,\n"
+                "    'platform': 'fixture',\n"
+                "    'instance_id': 'vm-1',\n"
+                "    'lifecycle_skipped': True,\n"
+                "}\n"
+                "print(result)\n",
+                encoding="utf-8",
+            )
+
+            report = scan_provider(
+                ScanOptions(
+                    provider_repo=provider,
+                    domains=["vm"],
+                    validation_root=FIXTURES / "ai-cloud-validation",
+                )
+            )
+
+        row = next(item for item in report.rows if item.step_name == "launch_instance")
+        self.assertEqual(row.status, "skipped")
+        self.assertIn("lifecycle_skipped", row.evidence.message)
+
     def test_skipped_consumer_does_not_require_producer_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             provider = Path(tempdir) / "provider"

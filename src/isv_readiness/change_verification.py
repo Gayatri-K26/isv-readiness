@@ -110,7 +110,7 @@ def verify_change_set(
 ) -> ChangeVerificationManifest:
     selected = select_gap(report, change_set.gap_id)
     detection = selected.get("detection")
-    if detection not in {"static", "dynamic"}:
+    if detection not in {"static", "dynamic", "semantic"}:
         raise VerificationError(f"Gap {change_set.gap_id} has no supported detection mode.")
     proposal = build_change_proposal(
         report,
@@ -161,7 +161,11 @@ def verify_change_set(
     )
     manifest = ChangeVerificationManifest(
         schema_version=CHANGE_VERIFICATION_VERSION,
-        verification_mode="isolated_static_change_set_rescan",
+        verification_mode=(
+            "isolated_static_regression_scan_pending_semantic_reaudit"
+            if detection == "semantic"
+            else "isolated_static_change_set_rescan"
+        ),
         gap_id=change_set.gap_id,
         domain=proposal.domain,
         change_set_sha256=proposal.change_set_sha256,

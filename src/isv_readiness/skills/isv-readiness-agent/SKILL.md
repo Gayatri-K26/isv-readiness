@@ -1,6 +1,6 @@
 ---
 name: isv-readiness-agent
-description: Generate source-grounded gapctl qualification profiles and provider remediation change sets. Use when an agent must map ISV evidence to NVIDIA validation scope or implement a reviewed provider adapter contract without inventing capabilities, runtime inputs, or passing results.
+description: Generate source-grounded gapctl qualification profiles and provider remediation change sets, or audit an approved domain lifecycle. Use when an agent must map ISV evidence to NVIDIA validation scope, implement a reviewed provider adapter contract, or check implementation completeness without inventing capabilities, runtime inputs, or passing results.
 ---
 
 # ISV Readiness Agent
@@ -14,6 +14,8 @@ output schema, and hashes as authoritative.
   [references/qualification.md](references/qualification.md).
 - For `agent_skill.phase: remediation`, read
   [references/remediation.md](references/remediation.md).
+- For `agent_skill.phase: audit`, read
+  [references/audit.md](references/audit.md).
 
 ## Common discipline
 

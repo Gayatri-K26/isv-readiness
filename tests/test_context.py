@@ -10,6 +10,7 @@ import jsonschema
 
 from isv_readiness.context import (
     ContextError,
+    _domain_audit_contract_rows,
     build_context_pack,
     context_cache_is_current,
     provider_contract_constraints,
@@ -29,6 +30,86 @@ COMMIT = "b" * 40
 
 
 class ContextTests(unittest.TestCase):
+    def test_semantic_audit_contract_includes_capability_consumers_and_lifecycle_edges(self) -> None:
+        setup = _gap_report(Path("/tmp/provider")).rows[0]
+        setup = GapRow(
+            **{
+                **setup.__dict__,
+                "enrichment": {
+                    "validation_phase": "setup",
+                    "solution_profile": {"capability_id": "vm.default"},
+                },
+            }
+        )
+        consumer = GapRow(
+            **{
+                **setup.__dict__,
+                "id": "gap_111111111111",
+                "step_name": "exercise",
+                "validation_class": "VmExerciseCheck",
+                "enrichment": {
+                    "validation_phase": "test",
+                    "solution_profile": {"capability_id": "managed-vm"},
+                },
+            }
+        )
+        unrelated = GapRow(
+            **{
+                **consumer.__dict__,
+                "id": "gap_222222222222",
+                "validation_class": "UnrelatedCheck",
+                "enrichment": {
+                    "validation_phase": "test",
+                    "solution_profile": {"capability_id": "other"},
+                },
+            }
+        )
+        audit = GapRow(
+            **{
+                **setup.__dict__,
+                "id": "gap_333333333333",
+                "validation_class": "DomainLifecycleAudit",
+                "requirement_id": "managed-vm",
+                "detection": "semantic",
+                "enrichment": {"domain_audit": {"capability_id": "managed-vm"}},
+            }
+        )
+
+        selected = _domain_audit_contract_rows((setup, consumer, unrelated, audit), audit)
+
+        self.assertEqual([row.id for row in selected], [setup.id, consumer.id])
+
+    def test_remediation_pack_preserves_large_api_spec_without_a_character_ceiling(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            workspace, project, manifest = _project(Path(tempdir), existing_provider=True)
+            provider = project.provider_root(manifest)
+            large_operation = "x" * 200_000
+            (workspace / "openapi.yaml").write_text(
+                "openapi: 3.0.3\npaths:\n  /vms:\n    post:\n      description: " + large_operation + "\n",
+                encoding="utf-8",
+            )
+            cache = workspace / ".gapctl" / "cache"
+
+            def fetcher(url: str, headers: dict[str, str]) -> bytes:
+                del url, headers
+                return b"reference context"
+
+            sync_context_sources(project, manifest, cache, fetcher=fetcher)
+            pack = build_context_pack(
+                project,
+                manifest,
+                _gap_report(provider),
+                gap_id="gap_0123456789ab",
+                cache_dir=cache,
+                environment={},
+            ).to_dict()
+
+            api_spec = next(item for item in pack["items"] if item["source_id"] == "primary_api_spec")
+            self.assertIn(large_operation, api_spec["content"])
+            self.assertFalse(api_spec["truncated"])
+            self.assertIsNone(pack["budget"]["max_chars"])
+            self.assertEqual(pack["budget"]["omitted_items"], 0)
+
     def test_normalizes_only_explicit_authoritative_lifecycle_timing(self) -> None:
         pack = {
             "items": [
@@ -81,13 +162,35 @@ class ContextTests(unittest.TestCase):
             workspace, project, manifest = _project(Path(tempdir), existing_provider=True)
             provider = project.provider_root(manifest)
             (provider / "scripts" / "vm").mkdir(parents=True)
+            (provider / "scripts" / "common").mkdir()
             (provider / "config").mkdir()
             (provider / "scripts" / "vm" / "launch.py").write_text(
                 "# TODO implement VM launch\n",
                 encoding="utf-8",
             )
             (provider / "config" / "vm.yaml").write_text(
-                "steps:\n  - name: launch\n    command: scripts/vm/launch.py\n",
+                "commands:\n"
+                "  vm:\n"
+                "    phases: [setup, test, teardown]\n"
+                "    steps:\n"
+                "      - name: launch\n"
+                "        phase: setup\n"
+                "        command: python ../scripts/vm/launch.py\n"
+                "      - name: teardown\n"
+                "        phase: teardown\n"
+                "        command: python ../scripts/vm/teardown.py\n",
+                encoding="utf-8",
+            )
+            (provider / "scripts" / "vm" / "teardown.py").write_text(
+                "print({'success': True, 'resources_deleted': []})\n",
+                encoding="utf-8",
+            )
+            (provider / "scripts" / "vm" / "client.py").write_text(
+                "class DomainClient:\n    pass\n",
+                encoding="utf-8",
+            )
+            (provider / "scripts" / "common" / "client.py").write_text(
+                "class SharedClient:\n    pass\n",
                 encoding="utf-8",
             )
             suite = workspace / "ai-cloud-validation" / "isvctl" / "configs" / "suites" / "vm.yaml"
@@ -172,6 +275,23 @@ class ContextTests(unittest.TestCase):
             related_item = next(item for item in raw["items"] if item["source_id"] == "related_target_gaps")
             self.assertIn("VmConnectivityCheck", related_item["content"])
             self.assertNotIn("aws_reference", related_item["content"])
+            lifecycle = next(item for item in raw["items"] if item["source_id"] == "domain_lifecycle_contract")
+            lifecycle_steps = {item["step_name"]: item for item in json.loads(lifecycle["content"])}
+            self.assertTrue(lifecycle_steps["launch"]["selected"])
+            provider_config = next(item for item in raw["items"] if item["source_id"] == "provider_config")
+            self.assertIn("phase: teardown", provider_config["content"])
+            lifecycle_script = next(
+                item for item in raw["items"] if item["source_id"].startswith("provider_lifecycle_")
+            )
+            self.assertIn("resources_deleted", lifecycle_script["content"])
+            shared_client = next(
+                item for item in raw["items"] if item["source_id"].startswith("provider_shared_")
+            )
+            self.assertIn("SharedClient", shared_client["content"])
+            domain_client = next(
+                item for item in raw["items"] if item["source_id"].startswith("provider_domain_")
+            )
+            self.assertIn("DomainClient", domain_client["content"])
             upstream = next(item for item in raw["items"] if item["source_id"] == "upstream_target_contract")
             self.assertIn("expected_state", upstream["content"])
             self.assertIn("step_output", upstream["content"])

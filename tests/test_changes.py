@@ -281,6 +281,195 @@ class ChangeProposalTests(unittest.TestCase):
                     ),
                 )
 
+    def test_authenticated_transport_requires_strict_https_base_url_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            provider = Path(tempdir) / "acme"
+            script = provider / "scripts" / "common" / "client.py"
+            script.parent.mkdir(parents=True)
+            script.write_text("raise NotImplementedError()\n", encoding="utf-8")
+            report = _report(target="scripts/common/client.py")
+            unsafe = (
+                "import os\n"
+                "from urllib.request import Request, urlopen\n"
+                "server = os.environ['ACME_SERVER']\n"
+                "request = Request(server + '/v1/vms', headers={'Authorization': 'Bearer token'})\n"
+                "urlopen(request)\n"
+            )
+            with self.assertRaisesRegex(FixGuardrailError, "strict endpoint guard"):
+                build_change_proposal(
+                    report,
+                    provider_repo=provider,
+                    change_set=_change_set(
+                        [("provider", "scripts/common/client.py", "replace", unsafe)]
+                    ),
+                    allowed_environment=["ACME_SERVER"],
+                )
+
+            safe = (
+                "import os\n"
+                "from urllib.parse import urlsplit\n"
+                "from urllib.request import Request, urlopen\n"
+                "server = os.environ['ACME_SERVER']\n"
+                "parsed = urlsplit(server)\n"
+                "if (parsed.scheme != 'https' or not parsed.hostname or parsed.username "
+                "or parsed.password or parsed.query or parsed.fragment):\n"
+                "    raise ValueError('invalid endpoint')\n"
+                "request = Request(server + '/v1/vms', headers={'Authorization': 'Bearer token'})\n"
+                "urlopen(request)\n"
+            )
+            proposal = build_change_proposal(
+                report,
+                provider_repo=provider,
+                change_set=_change_set(
+                    [("provider", "scripts/common/client.py", "replace", safe)]
+                ),
+                allowed_environment=["ACME_SERVER"],
+            )
+            self.assertEqual(len(proposal.files), 1)
+
+            lifecycle = provider / "scripts" / "vm" / "launch.py"
+            lifecycle.parent.mkdir(parents=True, exist_ok=True)
+            lifecycle.write_text("raise NotImplementedError()\n", encoding="utf-8")
+            with self.assertRaisesRegex(FixGuardrailError, "provider-shared client"):
+                build_change_proposal(
+                    _report(),
+                    provider_repo=provider,
+                    change_set=_change_set(
+                        [("provider", "scripts/vm/launch.py", "replace", safe)]
+                    ),
+                    allowed_environment=["ACME_SERVER"],
+                )
+
+            private_helper = provider / "scripts" / "vm" / "_transport_impl.py"
+            private_helper.write_text("raise NotImplementedError()\n", encoding="utf-8")
+            private_proposal = build_change_proposal(
+                _report(target="scripts/vm/_transport_impl.py"),
+                provider_repo=provider,
+                change_set=_change_set(
+                    [("provider", "scripts/vm/_transport_impl.py", "replace", safe)]
+                ),
+                allowed_environment=["ACME_SERVER"],
+            )
+            self.assertEqual(len(private_proposal.files), 1)
+
+    def test_cleanup_requires_absent_success_and_independent_error_collection(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            provider = Path(tempdir) / "acme"
+            script = provider / "scripts" / "vm" / "delete_resources.py"
+            script.parent.mkdir(parents=True)
+            script.write_text("raise NotImplementedError()\n", encoding="utf-8")
+            report = _report(target="scripts/vm/delete_resources.py", step_name="teardown")
+
+            no_absence = "client.delete('vm-1')\n"
+            with self.assertRaisesRegex(FixGuardrailError, "already-absent success path"):
+                build_change_proposal(
+                    report,
+                    provider_repo=provider,
+                    change_set=_change_set(
+                        [("provider", "scripts/vm/delete_resources.py", "replace", no_absence)]
+                    ),
+                )
+
+            fail_fast = (
+                "cleanup_errors = []\n"
+                "try:\n"
+                "    client.delete('key-1')\n"
+                "    client.delete('account-1')\n"
+                "except HttpError as exc:\n"
+                "    if exc.status_code != 404:\n"
+                "        cleanup_errors.append('cleanup failed')\n"
+            )
+            with self.assertRaisesRegex(FixGuardrailError, "fail-fast try block"):
+                build_change_proposal(
+                    report,
+                    provider_repo=provider,
+                    change_set=_change_set(
+                        [("provider", "scripts/vm/delete_resources.py", "replace", fail_fast)]
+                    ),
+                )
+
+            safe = (
+                "cleanup_errors = []\n"
+                "for resource in ('key-1', 'account-1'):\n"
+                "    try:\n"
+                "        client.delete(resource)\n"
+                "    except HttpError as exc:\n"
+                "        if exc.status_code != 404:\n"
+                "            cleanup_errors.append('cleanup failed')\n"
+            )
+            proposal = build_change_proposal(
+                report,
+                provider_repo=provider,
+                change_set=_change_set(
+                    [("provider", "scripts/vm/delete_resources.py", "replace", safe)]
+                ),
+            )
+            self.assertEqual(len(proposal.files), 1)
+
+    def test_cleanup_guard_recognizes_descriptive_delete_method_names(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            provider = Path(tempdir) / "acme"
+            script = provider / "scripts" / "vm" / "delete_resources.py"
+            script.parent.mkdir(parents=True)
+            script.write_text("raise NotImplementedError()\n", encoding="utf-8")
+            report = _report(target="scripts/vm/delete_resources.py", step_name="teardown")
+
+            with self.assertRaisesRegex(FixGuardrailError, "already-absent success path"):
+                build_change_proposal(
+                    report,
+                    provider_repo=provider,
+                    change_set=_change_set(
+                        [
+                            (
+                                "provider",
+                                "scripts/vm/delete_resources.py",
+                                "replace",
+                                "client.delete_project('project-1')\n",
+                            )
+                        ]
+                    ),
+                )
+
+    def test_rejects_dynamic_code_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            provider = Path(tempdir) / "acme"
+            script = provider / "scripts" / "vm" / "probe.py"
+            script.parent.mkdir(parents=True)
+            script.write_text("raise NotImplementedError()\n", encoding="utf-8")
+
+            for call in ("exec(payload)", "eval(payload)", "compile(payload, 'probe.py', 'exec')"):
+                candidate = f"payload = 'print(1)'\n{call}\n"
+                with self.subTest(call=call), self.assertRaisesRegex(
+                    FixGuardrailError, "dynamic code execution"
+                ):
+                    build_change_proposal(
+                        _report(target="scripts/vm/probe.py"),
+                        provider_repo=provider,
+                        change_set=_change_set(
+                            [("provider", "scripts/vm/probe.py", "replace", candidate)]
+                        ),
+                    )
+
+    def test_rejects_direct_authenticated_shell_transport(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            provider = Path(tempdir) / "acme"
+            script = provider / "scripts" / "slurm" / "setup.sh"
+            script.parent.mkdir(parents=True)
+            script.write_text("exit 1\n", encoding="utf-8")
+            candidate = (
+                "#!/bin/bash\n"
+                "curl -H \"Authorization: Bearer $ACME_TOKEN\" \"$ACME_SERVER/v1/clusters\"\n"
+            )
+            with self.assertRaisesRegex(FixGuardrailError, "directly in a shell script"):
+                build_change_proposal(
+                    _report(target="scripts/slurm/setup.sh"),
+                    provider_repo=provider,
+                    change_set=_change_set(
+                        [("provider", "scripts/slurm/setup.sh", "replace", candidate)]
+                    ),
+                    allowed_environment=["ACME_TOKEN", "ACME_SERVER"],
+                )
+
     def test_rejects_internal_deadline_beyond_configured_step_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             provider = Path(tempdir) / "acme"

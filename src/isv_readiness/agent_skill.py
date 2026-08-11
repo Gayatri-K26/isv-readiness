@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 SKILL_NAME = "isv-readiness-agent"
-SKILL_VERSION = "0.1.1"
-SkillPhase = Literal["qualification", "remediation"]
+SKILL_VERSION = "0.1.2"
+SkillPhase = Literal["qualification", "remediation", "audit"]
 
 
 def skill_root() -> Path:

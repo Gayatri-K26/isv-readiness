@@ -343,6 +343,29 @@ def _scan_check(
             enrichment=check.enrichment,
         )
 
+    static_skip_fields = _definitely_skipped_output_fields(step.script_path, text)
+    if static_skip_fields:
+        rendered_fields = ", ".join(static_skip_fields)
+        return _row(
+            provider_repo=provider_repo,
+            domain=domain,
+            step_name=check.step_name,
+            validation_class=check.validation_class,
+            requirement_id=check.requirement_id,
+            status="skipped",
+            stage="coverage",
+            message=f"Provider script can emit static skip flag(s): {rendered_fields}.",
+            config_path=step.config_path,
+            script_path=step.script_path,
+            target=None,
+            aws_reference=aws_reference,
+            schema_errors=[],
+            missing_json_fields=[],
+            auto_fixable=False,
+            rerun_config=rerun_config,
+            enrichment=check.enrichment,
+        )
+
     schema_name = registry.schema_for_step(step.name)
     empty_outputs = _definitely_empty_output_fields(
         step.script_path,
@@ -1006,6 +1029,72 @@ def _definitely_empty_output_fields(path: Path, text: str, required_fields: set[
     return sorted(empty)
 
 
+def _definitely_skipped_output_fields(path: Path, text: str) -> list[str]:
+    """Find literal skip flags carried by an emitted Python result mapping.
+
+    Provider configs expose ``skip: true`` directly, but a provider script can
+    also make a validation disappear by returning ``skipped: true`` or one of
+    the validation-specific ``*_skipped: true`` fields. Keep those decisions
+    visible to profile review. The scan remains conservative: a field is
+    reported only when every statically visible assignment for that emitted
+    mapping sets it to literal ``True``.
+    """
+
+    if path.suffix != ".py":
+        return []
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+
+    mappings: dict[str, dict[str, list[ast.AST]]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and isinstance(node.value, ast.Dict):
+                    _record_dict_assignments(mappings.setdefault(target.id, {}), node.value)
+                else:
+                    assigned = _named_subscript(target)
+                    if assigned is not None:
+                        name, field = assigned
+                        mappings.setdefault(name, {}).setdefault(field, []).append(node.value)
+        elif isinstance(node, ast.AnnAssign):
+            if isinstance(node.target, ast.Name) and isinstance(node.value, ast.Dict):
+                _record_dict_assignments(mappings.setdefault(node.target.id, {}), node.value)
+            elif node.value is not None:
+                assigned = _named_subscript(node.target)
+                if assigned is not None:
+                    name, field = assigned
+                    mappings.setdefault(name, {}).setdefault(field, []).append(node.value)
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.attr == "update"
+        ):
+            fields = mappings.setdefault(node.func.value.id, {})
+            if node.args and isinstance(node.args[0], ast.Dict):
+                _record_dict_assignments(fields, node.args[0])
+            for keyword in node.keywords:
+                if keyword.arg:
+                    fields.setdefault(keyword.arg, []).append(keyword.value)
+
+    skip_fields: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or _call_name(node.func) not in {"print", "write"}:
+            continue
+        for argument in node.args:
+            fields = _emitted_mapping(argument, mappings)
+            if fields is None:
+                continue
+            for field, values in fields.items():
+                if (field == "skipped" or field.endswith("_skipped")) and values and all(
+                    _is_definitely_true(value) for value in values
+                ):
+                    skip_fields.add(field)
+    return sorted(skip_fields)
+
+
 def _declared_result_fields(
     tree: ast.AST,
     mappings: dict[str, dict[str, list[ast.AST]]],
@@ -1107,6 +1196,10 @@ def _is_definitely_empty(node: ast.AST) -> bool:
 
 def _is_definitely_false(node: ast.AST) -> bool:
     return isinstance(node, ast.Constant) and node.value is False
+
+
+def _is_definitely_true(node: ast.AST) -> bool:
+    return isinstance(node, ast.Constant) and node.value is True
 
 
 def _jsonish_arg(node: ast.AST, assignments: dict[str, dict[str, Any]]) -> dict[str, Any] | None:

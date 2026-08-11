@@ -54,6 +54,13 @@ cd ./<provider-name>-readiness
 local file, directory of text documents, or HTTP(S) source supplied as ISV
 qualification evidence.
 
+`isv-project.yaml` stores provider entry points under `interfaces`. An
+interface kind may be `rest`, `graphql`, `cli`, `sdk`, `kubernetes`, or `other`.
+The two API flags above create a REST interface; use `--context` for the
+authoritative documentation of non-REST interfaces. New workspaces do not use
+the older, misleading top-level name `apis`, although the loader still accepts
+that legacy key.
+
 `init` clones `ai-cloud-validation` into the workspace, records its exact
 commit, imports the supplied ISV context and optional provider specification,
 complete NCP Software Reference Guide, and complete NVIDIA Inference Reference

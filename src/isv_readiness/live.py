@@ -120,9 +120,13 @@ def run_live_domain(
     for name in (*project.execution.credential_env, *project.execution.pass_env):
         if source_env.get(name):
             child_env[name] = source_env[name]
-    for api in project.apis:
-        if canonical_domain in api.domains and api.base_url and api.base_url_env:
-            child_env[api.base_url_env] = api.base_url
+    for interface in project.interfaces:
+        if (
+            canonical_domain in interface.domains
+            and interface.base_url
+            and interface.base_url_env
+        ):
+            child_env[interface.base_url_env] = interface.base_url
 
     artifacts_dir = artifacts_dir.expanduser().resolve()
     artifacts_dir.mkdir(parents=True, exist_ok=True)

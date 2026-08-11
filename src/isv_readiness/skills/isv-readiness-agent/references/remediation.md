@@ -16,7 +16,15 @@
    inventory, and shared clients; reuse or extend them instead of creating a
    second implementation unless evidence shows they cannot satisfy the
    contract. Preserve cross-step data flow, cleanup and error behavior, and
-   unrelated configuration. Edit only the selected configuration step.
+   unrelated configuration. Include the selected remediation target and only
+   the additional provider-owned lifecycle scripts or selected domain config
+   required by that same adapter contract. When authenticated HTTP is required, use exactly
+   one provider-shared client. Before attaching any credential, that client
+   must parse the base URL, require HTTPS and a hostname, and reject userinfo,
+   query, and fragment components. Keep certificate and hostname verification
+   enabled, normalize provider errors without response bodies, and implement
+   bounded retry/backoff only for source-supported transient outcomes and
+   operations that are idempotent or carry an evidenced idempotency mechanism.
 4. Model lifecycle work as a state transition: establish the starting state,
    perform the requested operation, poll its authoritative state, then verify
    independent postconditions. Retry only when the operation is idempotent or
@@ -27,6 +35,12 @@
    resource returned to that baseline.
 5. Preserve one canonical resource identifier across setup output, configured
    arguments, lifecycle calls, and result JSON.
+   Cleanup may act only on identifiers proven to be owned by this run. Treat a
+   documented already-absent result, commonly HTTP 404, as successful absence.
+   Attempt independent cleanup actions even when one fails, collect stable
+   redacted messages in `cleanup_errors`, and report failure after all safe
+   cleanup actions have been attempted. Never delete a resource merely because
+   its name came from the environment or configuration.
 6. Preserve lifecycle verbs. A create, launch, provision, delete, or teardown
    step must perform that operation; observing a pre-existing resource does not
    satisfy it.

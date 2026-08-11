@@ -15,6 +15,7 @@ from isv_readiness.project import (
     build_bootstrap_plan,
     execute_bootstrap,
     load_project,
+    validate_project,
 )
 from isv_readiness.schema import load_schema
 from isv_readiness.solution_profile import load_solution_profile
@@ -72,7 +73,7 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertEqual(project.provider.state, "existing")
             self.assertFalse(project.execution.allow_live_runs)
             self.assertEqual(project.execution.max_failure_groups, 10)
-            self.assertEqual(project.apis[0].auth_env, ("ACME_TOKEN",))
+            self.assertEqual(project.interfaces[0].auth_env, ("ACME_TOKEN",))
             self.assertEqual(
                 [source.id for source in project.context_sources],
                 ["nsrg", "inference_ra", "primary_api_spec"],
@@ -86,6 +87,8 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertEqual(profile.resolve("vm").action, "implement_or_fix_adapter")
             self.assertEqual(load_project(plan.manifest_path), project)
             raw = yaml.safe_load(plan.manifest_path.read_text(encoding="utf-8"))
+            self.assertIn("interfaces", raw)
+            self.assertNotIn("apis", raw)
             schema = load_schema("project.schema.json")
             jsonschema.validate(raw, schema)
 
@@ -115,7 +118,7 @@ class ProjectBootstrapTests(unittest.TestCase):
             )
             project = execute_bootstrap(plan, runner=_git_runner)
 
-            self.assertEqual(project.apis, ())
+            self.assertEqual(project.interfaces, ())
             supplied = [source for source in project.context_sources if "isv_supplied" in source.labels]
             self.assertEqual(
                 [(source.id, source.kind) for source in supplied],
@@ -126,6 +129,49 @@ class ProjectBootstrapTests(unittest.TestCase):
                 ],
             )
             self.assertTrue(all(source.required and source.trust == "authoritative" for source in supplied))
+
+    def test_provider_interfaces_support_every_declared_kind(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            workspace = Path(tempdir) / "workspace"
+            checkout = workspace / "ai-cloud-validation"
+            _make_checkout(checkout)
+            plan = build_bootstrap_plan(
+                workspace,
+                provider_name="acme",
+                domains=["vm"],
+                validation_root=checkout,
+                api_base_url="https://api.acme.invalid/v1",
+            )
+            execute_bootstrap(plan, runner=_git_runner)
+            raw = yaml.safe_load(plan.manifest_path.read_text(encoding="utf-8"))
+
+            for kind in ("rest", "graphql", "cli", "sdk", "kubernetes", "other"):
+                with self.subTest(kind=kind):
+                    raw["interfaces"][0]["kind"] = kind
+                    validate_project(raw)
+
+    def test_loading_legacy_apis_key_exposes_canonical_interfaces(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            workspace = Path(tempdir) / "workspace"
+            checkout = workspace / "ai-cloud-validation"
+            _make_checkout(checkout)
+            plan = build_bootstrap_plan(
+                workspace,
+                provider_name="acme",
+                domains=["vm"],
+                validation_root=checkout,
+                api_base_url="https://api.acme.invalid/v1",
+            )
+            execute_bootstrap(plan, runner=_git_runner)
+            raw = yaml.safe_load(plan.manifest_path.read_text(encoding="utf-8"))
+            raw["apis"] = raw.pop("interfaces")
+            plan.manifest_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+            project = load_project(plan.manifest_path)
+
+            self.assertEqual(project.interfaces[0].kind, "rest")
+            self.assertIn("interfaces", project.to_dict())
+            self.assertNotIn("apis", project.to_dict())
 
     def test_bootstrap_rejects_a_missing_context_input_before_clone(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:

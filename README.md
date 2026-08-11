@@ -80,6 +80,15 @@ the qualification inputs.
 When `--api` is supplied, `validate` injects that value into provider scripts as
 `ISV_API_BASE_URL`; the operator does not need to export it separately.
 
+The project manifest calls the collection `interfaces`, not `apis`, because a
+provider interface may be `rest`, `graphql`, `cli`, `sdk`, `kubernetes`, or
+`other`. The `--api` and `--api-spec` options are a REST convenience: when
+present, `init` creates a `kind: rest` interface. Other interface kinds can be
+declared under `interfaces` and their authoritative manuals, schemas, or command
+references supplied through repeatable `--context` inputs. Older manifests that
+still use the top-level `apis` key are accepted in memory and normalized to the
+canonical interface model; new manifests and agent packs emit `interfaces`.
+
 An API URL and API specification are optional. Use repeatable `--context`
 arguments when the ISV instead supplies reference architectures, product or
 operations documentation, command references, configuration examples, or
@@ -178,7 +187,8 @@ gapctl qualify --generator claude
 ```
 
 Every generator receives the same repository-pinned `isv-readiness-agent`
-skill with a qualification or remediation workflow. The skill teaches the
+skill with a qualification, remediation, or read-only domain-audit workflow.
+The skill teaches the
 agent how to reason from evidence; the existing schema, hash, scope, static
 verification, review, and live-run gates remain deterministic `gapctl`
 controls. Codex receives the skill natively in its isolated workspace. Other
@@ -257,37 +267,63 @@ gapctl validate
 
 For every owned domain, `validate`:
 
-1. scans provider-owned files against the pinned NVIDIA contracts;
+1. scans provider-owned files against the pinned NVIDIA contracts, surfacing
+   both config-level `skip: true` decisions and literal script-emitted
+   `skipped: true` / `*_skipped: true` results for scope review;
 2. selects only gaps that are both profile-approved and deterministically safe
    to edit, in declared phase and provider-step execution order rather than by
    target name or size;
 3. gives the selected generator the complete declared runtime-input contract,
    every edit-eligible unresolved check in the same adapter contract unit, and
-   the exact pinned suite entries and step-output schemas plus a deterministic,
-   source-hashed interface projection of the relevant validation consumers and
-   one bounded source hop for uniquely resolved local helpers they call; checks
-   share a unit by script, or by configuration file plus step, and the bounded
-   per-gap pack fails rather than silently truncating or omitting a selected
-   source;
-4. rejects undeclared runtime inputs, TLS-verification bypasses, raw
+   a compact ordered map of every setup, test, and teardown step in the domain;
+   the complete domain config, existing setup/teardown scripts, and existing
+   provider-shared helpers are included so a file-level edit preserves the
+   lifecycle and reuses one client;
+4. requires direct authenticated Python transports to validate the base URL
+   before attaching credentials: HTTPS and a hostname are mandatory, while
+   userinfo, query, and fragment components are rejected; recognizable cleanup
+   adapters must treat already-absent resources as success, avoid grouping
+   independent deletes in one fail-fast block, and aggregate cleanup errors;
+   generated Python must remain directly reviewable and cannot execute
+   dynamically decoded or constructed code; shell lifecycle scripts cannot
+   attach HTTP credentials directly and must invoke the provider-shared client;
+5. includes the exact pinned suite entries and step-output schemas plus a
+   deterministic, source-hashed interface projection of the relevant
+   validation consumers and one bounded source hop for uniquely resolved local
+   helpers they call; checks
+   share a unit by script, or by configuration file plus step; the per-gap pack
+   preserves every selected source whole, and the selected adapter's declared
+   complete-request capacity is the only size gate;
+6. rejects undeclared runtime inputs, TLS-verification bypasses, raw
    provider output in result JSON, required downstream outputs left provably
    empty or omitted from a recognizable result mapping, lifecycle timeouts below
    an explicit authoritative source threshold, internal deadlines that exceed
    the configured step timeout, and domain-config replacements that alter
    anything outside the selected step;
-5. verifies the candidate statically in an isolated copy;
-6. writes one combined patch under `.gapctl/work/<domain>/`;
-7. displays the patch hash and asks for human approval;
-8. applies only the exact reviewed patch;
-9. refuses to start live infrastructure while a known static blocker remains;
-10. asks for explicit authorization before running the real cloud tests;
-11. adds a run-local `isvctl` exclusion overlay for validation classes that the
+7. verifies the candidate statically in an isolated copy;
+8. after deterministic gaps are exhausted, runs one read-only completeness
+   audit that accounts for every approved `covered/test` capability and checks
+   the complete existing domain lifecycle against the supplied profile,
+   provider sources, survey, and API evidence;
+9. turns an audit finding into the same guarded gap workflow instead of letting
+   existing files or schema-valid output imply that lifecycle behavior exists;
+   after a semantic candidate is staged, runs one post-change audit and parks
+   any unresolved finding for the next reviewed pass;
+10. retains `domain-audit.pre.json` and, when remediation occurred,
+    `domain-audit.post.json` beside the domain review evidence;
+11. writes one combined patch under `.gapctl/work/<domain>/`;
+12. displays the patch hash and asks for human approval;
+13. applies only the exact reviewed patch;
+14. refuses to start live infrastructure while a known static or semantic
+    blocker remains;
+15. asks for explicit authorization before running the real cloud tests;
+16. adds a run-local `isvctl` exclusion overlay for validation classes that the
     reviewed profile explicitly routes out of scope, without editing the pinned
     suite or provider source;
-12. rejects live success when any emitted JUnit testcase records a `failure` or
+17. rejects live success when any emitted JUnit testcase records a `failure` or
     `error`, including injected subtests, regardless of process exit or summary
     text;
-13. records JUnit, logs, run metadata, and the full-scope gap scorecard.
+18. records JUnit, logs, run metadata, and the full-scope gap scorecard.
 
 All scaffolded domain configuration, including Kubernetes, lives under the
 provider directory. The isolated review copy and atomic apply therefore use one
@@ -304,6 +340,13 @@ requires interactive console or shell probes to terminate cleanly rather than
 misclassifying a healthy continuing session as a timeout.
 Lifecycle verbs also remain literal: a launch or create step cannot be replaced
 with a read-only check of a pre-existing resource.
+The completeness audit is a separate, schema-bound model call and cannot edit
+files. Its response must cover every approved capability exactly once, cite
+supplied provider files for an `implemented` verdict, and select an existing
+provider-owned target for a `gap`. It is deliberately not presented as live or
+cassette-based proof; the normal static, human-review, and live gates remain.
+It reuses the complete domain context pack and a small relative-path index,
+with both audit and remediation reading the evolving isolated provider copy.
 The agent must reuse suitable provider transport, routing, polling, inventory,
 and client primitives; cite the supplied source for each wire mapping; restore
 safe test baselines after mutation; and require evidence that existing command

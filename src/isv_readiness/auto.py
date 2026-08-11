@@ -16,6 +16,14 @@ from isv_readiness.change_verification import apply_verified_change_set, verify_
 from isv_readiness.changes import ChangeSet
 from isv_readiness.context import ContextError, build_context_pack, provider_contract_constraints
 from isv_readiness.decision import adapter_contract_unit, decide_gap, validation_profile_issues
+from isv_readiness.domain_audit import (
+    DomainAuditError,
+    approved_test_capabilities,
+    audit_gap_rows,
+    merge_audit_rows,
+    run_domain_audit,
+    write_domain_audit,
+)
 from isv_readiness.failure_feedback import (
     MAX_FAILURE_DETAIL_CHARS,
     MAX_FAILURE_DETAILS,
@@ -186,9 +194,16 @@ def run_auto(
     generator_calls = 0
     max_attempts = project.execution.max_attempts
     allowed_environment = declared_provider_environment(project, canonical_domain)
+    audit_phase = "not_run"
+    active_audit_rows = []
+    semantic_candidate_staged = False
+    post_audit_pending_reason: str | None = None
+    audit_required = bool(profile and approved_test_capabilities(profile, canonical_domain))
 
     for _ in range(max_iterations):
         report = _scan(scratch, project.validation_root(project_path), canonical_domain, profile)
+        if active_audit_rows:
+            report = merge_audit_rows(report, active_audit_rows)
         fixable = _select_fixable(report, canonical_domain)
         # Drop gaps already staged (a re-scan should show them resolved; if it
         # does not, the retry budget below stops an infinite loop).
@@ -198,6 +213,65 @@ def run_auto(
             if attempts_by_unit.get(adapter_contract_unit(row), 0) < max_attempts
         ]
         if not pending:
+            # Exhausted or non-editable rows remain parked; an audit cannot make
+            # a rejected deterministic candidate safe or override scope.
+            if fixable or active_audit_rows:
+                break
+            if not audit_required:
+                break
+            if audit_phase == "not_run":
+                if max_generator_calls is not None and generator_calls >= max_generator_calls:
+                    break
+                active_audit_rows = _run_domain_completeness_audit(
+                    project,
+                    project_path,
+                    report,
+                    profile,
+                    domain=canonical_domain,
+                    scratch=scratch,
+                    work_dir=work_dir,
+                    generator_command=generator_command,
+                    generator_pass_env=generator_pass_env,
+                    environment=environment,
+                    generator_runner=generator_runner,
+                    generator_timeout_seconds=generator_timeout_seconds,
+                    generator_idle_timeout_seconds=generator_idle_timeout_seconds,
+                    generator_max_request_bytes=generator_max_request_bytes,
+                    artifact_path=work_dir / "domain-audit.pre.json",
+                )
+                generator_calls += 1
+                audit_phase = "pre"
+                if active_audit_rows:
+                    continue
+                break
+            if audit_phase == "pre" and semantic_candidate_staged:
+                if max_generator_calls is not None and generator_calls >= max_generator_calls:
+                    post_audit_pending_reason = (
+                        "The generator-call limit was reached before the required post-change "
+                        "domain completeness audit. Re-run auto to obtain semantic confirmation."
+                    )
+                    break
+                active_audit_rows = _run_domain_completeness_audit(
+                    project,
+                    project_path,
+                    report,
+                    profile,
+                    domain=canonical_domain,
+                    scratch=scratch,
+                    work_dir=work_dir,
+                    generator_command=generator_command,
+                    generator_pass_env=generator_pass_env,
+                    environment=environment,
+                    generator_runner=generator_runner,
+                    generator_timeout_seconds=generator_timeout_seconds,
+                    generator_idle_timeout_seconds=generator_idle_timeout_seconds,
+                    generator_max_request_bytes=generator_max_request_bytes,
+                    artifact_path=work_dir / "domain-audit.post.json",
+                )
+                generator_calls += 1
+                audit_phase = "post"
+            break
+        if max_generator_calls is not None and generator_calls >= max_generator_calls:
             break
         row = pending[0]
         gap_id = row["id"]
@@ -338,10 +412,17 @@ def run_auto(
                 attempts=attempts_by_unit[contract_unit],
             )
         )
+        if row.get("detection") == "semantic":
+            active_audit_rows = [
+                item for item in active_audit_rows if item.id != gap_id
+            ]
+            semantic_candidate_staged = True
         if max_generator_calls is not None and generator_calls >= max_generator_calls:
             break
 
     final_report = _scan(scratch, project.validation_root(project_path), canonical_domain, profile)
+    if active_audit_rows:
+        final_report = merge_audit_rows(final_report, active_audit_rows)
     parked = _park(
         final_report,
         canonical_domain,
@@ -362,6 +443,16 @@ def run_auto(
                     "Declare where provider steps run so required command availability and the "
                     "configured route can be verified before accepting no_changes."
                 ),
+                masked_failure=False,
+            )
+        )
+    if post_audit_pending_reason:
+        parked.append(
+            ParkedGap(
+                gap_id="domain-audit-post",
+                status="error",
+                action="implement_or_fix_adapter",
+                reason=post_audit_pending_reason,
                 masked_failure=False,
             )
         )
@@ -576,6 +667,7 @@ def _generate(
         cache_dir=project_path.parent / ".gapctl" / "context-cache",
         environment=environment,
         feedback=[failure.to_dict() for failure in feedback],
+        provider_root_override=scratch,
     )
     raw_context_pack = context_pack.to_dict()
     return run_generator(
@@ -600,6 +692,60 @@ def _generate(
             ),
         ),
     ), provider_contract_constraints(raw_context_pack)
+
+
+def _run_domain_completeness_audit(
+    project: ReadinessProject,
+    project_path: Path,
+    report: dict[str, Any],
+    profile,
+    *,
+    domain: str,
+    scratch: Path,
+    work_dir: Path,
+    generator_command: Sequence[str],
+    generator_pass_env: Sequence[str],
+    environment: Mapping[str, str] | None,
+    generator_runner: GeneratorRunner | None,
+    generator_timeout_seconds: int,
+    generator_idle_timeout_seconds: int | None,
+    generator_max_request_bytes: int,
+    artifact_path: Path,
+):
+    try:
+        audit, approved_capabilities = run_domain_audit(
+            project,
+            project_path,
+            report,
+            profile,
+            domain=domain,
+            provider_repo=scratch,
+            work_dir=work_dir,
+            command=generator_command,
+            pass_env=generator_pass_env,
+            environment=environment,
+            runner=generator_runner,
+            timeout_seconds=generator_timeout_seconds,
+            idle_timeout_seconds=generator_idle_timeout_seconds,
+            max_request_bytes=generator_max_request_bytes,
+        )
+        write_domain_audit(artifact_path, audit)
+        return audit_gap_rows(
+            audit,
+            approved_capabilities,
+            profile=profile,
+            provider_repo=scratch,
+            report=report,
+        )
+    except (GeneratorRequestExported, GeneratorExchangeError):
+        raise
+    except GeneratorInfrastructureError as exc:
+        raise AutoWorkflowError(
+            "Domain-audit infrastructure failed; validation stopped without changing the real provider: "
+            f"{exc}"
+        ) from exc
+    except (ContextError, DomainAuditError, FixGuardrailError) as exc:
+        raise AutoWorkflowError(f"Domain completeness audit failed closed: {exc}") from exc
 
 
 def _record_failure(
@@ -846,7 +992,12 @@ def _stage_file(source: Path, target: Path, mode: int) -> Path:
 
 
 def _discard_review_artifacts(work_dir: Path) -> None:
-    for name in ("auto-review.json", "auto-review.patch"):
+    for name in (
+        "auto-review.json",
+        "auto-review.patch",
+        "domain-audit.pre.json",
+        "domain-audit.post.json",
+    ):
         (work_dir / name).unlink(missing_ok=True)
 
 

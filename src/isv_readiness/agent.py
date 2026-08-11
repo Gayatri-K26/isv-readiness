@@ -903,7 +903,7 @@ def project_identity(project: ReadinessProject, project_path: Path) -> str:
             "validation": raw["validation"],
             "provider": raw["provider"],
             "assessment": raw["assessment"],
-            "apis": raw["apis"],
+            "interfaces": raw["interfaces"],
             "context_sources": raw["context_sources"],
             "profile_sha256": profile_sha256,
         }

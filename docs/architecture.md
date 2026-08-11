@@ -45,7 +45,10 @@ qualification, the deterministic boundary resolves every citation against the
 exact packed evidence items before a proposal can be approved.
 
 The cache index is bound to both the declared source configuration and the
-current bytes of local sources. API metadata is optional. Repeatable context
+current bytes of local sources. Provider-interface metadata is optional and is
+stored under `interfaces`, whose supported kinds are `rest`, `graphql`, `cli`,
+`sdk`, `kubernetes`, and `other`. `--api` is the REST bootstrap shortcut rather
+than the name of the general model. Repeatable context
 inputs accept a local file, a local text-document tree, or an HTTP(S) page and
 are recorded as required, authoritative ISV evidence. If an ISV edits a local
 API specification or qualification document before proposal generation,
@@ -179,11 +182,34 @@ Generation requires all of the following:
 - the scanner marks the row safely auto-fixable;
 - the target is inside the provider-owned allowlist.
 
+File-oriented scanning is not allowed to make the terminal completeness
+decision by itself. Once deterministic edit-eligible rows are exhausted,
+`domain_audit.py` performs one read-only, schema-bound audit over every approved
+`covered/test` capability, the complete domain source inventory, the reviewed
+profile, and the source context already used for remediation. Every approved
+capability must appear exactly once. An `implemented` result must cite supplied
+provider code; a `gap` must select an existing provider-owned target and is
+converted to a normal `semantic` gap row. That row uses the existing change-set,
+scope, isolated static-regression, retry, scratch, and review controls. A
+successful semantic candidate receives one post-change audit; unresolved
+findings are parked instead of creating an unbounded review loop.
+
+The audit does not execute provider APIs and is not an intent/cassette or live
+gate. It closes the narrower orchestration hole where a generic inventory or
+no-op scaffold prevented the remediation model from being called at all.
+
 The scanner orders rows from the normalized execution plan: declared phase
 order, then provider step order. Suite-required steps that are not wired into
 the provider yet retain upstream validation order within their phase. The
 generation loop preserves that order instead of introducing a separate target
 priority heuristic.
+
+Skip decisions remain visible regardless of where the provider encodes them.
+The static scanner reports both command-level `skip: true` configuration and
+literal `skipped: true` or validation-specific `*_skipped: true` fields emitted
+by provider scripts. Such rows are resolved only when the reviewed profile
+routes the exact checks to `out_of_scope/skip`; executable diagnostics do not
+turn an unreviewed skip into passing evidence.
 
 The generator never writes the provider directly. It returns a schema-valid
 change set bound to the context pack hash. Verification applies the change in a
@@ -225,8 +251,14 @@ the other edit-eligible unresolved validation rows in the selected adapter
 contract unit. Checks share a unit when they use one script. Rows whose target
 is a YAML configuration file share a unit only when their step name also
 matches; unrelated steps commonly live in the same domain file and must remain
-independent decisions. The pack also includes the exact relevant entries from
-the pinned suite, the step-output schemas, and a deterministic AST projection of
+independent decisions. A compact domain-lifecycle item preserves every configured
+setup, test, and teardown step in execution order. The complete domain config,
+the selected and existing setup/teardown scripts, and provider-shared helper
+modules are supplied as authoritative provider context. Edit authority remains
+bounded to the selected adapter contract, but generation can see the surrounding
+resource ownership and data flow instead of treating one file as an isolated
+program. The pack also includes the exact relevant entries from the pinned
+suite, the step-output schemas, and a deterministic AST projection of
 the validation classes that consume those outputs. That projection retains
 method signatures, documented inputs, keyed data access, exact branch
 conditions, pass/fail outcomes, direct dependencies, caught exceptions, source
@@ -286,14 +318,24 @@ every explicit `failure` or `error`, including injected subtests. Process exit
 zero, PASS text, scanner grouping, and testcase naming cannot override that
 deterministic result.
 
-The per-gap pack keeps its model-neutral 180k-character safety bound and fails
-closed instead of truncating or omitting selected evidence; sibling rows are
-represented by their validation contract fields rather than duplicated scanner
-metadata.
+The remediation pack preserves every selected source whole. The selected
+adapter's declared complete-request byte capacity is the only size gate;
+sibling rows are represented by their validation contract fields rather than
+duplicated scanner metadata.
 
 Deterministic candidate checks enforce what can be established without knowing
 the provider: environment references in each changed candidate must be declared,
-insecure TLS patterns are rejected, raw response/console fields cannot enter
+insecure TLS patterns are rejected, and a direct authenticated Python transport
+must parse and validate its base URL before attaching credentials. That URL must
+use HTTPS, contain a hostname, and omit userinfo, query, and fragment components.
+Recognizable delete/teardown adapters must treat a documented already-absent
+outcome as success; multiple independent deletion actions cannot share one
+fail-fast try block and must expose a `cleanup_errors` aggregate. Raw
+Python candidates that call `exec`, `eval`, or `compile` are rejected so their
+behavior cannot be hidden from static review. Credential-bearing `curl` or
+`wget` calls are rejected in generated shell lifecycle scripts; they must use
+the same guarded provider-shared client boundary as Python adapters. Raw
+response/console fields cannot enter
 result JSON, a recognizable result mapping cannot omit or leave empty an output
 consumed by a later configured step, and an explicit internal deadline cannot
 exceed its configured step timeout. Dynamic result construction remains a human
@@ -317,6 +359,20 @@ Lifecycle semantics remain literal. A create, launch, provision, delete, or
 teardown step cannot be implemented as a read-only check of a pre-existing
 resource; when the declared interface lacks the corresponding operation, the
 generator must park it.
+
+Lifecycle completeness remains downstream of reviewed scope. API evidence can
+prove that a provider exposes a Slurm plugin or cluster operation, but it does
+not choose whether the engagement validates an adapter-managed resource or a
+pre-existing one. The domain audit treats the reviewed rationale and ownership
+as premises and returns `scope_question` when the supplied sources genuinely
+conflict; it may not infer ownership from comments or provider operation names.
+The audit reuses the normal whole-domain context pack rather than carrying a
+second copy of the scan and provider source. A small relative-path index binds
+citations to those packed sources, and all iterative passes read the isolated
+scratch provider that contains the current candidate.
+If repeated provider experiments show the need, a later profile revision can
+add a small reviewed resource mode (`adapter_managed`, `preexisting`, or
+`external`). That is not required by the first audit implementation.
 
 Connection topology is part of that structural comparison. A jump host, proxy,
 or gateway cannot be substituted for the resource that an upstream check tests
@@ -353,7 +409,9 @@ Keychain-backed CLI authentication. Authentication material itself is neither
 forwarded explicitly nor added to context.
 Before invocation, the core compares the complete serialized request with the
 adapter's declared byte capacity. An incompatible adapter fails clearly without
-receiving a shortened request.
+receiving a shortened request. Remediation context has no separate aggregate
+character ceiling: every selected source is preserved whole, just as it is for
+qualification, and the adapter-capacity check remains the single size boundary.
 
 `validate` invokes live execution one domain at a time internally, while the ISV
 runs one command for the entire owned scope. The explicit confirmation is the
@@ -434,6 +492,7 @@ The main internal services are:
 - `qualify.py`: suite catalog and profile drafting;
 - `solution_profile.py`: scope contract and responsibility resolution;
 - `scan/`: static and dynamic evidence extraction;
+- `domain_audit.py`: scope-complete semantic review and audit-gap conversion;
 - `decision.py`: centralized blocking and edit eligibility;
 - `generation.py`: replaceable generator boundary;
 - `changes.py` and `change_verification.py`: guarded proposals and application;

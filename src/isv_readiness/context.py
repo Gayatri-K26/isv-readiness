@@ -7,6 +7,7 @@ import json
 import math
 import os
 import re
+import shlex
 import time
 import urllib.error
 import urllib.request
@@ -252,10 +253,12 @@ def build_context_pack(
     gap_id: str,
     cache_dir: Path,
     environment: Mapping[str, str] | None = None,
-    max_chars: int = 180_000,
+    max_chars: int | None = None,
     feedback: Sequence[Mapping[str, Any] | str] = (),
+    whole_domain: bool = False,
+    provider_root_override: Path | None = None,
 ) -> ContextPack:
-    if max_chars < 4_000:
+    if max_chars is not None and max_chars < 4_000:
         raise ContextError("Context budget must be at least 4000 characters.")
     rows = report.rows if isinstance(report, GapReport) else [_gap_from_dict(row) for row in report.get("rows", [])]
     gap = next((row for row in rows if row.id == gap_id), None)
@@ -268,7 +271,14 @@ def build_context_pack(
     required_env = sorted(set(project.execution.credential_env))
     available_env = sorted(name for name in required_env if env.get(name))
     terms = _gap_terms(gap)
-    candidates = _local_gap_items(project, manifest_path, gap, terms)
+    candidates = _local_gap_items(
+        project,
+        manifest_path,
+        gap,
+        terms,
+        whole_domain=whole_domain,
+        provider_root_override=provider_root_override,
+    )
     runtime_names = declared_provider_environment(project, gap.domain)
     candidates.append(
         _item(
@@ -280,10 +290,12 @@ def build_context_pack(
                 {
                     "credential_env": list(project.execution.credential_env),
                     "pass_env": list(project.execution.pass_env),
-                    "injected_api_env": [
-                        api.base_url_env
-                        for api in project.apis
-                        if api.base_url and api.base_url_env and gap.domain in api.domains
+                    "injected_interface_env": [
+                        interface.base_url_env
+                        for interface in project.interfaces
+                        if interface.base_url
+                        and interface.base_url_env
+                        and gap.domain in interface.domains
                     ],
                     "minimal_process_env": list(MINIMAL_PROCESS_ENV),
                     "allowed_provider_env": list(runtime_names),
@@ -316,11 +328,28 @@ def build_context_pack(
                 "other edit-eligible unresolved validation rows sharing the selected adapter contract unit",
             )
         )
+    domain_lifecycle = _domain_lifecycle_contract(rows, gap)
+    if domain_lifecycle:
+        candidates.append(
+            _item(
+                "domain_lifecycle_contract",
+                "validation_contract",
+                "authoritative",
+                "gapctl://selected-domain/lifecycle",
+                json.dumps(domain_lifecycle, indent=2, sort_keys=True),
+                "complete ordered setup, test, and teardown map for the reviewed domain",
+            )
+        )
+    contract_rows = (
+        _domain_audit_contract_rows(rows, gap)
+        if isinstance(gap.enrichment.get("domain_audit"), dict)
+        else related_rows
+    )
     upstream_contract = _upstream_target_contract(
         project,
         manifest_path,
         gap,
-        related_rows,
+        contract_rows,
     )
     if upstream_contract is not None:
         candidates.append(upstream_contract)
@@ -337,7 +366,12 @@ def build_context_pack(
         )
     candidates.extend(_run_items(cache_dir, gap.domain, terms))
     candidates.extend(_cached_items(_project_records(project, cache_dir), gap.domain, terms))
-    items, used, omitted = _fit_budget(candidates, max_chars, allow_truncation=False)
+    if max_chars is None:
+        items = sorted(candidates, key=lambda item: (_trust_rank(item.trust), item.source_id, item.origin))
+        used = sum(len(item.content) for item in items)
+        omitted = 0
+    else:
+        items, used, omitted = _fit_budget(candidates, max_chars, allow_truncation=False)
 
     pack = ContextPack(
         schema_version=CONTEXT_PACK_SCHEMA_VERSION,
@@ -345,18 +379,18 @@ def build_context_pack(
             "provider": project.provider.name,
             "owned_domains": list(project.assessment.domains),
             "validation_commit": project.validation.resolved_commit,
-            "api_interfaces": [
+            "interfaces": [
                 {
-                    "id": api.id,
-                    "kind": api.kind,
-                    "base_url": api.base_url,
-                    "base_url_env": api.base_url_env,
-                    "spec": api.spec,
-                    "auth_env": list(api.auth_env),
-                    "domains": list(api.domains),
+                    "id": interface.id,
+                    "kind": interface.kind,
+                    "base_url": interface.base_url,
+                    "base_url_env": interface.base_url_env,
+                    "spec": interface.spec,
+                    "auth_env": list(interface.auth_env),
+                    "domains": list(interface.domains),
                 }
-                for api in project.apis
-                if gap.domain in api.domains
+                for interface in project.interfaces
+                if gap.domain in interface.domains
             ],
         },
         gap=gap.to_dict(),
@@ -489,17 +523,17 @@ def build_qualify_pack(
             "provider": project.provider.name,
             "declared_domains": sorted(domains),
             "validation_commit": project.validation.resolved_commit,
-            "api_interfaces": [
+            "interfaces": [
                 {
-                    "id": api.id,
-                    "kind": api.kind,
-                    "base_url": api.base_url,
-                    "base_url_env": api.base_url_env,
-                    "spec": api.spec,
-                    "auth_env": list(api.auth_env),
-                    "domains": list(api.domains),
+                    "id": interface.id,
+                    "kind": interface.kind,
+                    "base_url": interface.base_url,
+                    "base_url_env": interface.base_url_env,
+                    "spec": interface.spec,
+                    "auth_env": list(interface.auth_env),
+                    "domains": list(interface.domains),
                 }
-                for api in project.apis
+                for interface in project.interfaces
             ],
         },
         "constraints": [
@@ -631,6 +665,72 @@ def _related_gap_contract(row: GapRow) -> dict[str, Any]:
     }
 
 
+def _domain_lifecycle_contract(rows: Sequence[GapRow], gap: GapRow) -> list[dict[str, Any]]:
+    """Summarize every configured contract row in domain execution order."""
+
+    steps: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if row.domain != gap.domain:
+            continue
+        phase = row.enrichment.get("validation_phase")
+        profile = row.enrichment.get("solution_profile")
+        profile = profile if isinstance(profile, dict) else {}
+        entry = steps.setdefault(
+            row.step_name,
+            {
+                "step_name": row.step_name,
+                "phase": phase if isinstance(phase, str) else None,
+                "selected": row.step_name == gap.step_name,
+                "target": row.remediation.target,
+                "statuses": [],
+                "checks": [],
+                "reviewed_capabilities": [],
+            },
+        )
+        if entry["phase"] is None and isinstance(phase, str):
+            entry["phase"] = phase
+        entry["selected"] = bool(entry["selected"] or row.id == gap.id)
+        if entry["target"] is None and row.remediation.target:
+            entry["target"] = row.remediation.target
+        if row.status not in entry["statuses"]:
+            entry["statuses"].append(row.status)
+        check = row.validation_class or row.requirement_id
+        if check and check not in entry["checks"]:
+            entry["checks"].append(check)
+        capability = {
+            key: profile.get(key)
+            for key in (
+                "capability_id",
+                "coverage",
+                "validation_mode",
+                "action",
+                "required_inputs",
+            )
+            if profile.get(key) is not None
+        }
+        if capability and capability not in entry["reviewed_capabilities"]:
+            entry["reviewed_capabilities"].append(capability)
+    return list(steps.values())
+
+
+def _domain_audit_contract_rows(rows: Sequence[GapRow], gap: GapRow) -> list[GapRow]:
+    """Attach real consumer rows for the capability behind a semantic audit gap."""
+
+    audit = gap.enrichment.get("domain_audit")
+    audit = audit if isinstance(audit, dict) else {}
+    capability_id = str(audit.get("capability_id") or gap.requirement_id or "")
+    selected: list[GapRow] = []
+    for row in rows:
+        if row.id == gap.id or row.domain != gap.domain:
+            continue
+        profile = row.enrichment.get("solution_profile")
+        profile = profile if isinstance(profile, dict) else {}
+        phase = row.enrichment.get("validation_phase")
+        if profile.get("capability_id") == capability_id or phase in {"setup", "teardown"}:
+            selected.append(row)
+    return selected
+
+
 def _upstream_target_contract(
     project: ReadinessProject,
     manifest_path: Path,
@@ -647,7 +747,8 @@ def _upstream_target_contract(
     classes = {
         row.validation_class
         for row in rows
-        if row.validation_class and row.validation_class not in {"StepOutputSchema"}
+        if row.validation_class
+        and row.validation_class not in {"StepOutputSchema", "DomainLifecycleAudit"}
     }
     suite_name = "k8s.yaml" if gap.domain in {"k8s", "kubernetes"} else f"{gap.domain}.yaml"
     suite_path = validation_root / "isvctl" / "configs" / "suites" / suite_name
@@ -1166,13 +1267,18 @@ def _local_gap_items(
     manifest_path: Path,
     gap: GapRow,
     terms: set[str],
+    *,
+    whole_domain: bool = False,
+    provider_root_override: Path | None = None,
 ) -> list[ContextItem]:
     items: list[ContextItem] = []
-    provider_root = project.provider_root(manifest_path)
+    provider_root = provider_root_override or project.provider_root(manifest_path)
     validation_root = project.validation_root(manifest_path)
+    included_paths: set[Path] = set()
     if gap.remediation.target:
         target = _safe_descendant(provider_root, gap.remediation.target)
         if target.is_file():
+            included_paths.add(target.resolve())
             items.append(
                 _item(
                     "provider_target",
@@ -1188,24 +1294,169 @@ def _local_gap_items(
         config = config if config.is_absolute() else provider_root / config
         try:
             config = config.resolve()
-            config.relative_to(validation_root)
+            if not any(
+                _is_relative_to(config, root)
+                for root in (provider_root.resolve(), validation_root.resolve())
+            ):
+                raise ValueError
         except ValueError:
             config = Path()
         if config.is_file():
-            items.append(
-                _item(
-                    "provider_config",
-                    "provider_config",
-                    "authoritative",
+            config_text = _read_text(config)
+            resolved_config = config.resolve()
+            if resolved_config not in included_paths:
+                included_paths.add(resolved_config)
+                items.append(
+                    _item(
+                        "provider_config",
+                        "provider_config",
+                        "authoritative",
+                        config,
+                        config_text,
+                        "complete domain config containing setup, test, teardown, and cross-step data flow",
+                    )
+                )
+            items.extend(
+                _provider_lifecycle_source_items(
+                    provider_root,
                     config,
-                    _relevant_excerpt(_read_text(config), terms, 12_000),
-                    "config containing selected validation",
+                    config_text,
+                    gap,
+                    included_paths,
+                    include_all=whole_domain,
                 )
             )
+    items.extend(_provider_supporting_source_items(provider_root, included_paths))
     # remediation.aws_reference stays a pointer on the embedded gap row; the
     # reference implementation's contents are deliberately not included
     # (patterns only — generated code must derive from the ISV's own spec).
     return items
+
+
+def _provider_lifecycle_source_items(
+    provider_root: Path,
+    config_path: Path,
+    config_text: str,
+    gap: GapRow,
+    included_paths: set[Path],
+    *,
+    include_all: bool = False,
+) -> list[ContextItem]:
+    """Include selected, setup, and teardown scripts that define one domain lifecycle."""
+
+    try:
+        raw = yaml.safe_load(config_text) or {}
+    except yaml.YAMLError:
+        return []
+    steps = [item for item in _nested_step_mappings(raw) if isinstance(item.get("name"), str)]
+    paths: list[tuple[str, str, Path]] = []
+    for step in steps:
+        name = str(step["name"])
+        phase = str(step.get("phase") or "")
+        semantic_gap = isinstance(gap.enrichment.get("domain_audit"), dict)
+        if (
+            not include_all
+            and not semantic_gap
+            and name != gap.step_name
+            and phase not in {"setup", "teardown"}
+        ):
+            continue
+        command = step.get("command")
+        if not isinstance(command, str):
+            continue
+        try:
+            tokens = shlex.split(command)
+        except ValueError:
+            tokens = command.split()
+        script = next((token for token in tokens if Path(token).suffix.lower() in {".py", ".sh"}), None)
+        if script is None:
+            continue
+        path = (config_path.parent / script).resolve()
+        try:
+            path.relative_to(provider_root.resolve())
+        except ValueError:
+            continue
+        if path in included_paths or not _allowed_text_file(path):
+            continue
+        paths.append((phase, name, path))
+
+    items: list[ContextItem] = []
+    for phase, name, path in paths:
+        included_paths.add(path)
+        relative = path.relative_to(provider_root.resolve()).as_posix()
+        items.append(
+            _item(
+                _provider_source_id("provider_lifecycle", relative),
+                "provider_source",
+                "authoritative",
+                path,
+                _read_text(path),
+                f"existing {phase or 'configured'} lifecycle script for step {name}",
+            )
+        )
+    return items
+
+
+def _nested_step_mappings(value: Any) -> list[dict[str, Any]]:
+    steps: list[dict[str, Any]] = []
+    if isinstance(value, dict):
+        candidate = value.get("steps")
+        if isinstance(candidate, list):
+            steps.extend(item for item in candidate if isinstance(item, dict))
+        for child in value.values():
+            steps.extend(_nested_step_mappings(child))
+    elif isinstance(value, list):
+        for child in value:
+            steps.extend(_nested_step_mappings(child))
+    return steps
+
+
+def _provider_supporting_source_items(
+    provider_root: Path, included_paths: set[Path]
+) -> list[ContextItem]:
+    """Expose current same-domain and provider-shared helpers to later remediation."""
+
+    root = provider_root.resolve()
+    common_root = provider_root / "scripts" / "common"
+    source_roots = {common_root.resolve()} if common_root.is_dir() else set()
+    scripts_root = root / "scripts"
+    for path in included_paths:
+        try:
+            relative = path.relative_to(scripts_root)
+        except ValueError:
+            continue
+        if len(relative.parts) > 1:
+            source_roots.add(scripts_root / relative.parts[0])
+
+    items: list[ContextItem] = []
+    for source_root in sorted(source_roots):
+        prefix = "provider_shared" if source_root == common_root.resolve() else "provider_domain"
+        relevance = (
+            "existing provider-shared client, transport, naming, polling, or error helper"
+            if prefix == "provider_shared"
+            else "current same-domain adapter or helper from the evolving provider candidate"
+        )
+        for path in sorted(source_root.rglob("*")):
+            resolved = path.resolve()
+            if resolved in included_paths or not _allowed_text_file(resolved):
+                continue
+            included_paths.add(resolved)
+            relative = resolved.relative_to(root).as_posix()
+            items.append(
+                _item(
+                    _provider_source_id(prefix, relative),
+                    "provider_source",
+                    "authoritative",
+                    resolved,
+                    _read_text(resolved),
+                    relevance,
+                )
+            )
+    return items
+
+
+def _provider_source_id(prefix: str, relative: str) -> str:
+    return prefix + "_" + re.sub(r"[^a-zA-Z0-9_-]+", "_", relative).strip("_")
 
 
 def _run_items(cache_dir: Path, domain: str, terms: set[str]) -> list[ContextItem]:
@@ -1313,6 +1564,14 @@ def _safe_descendant(root: Path, relative: str) -> Path:
     except ValueError as exc:
         raise ContextError(f"Context target escapes provider root: {relative}") from exc
     return candidate
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
 
 
 def _allowed_text_file(path: Path) -> bool:

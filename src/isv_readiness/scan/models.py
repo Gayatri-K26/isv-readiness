@@ -6,7 +6,7 @@ from typing import Any, Literal
 SCHEMA_VERSION = "0.2.0"
 
 Status = Literal["pass", "fail", "not_implemented", "skipped", "error"]
-Detection = Literal["static", "dynamic"]
+Detection = Literal["static", "dynamic", "semantic"]
 Stage = Literal["coverage", "correctness"]
 
 

@@ -7,7 +7,12 @@
   "required": ["schema_version", "verification_mode", "gap_id", "domain", "change_set_sha256", "patch_sha256", "files", "selected_status_before", "selected_status_after", "regressions", "success"],
   "properties": {
     "schema_version": {"const": "0.1.0"},
-    "verification_mode": {"const": "isolated_static_change_set_rescan"},
+    "verification_mode": {
+      "enum": [
+        "isolated_static_change_set_rescan",
+        "isolated_static_regression_scan_pending_semantic_reaudit"
+      ]
+    },
     "gap_id": {"type": "string"},
     "domain": {"type": "string"},
     "change_set_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},

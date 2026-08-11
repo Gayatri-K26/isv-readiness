@@ -67,6 +67,143 @@ class AutoWorkflowTests(unittest.TestCase):
             self.assertIn("TODO", (provider / "scripts" / "vm" / "launch_instance.py").read_text())
             self.assertTrue((work / "auto-review.patch").exists())
 
+    def test_domain_audit_finds_existing_scaffold_then_confirms_generated_lifecycle(self) -> None:
+        calls: list[str] = []
+
+        def lifecycle_runner(command, cwd, request, environment, timeout):
+            del cwd, environment, timeout
+            payload = json.loads(request)
+            if "audit_context" in payload:
+                calls.append("audit")
+                self.assertNotIn("scanner_report", payload["audit_context"])
+                self.assertNotIn("provider_sources", payload["audit_context"])
+                source_ref = next(
+                    item
+                    for item in payload["audit_context"]["provider_paths"]
+                    if item["path"] == "scripts/vm/launch_instance.py"
+                )
+                source = next(
+                    item
+                    for item in payload["audit_context"]["context_pack"]["items"]
+                    if item["source_id"] == source_ref["source_id"]
+                )
+                implemented = "create_provider_resource" in source["content"]
+                return _audit_result(
+                    command,
+                    payload,
+                    status="implemented" if implemented else "gap",
+                    target=None if implemented else "scripts/vm/launch_instance.py",
+                )
+            calls.append("generation")
+            gap = payload["context_pack"]["gap"]
+            self.assertEqual(gap["validation_class"], "DomainLifecycleAudit")
+            content = (
+                "import json\n\n"
+                "def create_provider_resource():\n"
+                "    return 'vm-agent'\n\n"
+                "print(json.dumps({'success': True, 'platform': 'fixture', "
+                "'instance_id': create_provider_resource()}))\n"
+            )
+            output = {
+                "schema_version": "0.1.0",
+                "gap_id": gap["id"],
+                "context_pack_sha256": payload["context_pack_sha256"],
+                "generator": {"adapter": "fixture", "model": "fixture-model"},
+                "summary": "Replace the inventory scaffold with the approved create lifecycle",
+                "changes": [
+                    {
+                        "target_root": "provider",
+                        "path": gap["remediation"]["target"],
+                        "operation": "replace",
+                        "content": content,
+                        "content_sha256": hashlib.sha256(content.encode()).hexdigest(),
+                        "rationale": "Perform the reviewed setup effect",
+                    }
+                ],
+            }
+            return subprocess.CompletedProcess(command, 0, json.dumps(output), "")
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            project_path, provider = _project(Path(tempdir))
+            launch = provider / "scripts" / "vm" / "launch_instance.py"
+            launch.write_text(
+                "import json\n\n"
+                "# Existing inventory scaffold with schema-valid output.\n"
+                "print(json.dumps({'success': True, 'platform': 'fixture', 'instance_id': 'existing'}))\n",
+                encoding="utf-8",
+            )
+            describe = provider / "scripts" / "vm" / "describe_instance.py"
+            describe.write_text(
+                "import json\n\n"
+                "print(json.dumps({'success': True, 'platform': 'fixture', "
+                "'instance_id': 'existing', 'state': 'running'}))\n",
+                encoding="utf-8",
+            )
+            config_path = provider / "config" / "vm.yaml"
+            config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            steps = config["commands"]["vm"]["steps"]
+            steps.insert(
+                2,
+                {
+                    "name": "describe_instance",
+                    "phase": "test",
+                    "command": "python ../scripts/vm/describe_instance.py",
+                    "timeout": 60,
+                },
+            )
+            steps[-1].pop("skip", None)
+            config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+            work = Path(tempdir) / "work"
+
+            review = run_auto(
+                project_path,
+                domain="vm",
+                work_dir=work,
+                generator_command=["fixture-generator"],
+                generator_runner=lifecycle_runner,
+            )
+
+            self.assertEqual(calls, ["audit", "generation", "audit"])
+            self.assertEqual(review.status, "awaiting_review")
+            self.assertEqual(review.staged[0].validation_class, "DomainLifecycleAudit")
+            self.assertTrue((work / "domain-audit.pre.json").is_file())
+            self.assertTrue((work / "domain-audit.post.json").is_file())
+            staged_launch = work / "scratch-provider" / "scripts" / "vm" / "launch_instance.py"
+            self.assertIn("create_provider_resource", staged_launch.read_text())
+            self.assertNotIn("create_provider_resource", launch.read_text())
+
+    def test_domain_audit_is_not_scheduled_for_out_of_scope_domain(self) -> None:
+        calls = 0
+
+        def unexpected_runner(command, cwd, request, environment, timeout):
+            del command, cwd, request, environment, timeout
+            nonlocal calls
+            calls += 1
+            raise AssertionError("out-of-scope domains must not invoke the generator")
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            project_path, _provider = _project(Path(tempdir))
+            profile_path = project_path.parent / "solution-profile.yaml"
+            profile = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
+            domain = next(item for item in profile["domains"] if item["domain"] == "vm")
+            domain["coverage"] = "out_of_scope"
+            domain["validation_mode"] = "skip"
+            for capability in domain.get("capabilities", []):
+                capability["coverage"] = "out_of_scope"
+                capability["validation_mode"] = "skip"
+            profile_path.write_text(yaml.safe_dump(profile, sort_keys=False), encoding="utf-8")
+
+            review = run_auto(
+                project_path,
+                domain="vm",
+                work_dir=Path(tempdir) / "work",
+                generator_command=["fixture-generator"],
+                generator_runner=unexpected_runner,
+            )
+
+            self.assertEqual(calls, 0)
+            self.assertEqual(review.status, "no_changes")
+
     def test_no_changes_parks_when_execution_environment_is_not_declared(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             project_path, _provider = _project(Path(tempdir))
@@ -605,6 +742,8 @@ def _git_runner(command, cwd: Path, timeout: int) -> subprocess.CompletedProcess
 def _generator_runner(command, cwd, request, environment, timeout):
     del cwd, environment, timeout
     payload = json.loads(request)
+    if "audit_context" in payload:
+        return _audit_result(command, payload, status="implemented", target=None)
     gap = payload["context_pack"]["gap"]
     content = (
         "import json\n\n"
@@ -624,6 +763,48 @@ def _generator_runner(command, cwd, request, environment, timeout):
                 "content": content,
                 "content_sha256": hashlib.sha256(content.encode()).hexdigest(),
                 "rationale": "Return the output required by the installed validation contract",
+            }
+        ],
+    }
+    return subprocess.CompletedProcess(command, 0, json.dumps(output), "")
+
+
+def _audit_result(command, payload: dict, *, status: str, target: str | None):
+    capability_id = payload["audit_context"]["approved_capabilities"][0]["capability_id"]
+    evidence = (
+        [
+            {
+                "effect": "create provider resource",
+                "path": "scripts/vm/launch_instance.py",
+                "detail": "The setup path calls the provider lifecycle helper and emits its resource ID.",
+            }
+        ]
+        if status == "implemented"
+        else []
+    )
+    output = {
+        "schema_version": "0.1.0",
+        "domain": payload["audit_context"]["domain"],
+        "audit_context_sha256": payload["audit_context_sha256"],
+        "auditor": {"adapter": "fixture", "model": "fixture-model"},
+        "summary": "Audit the complete approved VM lifecycle",
+        "capabilities": [
+            {
+                "capability_id": capability_id,
+                "status": status,
+                "step_name": "launch_instance",
+                "target": target,
+                "expected_effects": {
+                    "setup": ["create provider resource"],
+                    "test": ["list provider resources"],
+                    "teardown": ["delete resource owned by the run"],
+                },
+                "implementation_evidence": evidence,
+                "reason": (
+                    "The lifecycle implementation performs the reviewed effects."
+                    if status == "implemented"
+                    else "The existing setup only inventories a preexisting resource."
+                ),
             }
         ],
     }

@@ -59,7 +59,7 @@ class Assessment:
 
 
 @dataclass(frozen=True)
-class ApiInterface:
+class ProviderInterface:
     id: str
     kind: str
     base_url: str | None
@@ -98,7 +98,7 @@ class ReadinessProject:
     validation: ValidationCheckout
     provider: ProviderProject
     assessment: Assessment
-    apis: tuple[ApiInterface, ...]
+    interfaces: tuple[ProviderInterface, ...]
     context_sources: tuple[ContextSource, ...]
     execution: ExecutionPolicy
 
@@ -124,9 +124,11 @@ def declared_provider_environment(
 
     names = [*project.execution.credential_env, *project.execution.pass_env]
     names.extend(
-        api.base_url_env
-        for api in project.apis
-        if api.base_url and api.base_url_env and (domain is None or domain in api.domains)
+        interface.base_url_env
+        for interface in project.interfaces
+        if interface.base_url
+        and interface.base_url_env
+        and (domain is None or domain in interface.domains)
     )
     names.extend(MINIMAL_PROCESS_ENV)
     return tuple(dict.fromkeys(names))
@@ -270,7 +272,7 @@ def execute_bootstrap(
     profile_path = plan.profile or (manifest_dir / "solution-profile.yaml")
     profile_value = _portable_path(profile_path, manifest_dir)
 
-    apis: tuple[ApiInterface, ...] = ()
+    interfaces: tuple[ProviderInterface, ...] = ()
     sources = [
         ContextSource(
             id="nsrg",
@@ -294,8 +296,8 @@ def execute_bootstrap(
         ),
     ]
     if plan.api_base_url or plan.api_spec:
-        apis = (
-            ApiInterface(
+        interfaces = (
+            ProviderInterface(
                 id="primary_api",
                 kind="rest",
                 base_url=plan.api_base_url,
@@ -344,7 +346,7 @@ def execute_bootstrap(
         ),
         provider=ProviderProject(name=plan.provider_name, path=provider_value, state=state),
         assessment=Assessment(domains=plan.domains, profile=profile_value),
-        apis=apis,
+        interfaces=interfaces,
         context_sources=tuple(sources),
         execution=ExecutionPolicy(
             run_environment="not_configured",
@@ -371,6 +373,7 @@ def execute_bootstrap(
 
 def load_project(path: Path) -> ReadinessProject:
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw = _canonical_project_manifest(raw)
     validate_project(raw)
     domains = tuple(raw["assessment"]["domains"])
     context_sources = tuple(
@@ -410,8 +413,8 @@ def load_project(path: Path) -> ReadinessProject:
             domains=domains,
             profile=raw["assessment"]["profile"],
         ),
-        apis=tuple(
-            ApiInterface(
+        interfaces=tuple(
+            ProviderInterface(
                 id=item["id"],
                 kind=item["kind"],
                 base_url=item["base_url"],
@@ -420,7 +423,7 @@ def load_project(path: Path) -> ReadinessProject:
                 auth_env=tuple(item["auth_env"]),
                 domains=tuple(item["domains"]),
             )
-            for item in raw["apis"]
+            for item in raw["interfaces"]
         ),
         context_sources=context_sources,
         execution=ExecutionPolicy(
@@ -436,25 +439,36 @@ def load_project(path: Path) -> ReadinessProject:
 
 
 def validate_project(raw: Any) -> None:
+    raw = _canonical_project_manifest(raw)
     try:
         jsonschema.validate(raw, load_schema("project.schema.json"))
     except jsonschema.ValidationError as exc:
         location = ".".join(str(item) for item in exc.absolute_path) or "project"
         raise ProjectError(f"Invalid project at {location}: {exc.message}") from exc
-    ids = [item["id"] for item in raw["apis"]] + [item["id"] for item in raw["context_sources"]]
+    ids = [item["id"] for item in raw["interfaces"]] + [item["id"] for item in raw["context_sources"]]
     if len(ids) != len(set(ids)):
-        raise ProjectError("API and context source IDs must be unique across the project.")
+        raise ProjectError("Interface and context source IDs must be unique across the project.")
     secrets = [value for value in raw["execution"]["credential_env"] if "=" in value]
     if secrets:
         raise ProjectError("Project files store credential environment variable names, never secret values.")
     environment_names = [
         *raw["execution"]["credential_env"],
         *raw["execution"]["pass_env"],
-        *(item["base_url_env"] for item in raw["apis"] if item["base_url_env"]),
+        *(item["base_url_env"] for item in raw["interfaces"] if item["base_url_env"]),
     ]
     invalid_env = [name for name in environment_names if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", name)]
     if invalid_env:
         raise ProjectError(f"Invalid environment variable names: {', '.join(invalid_env)}")
+
+
+def _canonical_project_manifest(raw: Any) -> Any:
+    """Accept the pre-rename ``apis`` key while exposing only ``interfaces`` internally."""
+
+    if not isinstance(raw, dict) or "interfaces" in raw or "apis" not in raw:
+        return raw
+    normalized = dict(raw)
+    normalized["interfaces"] = normalized.pop("apis")
+    return normalized
 
 
 def _validate_checkout(root: Path) -> None:
