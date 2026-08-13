@@ -166,6 +166,8 @@ def _reject_dynamic_code_execution(candidate_text: str) -> None:
         raise FixGuardrailError(
             "Candidate uses dynamic code execution and is not directly reviewable: "
             + ", ".join(forbidden)
+            + ". Put literal source code directly in change.content; do not encode, "
+            "compile, eval, or exec a generated payload."
         )
 
 
@@ -218,7 +220,8 @@ def _reject_unvalidated_authenticated_transport(relative_target: Path, candidate
                 return
             raise FixGuardrailError(
                 "Candidate embeds authenticated HTTP in a lifecycle script. "
-                "Put credential-bearing transport in one provider-shared client module and import it."
+                "Put credential-bearing transport in one provider-shared client module under "
+                "scripts/common/<client>.py and import it from lifecycle scripts."
             )
 
     raise FixGuardrailError(

@@ -433,8 +433,19 @@ Each live domain produces:
 .gapctl/runs/<run-id>/
 ├── run.json
 ├── junit.xml
-└── isvctl.log
+├── isvctl.log
+└── run-explanations.json
 ```
+
+After JUnit and the redacted log are canonicalized, `run_explanations.py`
+creates the schema-backed explanation manifest without a model call. Executed
+checks take their outcome, testcase, reason, and redacted message from dynamic
+rows. Reviewed exclusions that the live scope overlay intentionally kept out of
+JUnit are added from profile-enriched static rows only when no matching dynamic
+testcase exists. Each record includes the central `decide_gap` result and the
+reviewed coverage, ownership, rationale, and evidence references. Top-level
+hashes bind the document to the solution profile, source report, JUnit, and log.
+The file is created for failed runs as well as successful ones.
 
 When a later domain runs, current static rows are rebuilt and existing dynamic
 rows for other domains are retained. This prevents a multi-domain engagement
@@ -453,7 +464,9 @@ local state only after the shared readiness assessment confirms:
 
 After those local checks, it obtains a Lab Service token and creates one typed
 test run per owned domain. There is no intermediate bundle or user-selected
-JUnit path.
+JUnit path. The current service request uploads canonical JUnit; the run-local
+explanation manifest remains available for a future structured-results service
+integration.
 
 ## Trust order
 
@@ -496,6 +509,7 @@ The main internal services are:
 - `changes.py` and `change_verification.py`: guarded proposals and application;
 - `auto.py`: scratch-copy generation and hash-bound review state;
 - `live.py` and `runs.py`: real execution and canonical evidence;
+- `run_explanations.py`: deterministic per-check live outcome explanations;
 - `readiness.py`: shared validate/publish gate;
 - `publish.py`: Lab Service authentication and typed evidence upload;
 - `journey.py`: orchestration behind `qualify` and `validate`;

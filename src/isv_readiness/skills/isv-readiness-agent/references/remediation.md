@@ -19,7 +19,9 @@
    unrelated configuration. Include the selected remediation target and only
    the additional provider-owned lifecycle scripts or selected domain config
    required by that same adapter contract. When authenticated HTTP is required, use exactly
-   one provider-shared client. Before attaching any credential, that client
+   one provider-shared client under `scripts/common/<client>.py`; import it from
+   lifecycle scripts rather than placing credential-bearing transport directly
+   in a domain script or directly under `scripts/`. Before attaching any credential, that client
    must parse the base URL, require HTTPS and a hostname, and reject userinfo,
    query, and fragment components. Keep certificate and hostname verification
    enabled, normalize provider errors without response bodies, and implement
@@ -86,3 +88,6 @@
     bounded, fail-closed adapter.
 19. Recheck the candidate for invented inputs, operations, fields, identities,
     success claims, broadened scope, and changes outside the edit boundary.
+20. Put literal, directly reviewable source code in every `change.content`.
+    Never encode a candidate and reconstruct it with `compile`, `eval`, or
+    `exec`.

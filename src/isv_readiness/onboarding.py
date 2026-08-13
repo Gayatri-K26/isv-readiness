@@ -177,6 +177,12 @@ def execute_provider_onboarding(
             f"Provider scaffold failed with exit code {result.returncode}: {details or 'no output'}"
         )
 
+    # Remediation requires authenticated transport to live in one guarded
+    # provider-shared module. Upstream scaffolds may omit this empty directory;
+    # establish the already-authorized boundary before any model proposes a
+    # scripts/common/<client>.py create.
+    (plan.provider_dir / "scripts" / "common").mkdir(parents=True, exist_ok=True)
+
     written = [
         plan.provider_dir / "config" / DOMAIN_CONFIG_FILES[domain]
         for domain in plan.domains

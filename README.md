@@ -316,7 +316,9 @@ For every owned domain, `validate`:
 17. rejects live success when any emitted JUnit testcase records a `failure` or
     `error`, including injected subtests, regardless of process exit or summary
     text;
-18. records JUnit, logs, run metadata, and the full-scope gap scorecard.
+18. records JUnit, redacted logs, run metadata, a schema-backed explanation for
+    every executed check and approved scope exclusion, and the full-scope gap
+    scorecard.
 
 All scaffolded domain configuration, including Kubernetes, lives under the
 provider directory. The isolated review copy and atomic apply therefore use one
@@ -408,8 +410,17 @@ Run artifacts are stored under:
 .gapctl/runs/<run-id>/
 ├── run.json
 ├── junit.xml
-└── isvctl.log
+├── isvctl.log
+└── run-explanations.json
 ```
+
+`run-explanations.json` is generated after the live run without another model
+call. It combines each JUnit outcome with the redacted validation message, the
+central blocking decision, and the reviewed coverage, ownership, rationale, and
+evidence references. Approved scope exclusions that were intentionally omitted
+from JUnit are included with `source: reviewed_scope`. See
+[`docs/check-outcome-explanations.md`](docs/check-outcome-explanations.md) for
+the field contract.
 
 Successful evidence from earlier domains is preserved while later domains run.
 

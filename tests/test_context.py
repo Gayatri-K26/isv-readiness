@@ -11,6 +11,7 @@ import jsonschema
 from isv_readiness.context import (
     ContextError,
     _domain_audit_contract_rows,
+    _selected_suite_entries,
     build_context_pack,
     context_cache_is_current,
     provider_contract_constraints,
@@ -30,6 +31,51 @@ COMMIT = "b" * 40
 
 
 class ContextTests(unittest.TestCase):
+    def test_suite_contract_extraction_preserves_repeated_list_entries(self) -> None:
+        validations = {
+            "k8s_node_pools": [
+                {
+                    "K8sNodePoolCheck": {
+                        "step": "create_test_node_pool",
+                        "label_selector": "{{ steps.create_test_node_pool.label_selector }}",
+                        "expected_replicas": "{{ steps.create_test_node_pool.expected_replicas }}",
+                    }
+                },
+                {
+                    "K8sNodePoolCheck": {
+                        "step": "create_test_gpu_node_pool",
+                        "label_selector": "{{ steps.create_test_gpu_node_pool.label_selector }}",
+                        "expected_replicas": "{{ steps.create_test_gpu_node_pool.expected_replicas }}",
+                    },
+                    "UnrelatedCheck": {"step": "create_test_gpu_node_pool"},
+                },
+                {"K8sNodePoolCheck": {"step": "delete_test_node_pool", "expected_replicas": 0}},
+            ],
+            "kubernetes": {
+                "checks": {"K8sNodeReadyCheck": {"require_all_ready": True}},
+                "step": "setup",
+            },
+        }
+
+        selected = _selected_suite_entries(
+            validations,
+            steps={"create_test_node_pool", "create_test_gpu_node_pool"},
+            classes={"K8sNodePoolCheck"},
+        )
+
+        self.assertEqual(len(selected["k8s_node_pools"]), 2)
+        self.assertEqual(
+            selected["k8s_node_pools"][1],
+            {
+                "K8sNodePoolCheck": {
+                    "step": "create_test_gpu_node_pool",
+                    "label_selector": "{{ steps.create_test_gpu_node_pool.label_selector }}",
+                    "expected_replicas": "{{ steps.create_test_gpu_node_pool.expected_replicas }}",
+                }
+            },
+        )
+        self.assertNotIn("kubernetes", selected)
+
     def test_semantic_audit_contract_includes_capability_consumers_and_lifecycle_edges(self) -> None:
         setup = _gap_report(Path("/tmp/provider")).rows[0]
         setup = GapRow(

@@ -252,7 +252,11 @@ def _authorize_selected_gap(row: dict[str, Any], gap_id: str) -> None:
 def _authorize_provider_path(path: Path, domain: str) -> None:
     if path.parts[0] == "scripts":
         if len(path.parts) < 3 or path.suffix.lower() not in ALLOWED_SCRIPT_SUFFIXES:
-            raise FixGuardrailError(f"Provider script target is not an approved text file: {path}")
+            raise FixGuardrailError(
+                f"Provider script target is not an approved text file: {path}. "
+                "Lifecycle scripts belong under scripts/<domain>/; a provider-shared "
+                "client or helper belongs under scripts/common/."
+            )
         return
     if path.parts[0] == "config":
         expected = DOMAIN_CONFIG_FILES.get(domain)

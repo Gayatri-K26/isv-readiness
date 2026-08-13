@@ -224,6 +224,9 @@ class SimpleCommandTests(unittest.TestCase):
                 self.assertTrue((run_dir / "run.json").is_file())
                 self.assertTrue((run_dir / "junit.xml").is_file())
                 self.assertTrue((run_dir / "isvctl.log").is_file())
+                self.assertTrue((run_dir / "run-explanations.json").is_file())
+                run_record = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+                self.assertIn("run-explanations.json", run_record["artifacts"])
             self.assertEqual(load_project(manifest).assessment.domains, ("vm", "network"))
 
 

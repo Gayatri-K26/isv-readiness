@@ -17,6 +17,54 @@ decision log, not a transcript of private model reasoning.
 - Provider and product changes remain human-gated. Generated fixes are proposed
   as patches or pull requests and are never auto-merged.
 
+## Mistral Four-Domain Comparison - Kubernetes Contract Extraction
+
+### Evidence
+
+- The current Kubernetes suite represents repeated `K8sNodePoolCheck` contracts
+  as a list of one-check mappings so create, GPU-create, update, and delete can
+  bind the same validation class to different lifecycle steps.
+- The scanner already normalized this current shape, but generation context
+  selected only the older group-level `step` plus `checks` mapping shape.
+- As a result, the third Mistral experiment sent an empty `suite_entries` map
+  for Kubernetes even though the selected gaps targeted node-pool checks.
+
+### Decision
+
+Select both supported suite shapes when building the exact upstream target
+contract. Preserve every matching list entry and its parameters, filter it by
+the selected lifecycle steps and validation classes, and keep unrelated list
+members out of the remediation request. A regression test covers repeated CPU
+and GPU node-pool entries and proves that unmatched steps and classes remain
+excluded.
+
+## Mistral Four-Domain Comparison - Actionable Guardrail Feedback
+
+### Evidence
+
+- In the first controlled IAM rerun, the generator correctly converged on a
+  shared authenticated client but proposed `scripts/mistral_client.py`.
+- The edit allowlist intentionally requires at least one directory below
+  `scripts/`; `scripts/common/<client>.py` is the approved provider-shared
+  location, but the rejection message named only the invalid path.
+- A teardown correction repeated a base64/`compile` construction after the
+  generic dynamic-execution rejection.
+
+### Decision
+
+Keep both guardrails unchanged and make their feedback actionable. Invalid
+script paths now state the approved domain and `scripts/common/` locations.
+Dynamic-execution failures now require literal source directly in
+`change.content` and explicitly reject encoding plus compile/eval/exec. This
+adds no new workflow stage or special-case provider logic.
+
+The subsequent Control Plane run followed the corrected skill and selected
+`scripts/common/<client>.py`, but the new-provider scaffold did not contain the
+empty `scripts/common` parent and proposal construction deliberately refuses to
+create implicit directory trees. Onboarding now creates this one authorized
+shared-helper boundary after the upstream scaffold completes. It does not
+authorize any additional file path or create arbitrary candidate directories.
+
 ## Step 1 - Contract and Scope Audit
 
 ### Objective
@@ -3057,3 +3105,37 @@ runtime inputs.
   older manifest so an existing workspace can upgrade without retaining the
   obsolete gate in the canonical project model.
 - Existing static, audit, patch-review, and live gates remain unchanged.
+
+## Step 69 - Record Per-Check Explanations After Live Runs
+
+### Evidence
+
+The local gap report retained validation messages and reviewed scope rationale,
+but publication consumed only canonical JUnit. A passing testcase commonly had
+no explanatory message, failed-run reasoning stayed split across artifacts, and
+profile-approved exclusions could be absent from JUnit because the live scope
+overlay correctly prevented their execution. AI Cloud Validation consumers had
+no single structured document joining those fields after a run.
+
+### Decision
+
+1. Generate `run-explanations.json` in the canonical run directory after JUnit
+   and the redacted log are finalized, without making another model call.
+2. Record every dynamic check with its outcome, JUnit reason/testcase, redacted
+   validation explanation, central blocking decision, and reviewed scope data.
+3. Add an approved `reviewed_scope` exclusion only when no matching dynamic
+   testcase exists. Take its explanation and evidence references from the
+   reviewed profile rather than inventing runtime evidence.
+4. Bind the document to the run, pinned validation commit, solution-profile
+   hash, source-report hash, and canonical JUnit/log hashes.
+5. Create the artifact for unsuccessful as well as successful runs. Keep the
+   current Lab Service upload unchanged until it exposes a reviewed structured
+   explanation contract.
+6. Add one packaged JSON schema and one short field guide; do not add another
+   workflow command, agent phase, or editable source of truth.
+
+### Verification
+
+- Focused tests cover pass, failure, runtime skip, approved scope exclusion,
+  secret redaction, schema validation, canonical artifact hashing, public live
+  recording, and `run.json` artifact discovery.

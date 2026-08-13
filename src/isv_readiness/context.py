@@ -757,14 +757,7 @@ def _upstream_target_contract(
         suite_raw = yaml.safe_load(_read_text(suite_path)) or {}
         validations = ((suite_raw.get("tests") or {}).get("validations") or {})
         if isinstance(validations, dict):
-            suite_entries = {
-                name: value
-                for name, value in validations.items()
-                if isinstance(value, dict)
-                and value.get("step") in steps
-                and isinstance(value.get("checks"), dict)
-                and classes.intersection(value["checks"])
-            }
+            suite_entries = _selected_suite_entries(validations, steps=steps, classes=classes)
 
     class_interfaces: dict[str, dict[str, Any]] = {}
     source_root = validation_root / "isvtest" / "src" / "isvtest" / "validations"
@@ -829,6 +822,44 @@ def _upstream_target_contract(
         json.dumps(payload, sort_keys=True, separators=(",", ":")),
         "exact pinned suite entries and output schemas plus provenance-backed interfaces extracted from validation consumers",
     )
+
+
+def _selected_suite_entries(
+    validations: Mapping[str, Any],
+    *,
+    steps: set[str],
+    classes: set[str],
+) -> dict[str, Any]:
+    """Preserve matching map- and list-shaped suite contracts exactly."""
+
+    selected: dict[str, Any] = {}
+    for name, value in validations.items():
+        if (
+            isinstance(value, dict)
+            and value.get("step") in steps
+            and isinstance(value.get("checks"), dict)
+            and classes.intersection(value["checks"])
+        ):
+            selected[name] = value
+            continue
+        if not isinstance(value, list):
+            continue
+        matching_items: list[dict[str, Any]] = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            matching_checks = {
+                class_name: parameters
+                for class_name, parameters in item.items()
+                if class_name in classes
+                and isinstance(parameters, dict)
+                and parameters.get("step") in steps
+            }
+            if matching_checks:
+                matching_items.append(matching_checks)
+        if matching_items:
+            selected[name] = matching_items
+    return selected
 
 
 def _validation_class_interface(

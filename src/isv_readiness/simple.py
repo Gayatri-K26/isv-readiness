@@ -13,6 +13,7 @@ from isv_readiness.onboarding import OnboardingError, build_provider_onboarding_
 from isv_readiness.project import ProjectError, ReadinessProject, build_bootstrap_plan, execute_bootstrap, load_project
 from isv_readiness.qualify import QualifyError, build_qualify_catalog
 from isv_readiness.readiness import assess_readiness
+from isv_readiness.run_explanations import RunExplanationError, write_run_explanations
 from isv_readiness.runs import JUNIT_FILENAME, LOG_FILENAME, RunRecordError, new_run_dir, write_run_record
 from isv_readiness.scan.models import SCHEMA_VERSION
 from isv_readiness.scan.profile import enrich_report_with_profile
@@ -188,6 +189,16 @@ def run_test_domain(project: ReadinessProject, project_path: Path, domain: str) 
             explicit_authorization=True,
         )
         _canonicalize_run_artifacts(result.junit_path, result.log_path, run_dir)
+        write_run_explanations(
+            project,
+            project_path,
+            run_dir=run_dir,
+            run_id=run_id,
+            domain=result.domain,
+            exit_code=result.exit_code,
+            success=result.success,
+            report=result.report,
+        )
         write_run_record(
             run_dir,
             run_id=run_id,
@@ -195,7 +206,7 @@ def run_test_domain(project: ReadinessProject, project_path: Path, domain: str) 
             config=result.config,
             exit_code=result.exit_code,
         )
-    except (OSError, ProjectError, LiveRunError, RunRecordError) as exc:
+    except (OSError, ProjectError, LiveRunError, RunExplanationError, RunRecordError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
 

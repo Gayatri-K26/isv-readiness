@@ -151,6 +151,17 @@ class ChangeProposalTests(unittest.TestCase):
                         [("provider", "scripts/vm/launch.py", "replace", 'API_KEY = "secret-value-123"\n')]
                     ),
                 )
+            with self.assertRaisesRegex(FixGuardrailError, "scripts/common"):
+                build_change_proposal(
+                    _report(),
+                    provider_repo=provider,
+                    change_set=_change_set(
+                        [
+                            ("provider", "scripts/vm/launch.py", "replace", "print('safe')\n"),
+                            ("provider", "scripts/client.py", "create", "print('shared')\n"),
+                        ]
+                    ),
+                )
 
     def test_kubernetes_wrapper_is_the_only_allowed_providers_root_change(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
@@ -440,7 +451,7 @@ class ChangeProposalTests(unittest.TestCase):
             for call in ("exec(payload)", "eval(payload)", "compile(payload, 'probe.py', 'exec')"):
                 candidate = f"payload = 'print(1)'\n{call}\n"
                 with self.subTest(call=call), self.assertRaisesRegex(
-                    FixGuardrailError, "dynamic code execution"
+                    FixGuardrailError, "literal source code directly in change.content"
                 ):
                     build_change_proposal(
                         _report(target="scripts/vm/probe.py"),

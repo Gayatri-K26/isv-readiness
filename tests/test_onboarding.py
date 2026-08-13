@@ -48,6 +48,7 @@ class CrossDomainOnboardingTests(unittest.TestCase):
             self.assertEqual(calls[0][0], ("uv", "run", "isvctl", "provider", "scaffold", "acme"))
             self.assertEqual(calls[0][1], validation_root.resolve())
             self.assertIn(plan.provider_dir / "config" / "vm.yaml", written)
+            self.assertTrue((plan.provider_dir / "scripts" / "common").is_dir())
             self.assertIsNotNone(plan.k8s_plan)
             assert plan.k8s_plan is not None
             self.assertIn(plan.k8s_plan.wrapper_path, written)

@@ -21,6 +21,7 @@ RUN_RECORD_FILENAME = "run.json"
 JUNIT_FILENAME = "junit.xml"
 LOG_FILENAME = "isvctl.log"
 SETUP_FILENAME = "setup.json"
+RUN_EXPLANATIONS_FILENAME = "run-explanations.json"
 _RUN_ID_SAFE_RE = re.compile(r"[^a-z0-9-]+")
 
 
@@ -48,6 +49,10 @@ class RunRecord:
     @property
     def setup_json_path(self) -> Path | None:
         return _existing(self.path / SETUP_FILENAME)
+
+    @property
+    def explanations_path(self) -> Path | None:
+        return _existing(self.path / RUN_EXPLANATIONS_FILENAME)
 
 
 def new_run_dir(runs_root: Path, domain: str, *, created_at: str | None = None) -> tuple[str, Path]:
@@ -91,7 +96,12 @@ def write_run_record(
         "exit_code": record.exit_code,
         "artifacts": sorted(
             path.name
-            for path in (record.junit_path, record.log_path, record.setup_json_path)
+            for path in (
+                record.junit_path,
+                record.log_path,
+                record.setup_json_path,
+                record.explanations_path,
+            )
             if path is not None
         ),
     }
